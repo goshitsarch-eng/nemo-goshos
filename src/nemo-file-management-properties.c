@@ -1198,5 +1198,11 @@ nemo_file_management_properties_dialog_show (GtkWindow   *window,
 				       "/org/nemo/nemo-file-management-properties.glade",
 				       NULL);
 
+	if (gtk_builder_get_object (builder, "file_management_dialog") == NULL) {
+		g_warning ("Verne: failed to load File Management Preferences UI");
+		g_object_unref (builder);
+		return;
+	}
+
 	nemo_file_management_properties_dialog_setup (builder, window, initial_page);
 }

@@ -18,7 +18,11 @@
 .verne-window searchbar,
 .nemo-window searchbar,
 .verne-window .search-bar,
-.nemo-window .search-bar {
+.nemo-window .search-bar,
+.verne-window notebook,
+.nemo-window notebook,
+.verne-window statusbar,
+.nemo-window statusbar {
 	background-color: @window_bg_color;
 }
 

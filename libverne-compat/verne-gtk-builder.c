@@ -233,13 +233,18 @@ verne_transform_gtk3_ui (const gchar *xml, gssize len)
 	replace_all (s, "GtkVSeparator", "GtkSeparator");
 	replace_all (s, "GtkTable", "GtkGrid");
 	replace_all (s, "GtkArrow", "GtkImage");
+	replace_all (s, "GtkRadioButton", "GtkCheckButton");
+	replace_all (s, "GtkViewport", "GtkBox");
 	replace_all (s, "class=\"GtkDialog\"", "class=\"GtkWindow\"");
 	replace_all (s, "class=\"GtkInfoBar\"", "class=\"GtkBox\"");
 
 	replace_all (s, " name=\"can-focus\"", " name=\"focusable\"");
 	replace_all (s, " name=\"margin-left\"", " name=\"margin-start\"");
 	replace_all (s, " name=\"margin-right\"", " name=\"margin-end\"");
-	replace_all (s, " name=\"border-width\"", " name=\"margin\"");
+	replace_all (s, " name=\"left-padding\"", " name=\"margin-start\"");
+	replace_all (s, " name=\"right-padding\"", " name=\"margin-end\"");
+	replace_all (s, " name=\"top-padding\"", " name=\"margin-top\"");
+	replace_all (s, " name=\"bottom-padding\"", " name=\"margin-bottom\"");
 	replace_all (s, "xsi-", "");
 
 	replace_all (s, " internal-child=\"vbox\"", "");
@@ -272,6 +277,8 @@ verne_transform_gtk3_ui (const gchar *xml, gssize len)
 	remove_property (s, "n-columns");
 	remove_property (s, "row-homogeneous");
 	remove_property (s, "column-homogeneous");
+	remove_property (s, "border-width");
+	remove_property (s, "draw-indicator");
 
 	strip_empty_child_tags (s);
 	return g_string_free (s, FALSE);

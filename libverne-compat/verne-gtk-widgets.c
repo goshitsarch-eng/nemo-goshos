@@ -548,7 +548,7 @@ verne_menu_ensure_css (void)
 		"  background-color: #e6e6e6;\n"
 		"}\n"
 		".menubar {\n"
-		"  background-color: @headerbar_bg_color;\n"
+		"  background-color: #f6f5f4;\n"
 		"  min-height: 28px;\n"
 		"}\n"
 		".menubar > button {\n"
