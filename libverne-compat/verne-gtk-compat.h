@@ -1649,7 +1649,22 @@ unsigned long verne_gdk_root_xid (void);
 #define GDK_ROOT_WINDOW() verne_gdk_root_xid ()
 #define gdk_flush() ((void)0)
 #define gdk_display_get_n_monitors(d) verne_screen_n_monitors ()
-#define gdk_display_get_monitor(d, n) ((GdkMonitor *) NULL)
+static inline GdkMonitor *
+verne_display_get_monitor (GdkDisplay *d, int n)
+{
+	GListModel *list;
+	GdkMonitor *m;
+	if (d == NULL)
+		d = gdk_display_get_default ();
+	list = d ? gdk_display_get_monitors (d) : NULL;
+	if (list == NULL || n < 0 || (guint) n >= g_list_model_get_n_items (list))
+		return NULL;
+	m = g_list_model_get_item (list, (guint) n);
+	if (m)
+		g_object_unref (m);
+	return m;
+}
+#define gdk_display_get_monitor(d, n) verne_display_get_monitor (d, n)
 #define gdk_device_manager_list_devices(m, t) NULL
 #define gdk_screen_get_number(s) 0
 #define gtk_tree_view_set_rules_hint(t, b) ((void)0)

@@ -617,7 +617,8 @@ connect_fallback_signals (NemoDesktopManager *manager)
 
     {
         GdkDisplay *display = gdk_display_get_default ();
-        if (priv->monitor_removed_id == 0 && display != NULL) {
+        if (priv->monitor_removed_id == 0 && display != NULL &&
+            g_signal_lookup ("monitor-removed", G_OBJECT_TYPE (display)) != 0) {
             priv->monitor_removed_id = g_signal_connect (display,
                                                          "monitor-removed",
                                                          G_CALLBACK (on_monitor_removed_wayland),
