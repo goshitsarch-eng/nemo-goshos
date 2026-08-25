@@ -50,7 +50,7 @@
 typedef struct FMTreeViewDetails FMTreeViewDetails;
 
 typedef struct {
-	GtkScrolledWindow parent;
+	VerneScrolledWindow parent;
 	
 	FMTreeViewDetails *details;
 } FMTreeView;

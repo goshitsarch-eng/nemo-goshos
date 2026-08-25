@@ -12,13 +12,23 @@ container_n_children (GtkWidget *container)
 }
 
 void
-gtk_container_add (GtkWidget *container, GtkWidget *child)
+gtk_container_add (gpointer container_ptr, GtkWidget *child)
 {
+	GtkWidget *container = GTK_WIDGET (container_ptr);
 	g_return_if_fail (GTK_IS_WIDGET (container));
 	g_return_if_fail (GTK_IS_WIDGET (child));
 
 	if (ADW_IS_APPLICATION_WINDOW (container)) {
 		adw_application_window_set_content (ADW_APPLICATION_WINDOW (container), child);
+		return;
+	}
+
+	if (VERNE_IS_SCROLLED_WINDOW (container)) {
+		(gtk_scrolled_window_set_child) (verne_to_gtk_sw (container), child);
+		return;
+	}
+	if (VERNE_IS_INFO_BAR (container)) {
+		(gtk_info_bar_add_child) (verne_to_gtk_ib (container), child);
 		return;
 	}
 
@@ -106,8 +116,9 @@ gtk_container_add (GtkWidget *container, GtkWidget *child)
 }
 
 void
-gtk_container_remove (GtkWidget *container, GtkWidget *child)
+gtk_container_remove (gpointer container_ptr, GtkWidget *child)
 {
+	GtkWidget *container = GTK_WIDGET (container_ptr);
 	g_return_if_fail (GTK_IS_WIDGET (container));
 	g_return_if_fail (GTK_IS_WIDGET (child));
 

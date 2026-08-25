@@ -36,7 +36,7 @@ typedef struct NemoInterestingFolderBarPrivate NemoInterestingFolderBarPrivate;
 
 typedef struct
 {
-	GtkInfoBar parent;
+	VerneInfoBar parent;
 
 	NemoInterestingFolderBarPrivate *priv;
 } NemoInterestingFolderBar;

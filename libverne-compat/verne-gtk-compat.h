@@ -4,6 +4,13 @@
 #ifndef VERNE_GTK_COMPAT_H
 #define VERNE_GTK_COMPAT_H
 
+/* Search helpers and other non-GTK translation units still get -include'd. */
+#if defined(__has_include) && !__has_include(<gtk/gtk.h>)
+#define VERNE_GTK_COMPAT_SKIP 1
+#endif
+
+#ifndef VERNE_GTK_COMPAT_SKIP
+
 #include <gtk/gtk.h>
 #include <adwaita.h>
 #include <atk/atk.h>
@@ -191,8 +198,8 @@ int verne_screen_height (void);
 int verne_screen_n_monitors (void);
 
 /* --- container / packing --- */
-void gtk_container_add (GtkWidget *container, GtkWidget *child);
-void gtk_container_remove (GtkWidget *container, GtkWidget *child);
+void gtk_container_add (gpointer container, GtkWidget *child);
+void gtk_container_remove (gpointer container, GtkWidget *child);
 void gtk_container_foreach (GtkWidget *container, GtkCallback callback, gpointer callback_data);
 GList *gtk_container_get_children (GtkWidget *container);
 void gtk_container_set_border_width (GtkWidget *container, guint border_width);
@@ -1084,25 +1091,120 @@ typedef enum {
 #define gdk_keyboard_ungrab(time) ((void)0)
 #define gdk_window_move_resize(w, x, y, width, height) ((void)0)
 #define gdk_app_launch_context_set_screen(c, s) ((void)0)
-#define gtk_widget_get_parent_window(w) gtk_widget_get_window (gtk_widget_get_parent (w))
+#define gtk_widget_get_parent_window(w) ((w) && gtk_widget_get_parent (w) ? gtk_widget_get_window (gtk_widget_get_parent (w)) : gtk_widget_get_window (w))
 #define gdk_window_get_origin(w, x, y) G_STMT_START { if (x) *(x)=0; if (y) *(y)=0; } G_STMT_END
 #define gdk_window_get_toplevel(w) (w)
-#define gdk_cairo_get_clip_rectangle(cr, r) (cairo_clip_extents (cr, NULL, NULL, NULL, NULL), TRUE)
-#define gtk_style_context_get_background_color(ctx, state, rgba) ((void)0)
+#define gdk_cairo_get_clip_rectangle(cr, r) verne_gdk_cairo_get_clip_rectangle (cr, r)
+#define gtk_style_context_get_background_color(ctx, state, rgba) G_STMT_START { if (rgba) { (rgba)->red=1; (rgba)->green=1; (rgba)->blue=1; (rgba)->alpha=1; } } G_STMT_END
 #define gtk_widget_set_realized(w, b) ((void)0)
 #define gtk_widget_get_visual(w) NULL
+#define gtk_widget_set_window(w, win) ((void)0)
+#define gtk_style_context_set_background(ctx, win) ((void)0)
+#define gtk_im_context_set_client_window(c, w) ((void)0)
+#define GTK_MENU_SHELL(x) ((gpointer)(x))
+#define gtk_expander_set_spacing(e, s) ((void)0)
+#define gtk_label_set_line_wrap(l, b) gtk_label_set_wrap (l, b)
+#define gtk_label_set_line_wrap_mode(l, m) gtk_label_set_wrap_mode (l, m)
+#define gtk_window_get_gravity(w) GDK_GRAVITY_NORTH_WEST
+#define gtk_tree_view_get_bin_window(tv) gtk_widget_get_window (GTK_WIDGET (tv))
+#define gtk_widget_queue_draw_area(w, x, y, width, height) gtk_widget_queue_draw (w)
+#define gtk_widget_queue_draw_region(w, r) gtk_widget_queue_draw (w)
+
+#ifndef GDK_INPUT_OUTPUT
 #define GDK_INPUT_OUTPUT 0
+#endif
+#ifndef GDK_INPUT_ONLY
+#define GDK_INPUT_ONLY 1
+#endif
+#ifndef GDK_WINDOW_CHILD
 #define GDK_WINDOW_CHILD 0
-#define GDK_WA_X 0
-#define GDK_WA_Y 0
-#define GDK_WA_VISUAL 0
-typedef struct { gint x, y, width, height, wclass, window_type, event_mask; gpointer visual; } GdkWindowAttr;
+#endif
+#ifndef GDK_WA_X
+#define GDK_WA_X (1 << 2)
+#define GDK_WA_Y (1 << 3)
+#define GDK_WA_VISUAL (1 << 6)
+#define GDK_WA_WMCLASS (1 << 7)
+#define GDK_WA_NOREDIR (1 << 8)
+#define GDK_WA_TYPE_HINT (1 << 9)
+#define GDK_WA_CURSOR (1 << 4)
+#endif
+#ifndef GDK_XTERM
+#define GDK_XTERM 152
+#endif
+
+typedef struct {
+	gint x, y, width, height, wclass, window_type, event_mask;
+	gpointer visual;
+	GdkCursor *cursor;
+	gchar *title;
+	gchar *wmclass_name;
+	gchar *wmclass_class;
+	gboolean override_redirect;
+	GdkWindowTypeHint type_hint;
+} GdkWindowAttr;
+
+GdkSurface *gdk_window_new (GdkSurface *parent, GdkWindowAttr *attributes, gint attributes_mask);
+void gdk_window_destroy (GdkSurface *window);
+void gdk_window_show (GdkSurface *window);
+void gdk_window_hide (GdkSurface *window);
+void gdk_window_set_user_data (GdkSurface *window, gpointer user_data);
+gpointer gdk_window_get_user_data (GdkSurface *window);
+void gdk_window_invalidate_rect (GdkSurface *window, const GdkRectangle *rect, gboolean invalidate_children);
+void gdk_window_get_geometry (GdkSurface *window, gint *x, gint *y, gint *width, gint *height);
+void gdk_window_get_position (GdkSurface *window, gint *x, gint *y);
+void gdk_window_move (GdkSurface *window, gint x, gint y);
+void gdk_window_resize (GdkSurface *window, gint width, gint height);
+void gdk_window_raise (GdkSurface *window);
+void gdk_window_lower (GdkSurface *window);
+void gdk_window_focus (GdkSurface *window, guint32 timestamp);
+void gdk_window_set_cursor (GdkSurface *window, GdkCursor *cursor);
+GdkCursor *gdk_cursor_new (gint cursor_type);
+GdkCursor *gdk_cursor_new_for_display (GdkDisplay *display, gint cursor_type);
+void gtk_window_get_size (GtkWindow *window, gint *width, gint *height);
+void gtk_menu_popup_at_rect (GtkMenu *menu, GdkSurface *rect_window, const GdkRectangle *rect,
+			     GdkGravity rect_anchor, GdkGravity menu_anchor, const GdkEvent *trigger);
+gboolean verne_gdk_cairo_get_clip_rectangle (cairo_t *cr, cairo_rectangle_int_t *rect);
+static inline GdkSurface *
+verne_gdk_window_get_device_position (GdkSurface *surface, GdkDevice *device, gint *x, gint *y, GdkModifierType *mask)
+{
+	double dx = 0, dy = 0;
+	GdkModifierType m = 0;
+	if (surface && device)
+		gdk_surface_get_device_position (surface, device, &dx, &dy, &m);
+	if (x) *x = (gint) dx;
+	if (y) *y = (gint) dy;
+	if (mask) *mask = m;
+	return surface;
+}
+#define gdk_window_get_device_position verne_gdk_window_get_device_position
+
+void gtk_selection_data_set_text (GtkSelectionData *s, const gchar *str, gint len);
+GtkTargetEntry *gtk_target_table_new_from_list (GtkTargetList *list, gint *n_targets);
+void gtk_target_table_free (GtkTargetEntry *targets, gint n_targets);
 
 void gtk_misc_get_padding (GtkMisc *misc, gint *xpad, gint *ypad);
 void gtk_style_context_get (GtkStyleContext *context, GtkStateFlags state, ...) G_GNUC_NULL_TERMINATED;
 #define gtk_render_insertion_cursor(ctx, cr, x, y, layout, index, dir) ((void)0)
 #define gdk_keymap_get_default() NULL
 #define gdk_keymap_get_direction(k) PANGO_DIRECTION_LTR
+
+static inline GtkClipboard *
+verne_gtk_widget_get_clipboard (GtkWidget *widget, GdkAtom selection)
+{
+	(void) widget;
+	return gtk_clipboard_get (selection);
+}
+#if defined(gtk_widget_get_clipboard)
+#undef gtk_widget_get_clipboard
+#endif
+#define gtk_widget_get_clipboard(w, sel) verne_gtk_widget_get_clipboard (w, sel)
+
+typedef struct _GdkKeymap GdkKeymap;
+#define gtk_im_multicontext_append_menuitems(ctx, shell) ((void)0)
+#define gtk_menu_shell_select_first(shell, search) ((void)0)
+#define gtk_get_current_event_time() ((guint32) (g_get_monotonic_time () / 1000))
+#define gtk_get_current_event() ((GdkEvent *) NULL)
+#define gtk_get_current_event_state(s) FALSE
 
 static inline void
 verne_gtk_style_context_get_color (GtkStyleContext *context, GtkStateFlags state, GdkRGBA *color)
@@ -1112,6 +1214,326 @@ verne_gtk_style_context_get_color (GtkStyleContext *context, GtkStateFlags state
 }
 #define gtk_style_context_get_color(c, s, r) verne_gtk_style_context_get_color (c, s, r)
 
+#ifndef GdkPoint
+typedef struct { gint x; gint y; } GdkPoint;
+#endif
+
+typedef struct {
+	GtkWidgetClass parent_class;
+	gint scrollbar_spacing;
+	gboolean (* scroll_child) (GtkScrolledWindow *sw, GtkScrollType scroll, gboolean horizontal);
+	void (* move_focus_out) (GtkScrolledWindow *sw, GtkDirectionType direction);
+} GtkScrolledWindowClass;
+
+#define GTK_SCROLLED_WINDOW_CLASS(k) ((GtkScrolledWindowClass *)(k))
+
+typedef struct {
+	GtkBox parent;
+	GtkWidget *inner;
+} VerneScrolledWindow;
+typedef GtkScrolledWindowClass VerneScrolledWindowClass;
+GType verne_scrolled_window_get_type (void);
+#define VERNE_TYPE_SCROLLED_WINDOW (verne_scrolled_window_get_type ())
+#define VERNE_IS_SCROLLED_WINDOW(w) (G_TYPE_CHECK_INSTANCE_TYPE ((w), VERNE_TYPE_SCROLLED_WINDOW))
+#define VERNE_SCROLLED_WINDOW(w) ((VerneScrolledWindow *)(w))
+GtkWidget *verne_scrolled_window_get_inner (gpointer widget);
+
+static inline GtkScrolledWindow *
+verne_to_gtk_sw (gpointer widget)
+{
+	if (widget != NULL && VERNE_IS_SCROLLED_WINDOW (widget))
+		return GTK_SCROLLED_WINDOW (VERNE_SCROLLED_WINDOW (widget)->inner);
+	return GTK_SCROLLED_WINDOW (widget);
+}
+
+#define gtk_scrolled_window_set_policy(sw, h, v) (gtk_scrolled_window_set_policy) (verne_to_gtk_sw (sw), h, v)
+#define gtk_scrolled_window_set_hadjustment(sw, a) (gtk_scrolled_window_set_hadjustment) (verne_to_gtk_sw (sw), a)
+#define gtk_scrolled_window_set_vadjustment(sw, a) (gtk_scrolled_window_set_vadjustment) (verne_to_gtk_sw (sw), a)
+#define gtk_scrolled_window_get_hscrollbar(sw) (gtk_scrolled_window_get_hscrollbar) (verne_to_gtk_sw (sw))
+#define gtk_scrolled_window_get_vscrollbar(sw) (gtk_scrolled_window_get_vscrollbar) (verne_to_gtk_sw (sw))
+#define gtk_scrolled_window_set_child(sw, c) (gtk_scrolled_window_set_child) (verne_to_gtk_sw (sw), c)
+#define gtk_scrolled_window_get_child(sw) (gtk_scrolled_window_get_child) (verne_to_gtk_sw (sw))
+
+typedef struct {
+	GtkBox parent;
+	GtkWidget *inner;
+	GtkWidget *content_area;
+	GtkWidget *action_area;
+} VerneInfoBar;
+typedef struct { GtkBoxClass parent_class; } VerneInfoBarClass;
+GType verne_info_bar_get_type (void);
+#define VERNE_TYPE_INFO_BAR (verne_info_bar_get_type ())
+#define VERNE_IS_INFO_BAR(w) (G_TYPE_CHECK_INSTANCE_TYPE ((w), VERNE_TYPE_INFO_BAR))
+#define VERNE_INFO_BAR(w) ((VerneInfoBar *)(w))
+GtkWidget *verne_info_bar_get_inner (gpointer widget);
+
+static inline GtkInfoBar *
+verne_to_gtk_ib (gpointer widget)
+{
+	if (widget != NULL && VERNE_IS_INFO_BAR (widget))
+		return GTK_INFO_BAR (VERNE_INFO_BAR (widget)->inner);
+	return GTK_INFO_BAR (widget);
+}
+
+#define gtk_info_bar_add_button(b, t, r) (gtk_info_bar_add_button) (verne_to_gtk_ib (b), t, r)
+#define gtk_info_bar_set_message_type(b, t) (gtk_info_bar_set_message_type) (verne_to_gtk_ib (b), t)
+#define gtk_info_bar_set_response_sensitive(b, r, s) (gtk_info_bar_set_response_sensitive) (verne_to_gtk_ib (b), r, s)
+#define gtk_info_bar_add_child(b, w) (gtk_info_bar_add_child) (verne_to_gtk_ib (b), w)
+
+typedef struct { GtkWidgetClass parent_class; } GtkInfoBarClass;
+#define GTK_INFO_BAR_CLASS(k) ((GtkInfoBarClass *)(k))
+
+struct _GtkMenuItem {
+	GtkButton parent;
+	GtkWidget *submenu;
+	GtkWidget *image;
+	gchar *label;
+};
+typedef struct _GtkMenuItemClass { GtkButtonClass parent_class; } GtkMenuItemClass;
+
+#ifndef GTK_SHADOW_NONE
+typedef enum {
+	GTK_SHADOW_NONE,
+	GTK_SHADOW_IN,
+	GTK_SHADOW_OUT,
+	GTK_SHADOW_ETCHED_IN,
+	GTK_SHADOW_ETCHED_OUT
+} GtkShadowType;
+#endif
+
+#define GTK_JUNCTION_TOP (1 << 3)
+#define GTK_JUNCTION_LEFT (1 << 0)
+#define GTK_JUNCTION_RIGHT (1 << 1)
+#define GTK_JUNCTION_BOTTOM (1 << 2)
+typedef guint GtkJunctionSides;
+
+#define gtk_entry_set_text(e, t) gtk_editable_set_text (GTK_EDITABLE (e), t)
+#define gtk_entry_get_text(e) gtk_editable_get_text (GTK_EDITABLE (e))
+#define gtk_widget_set_no_show_all(w, b) ((void)0)
+#define gtk_widget_get_no_show_all(w) FALSE
+#define gtk_widget_set_margin_left(w, m) gtk_widget_set_margin_start (w, m)
+#define gtk_widget_set_margin_right(w, m) gtk_widget_set_margin_end (w, m)
+#define gtk_widget_push_composite_child() ((void)0)
+#define gtk_widget_pop_composite_child() ((void)0)
+#define gtk_widget_reset_style(w) ((void)0)
+#define gtk_size_group_set_ignore_hidden(g, b) ((void)0)
+#define gtk_frame_set_shadow_type(f, s) ((void)0)
+#define gtk_scrolled_window_set_shadow_type(sw, s) ((void)0)
+#define gtk_window_set_position(w, p) ((void)0)
+#define gtk_window_set_screen(w, s) ((void)0)
+#define gtk_window_set_skip_taskbar_hint(w, b) ((void)0)
+#define gtk_menu_set_screen(m, s) ((void)0)
+#define gtk_style_context_invalidate(c) ((void)0)
+#define gtk_style_context_set_junction_sides(c, s) ((void)0)
+#define gtk_style_context_reset_widgets(s) ((void)0)
+#define gtk_style_context_add_provider_for_screen(s, p, pri) gtk_style_context_add_provider_for_display (gdk_display_get_default (), p, pri)
+#define gtk_style_context_remove_provider_for_screen(s, p) gtk_style_context_remove_provider_for_display (gdk_display_get_default (), p)
+#define gtk_settings_get_for_screen(s) gtk_settings_get_default ()
+#define gtk_button_clicked(b) g_signal_emit_by_name (b, "clicked")
+#define gtk_image_menu_item_new_with_mnemonic(l) gtk_menu_item_new_with_mnemonic (l)
+#define gtk_check_menu_item_new_with_label(l) gtk_check_menu_item_new_with_mnemonic (l)
+#define gtk_icon_theme_append_search_path(t, p) gtk_icon_theme_add_search_path (t, p)
+#define gtk_widget_new(type, first, ...) g_object_new (type, first, __VA_ARGS__)
+#define gtk_get_option_group(open) NULL
+#define gtk_css_provider_get_named(name, variant) gtk_css_provider_new ()
+#define gtk_message_dialog_set_image(d, i) ((void)0)
+
+GtkWidget *gtk_info_bar_get_content_area (GtkInfoBar *bar);
+GtkWidget *gtk_info_bar_get_action_area (GtkInfoBar *bar);
+void gtk_window_activate_default (GtkWindow *window);
+void gtk_window_set_icon (GtkWindow *window, GdkPixbuf *pixbuf);
+void gtk_main (void);
+void gtk_main_quit (void);
+gboolean gtk_main_iteration (void);
+gboolean gtk_main_iteration_do (gboolean blocking);
+guint gtk_main_level (void);
+void gtk_widget_get_preferred_width (GtkWidget *widget, gint *minimum, gint *natural);
+void gtk_widget_get_preferred_height (GtkWidget *widget, gint *minimum, gint *natural);
+cairo_surface_t *gdk_cairo_surface_create_from_pixbuf (const GdkPixbuf *pixbuf, int scale, GdkSurface *for_surface);
+void gdk_screen_get_monitor_geometry (GdkScreen *screen, int monitor, GdkRectangle *dest);
+int gdk_screen_get_monitor_scale_factor (GdkScreen *screen, int monitor);
+gchar *gdk_screen_get_monitor_plug_name (GdkScreen *screen, int monitor);
+void gdk_monitor_get_workarea (GdkMonitor *monitor, GdkRectangle *workarea);
+GdkEvent *gdk_event_copy (const GdkEvent *event);
+void gdk_event_free (GdkEvent *event);
+GdkEvent *gdk_event_new (GdkEventType type);
+GdkAtom gtk_drag_dest_find_target (GtkWidget *widget, GdkDragContext *context, GtkTargetList *list);
+void gtk_drag_get_data (GtkWidget *widget, GdkDragContext *context, GdkAtom target, guint32 time);
+void gtk_drag_highlight (GtkWidget *widget);
+void gtk_drag_unhighlight (GtkWidget *widget);
+gpointer gtk_drag_begin (GtkWidget *widget, GtkTargetList *targets, GdkDragAction actions, gint button, GdkEvent *event);
+void gtk_drag_set_icon_surface (GdkDragContext *context, cairo_surface_t *surface);
+void gtk_drag_dest_set_track_motion (GtkWidget *widget, gboolean track);
+GtkTargetList *gtk_drag_source_get_target_list (GtkWidget *widget);
+GdkDragAction gdk_drag_context_get_selected_action (GdkDragContext *context);
+GdkDragAction gdk_drag_context_get_suggested_action (GdkDragContext *context);
+GdkDragAction gdk_drag_context_get_actions (GdkDragContext *context);
+GdkSurface *gdk_drag_context_get_source_window (GdkDragContext *context);
+void gdk_drag_status (GdkDragContext *context, GdkDragAction action, guint32 time);
+gboolean gtk_target_list_find (GtkTargetList *list, GdkAtom target, guint *info);
+gboolean gtk_targets_include_text (GdkAtom *targets, gint n_targets);
+gboolean gtk_targets_include_uri (GdkAtom *targets, gint n_targets);
+guchar *gtk_selection_data_get_text (const GtkSelectionData *s);
+void gtk_entry_set_icon_from_stock (GtkEntry *entry, GtkEntryIconPosition pos, const gchar *stock_id);
+GtkWidget *gtk_tool_item_new (void);
+void gtk_tool_item_set_expand (gpointer item, gboolean expand);
+#define GTK_TOOL_ITEM(w) (w)
+#define GTK_ACTIVATABLE(w) (w)
+#define GTK_IS_ACTIVATABLE(w) FALSE
+void gtk_activatable_set_related_action (gpointer activatable, GtkAction *action);
+GtkAction *gtk_activatable_get_related_action (gpointer activatable);
+void gtk_activatable_set_use_action_appearance (gpointer activatable, gboolean use);
+gboolean gtk_activatable_get_use_action_appearance (gpointer activatable);
+gboolean gtk_bindings_activate_event (GObject *object, GdkEventKey *event);
+void gtk_propagate_event (GtkWidget *widget, GdkEvent *event);
+#define GTK_RADIO_BUTTON(w) (GTK_CHECK_BUTTON (w))
+#define gtk_radio_button_get_group(b) NULL
+GtkWidget *gtk_image_new_from_surface (cairo_surface_t *surface);
+void gtk_image_set_from_surface (GtkImage *image, cairo_surface_t *surface);
+void gtk_render_icon_surface (GtkStyleContext *context, cairo_t *cr, cairo_surface_t *surface, gdouble x, gdouble y);
+gpointer gtk_icon_theme_lookup_icon_for_scale (GtkIconTheme *theme, const gchar *name, gint size, gint scale, GtkIconLookupFlags flags);
+gpointer gtk_icon_theme_lookup_by_gicon_for_scale (GtkIconTheme *theme, GIcon *icon, gint size, gint scale, GtkIconLookupFlags flags);
+GdkPixbuf *gtk_icon_info_load_icon (gpointer info, GError **error);
+const gchar *gtk_icon_info_get_filename (gpointer info);
+GtkIconSize gtk_icon_size_from_name (const gchar *name);
+GtkWidget *gtk_menu_shell_get_selected_item (gpointer menu_shell);
+typedef struct {
+	const gchar *filename;
+	const gchar *uri;
+	const gchar *display_name;
+	const gchar *mime_type;
+	gboolean contains_image;
+} GtkFileFilterInfo;
+typedef enum {
+	GTK_FILE_FILTER_FILENAME = 1 << 0,
+	GTK_FILE_FILTER_URI = 1 << 1,
+	GTK_FILE_FILTER_DISPLAY_NAME = 1 << 2,
+	GTK_FILE_FILTER_MIME_TYPE = 1 << 3
+} GtkFileFilterFlags;
+typedef gboolean (*GtkFileFilterFunc) (const GtkFileFilterInfo *info, gpointer data);
+void gtk_file_filter_add_custom (GtkFileFilter *filter, GtkFileFilterFlags needed, GtkFileFilterFunc func, gpointer data, GDestroyNotify notify);
+gchar *gtk_file_chooser_get_filename (GtkFileChooser *chooser);
+GdkSurface *gdk_device_get_window_at_position (GdkDevice *device, gint *x, gint *y);
+void gdk_window_set_background_rgba (GdkSurface *window, const GdkRGBA *rgba);
+void gdk_window_set_transient_for (GdkSurface *window, GdkSurface *parent);
+GdkWindowTypeHint gdk_window_get_type_hint (GdkSurface *window);
+cairo_surface_t *gdk_window_create_similar_surface (GdkSurface *window, cairo_content_t content, int w, int h);
+cairo_surface_t *gdk_window_create_similar_image_surface (GdkSurface *window, cairo_format_t format, int w, int h, int scale);
+void gdk_window_move_to_rect (GdkSurface *window, const GdkRectangle *rect, GdkGravity rect_anchor, GdkGravity window_anchor, GdkAnchorHints hints, int dx, int dy);
+void gdk_window_remove_filter (GdkSurface *window, gpointer func, gpointer data);
+gboolean gdk_property_get (GdkSurface *window, GdkAtom property, GdkAtom type, gulong offset, gulong length, gint pdelete, GdkAtom *actual_type, gint *actual_format, gint *actual_length, guchar **data);
+void gdk_property_change (GdkSurface *window, GdkAtom property, GdkAtom type, gint format, gint mode, const guchar *data, gint nelements);
+GdkSurface *gdk_selection_owner_get (GdkAtom selection);
+gboolean gdk_display_supports_selection_notification (GdkDisplay *display);
+gboolean gdk_screen_get_setting (GdkScreen *screen, const gchar *name, GValue *value);
+GList *gdk_screen_get_window_stack (GdkScreen *screen);
+unsigned long gdk_x11_get_xatom_by_name (const gchar *name);
+void gnome_desktop_get_session_user_pwent (void);
+void gtk_builder_add_callback_symbols (GtkBuilder *builder, const char *first, ...) G_GNUC_NULL_TERMINATED;
+void gtk_style_context_get_border_color (GtkStyleContext *context, GtkStateFlags state, GdkRGBA *color);
+void gtk_style_context_get_style (GtkStyleContext *context, ...) G_GNUC_NULL_TERMINATED;
+
+typedef enum {
+	GDK_FILTER_CONTINUE,
+	GDK_FILTER_TRANSLATE,
+	GDK_FILTER_REMOVE
+} GdkFilterReturn;
+typedef void GdkXEvent;
+typedef struct { GdkEventType type; } GdkEventOwnerChange;
+typedef struct { GdkEventType type; } GdkEventSelection;
+typedef struct { gint dummy; } GtkStyle;
+typedef struct { gint dummy; } GtkIconInfo;
+typedef struct { gint dummy; } GtkActivatable;
+typedef struct { gint dummy; } GtkActivatableIface;
+typedef struct { gint dummy; } GdkVisual;
+typedef GtkCheckButton GtkRadioButton;
+typedef GtkWidget GtkToolItem;
+typedef GtkWidget GtkMenuShell;
+
+G_DEFINE_AUTOPTR_CLEANUP_FUNC (GtkBin, g_object_unref)
+
+#define gtk_container_add_with_properties(c, child, ...) gtk_container_add (c, child)
+#define gtk_toggle_button_get_inconsistent(b) FALSE
+#define gtk_toggle_button_set_inconsistent(b, v) ((void)0)
+#define gtk_window_propagate_key_event(w, e) FALSE
+#define gtk_icon_size_register(name, w, h) GTK_ICON_SIZE_INHERIT
+#define gtk_file_chooser_set_local_only(c, b) ((void)0)
+#define gtk_file_chooser_get_uri(c) (gtk_file_chooser_get_file (c) ? g_file_get_uri (gtk_file_chooser_get_file (c)) : NULL)
+#define gdk_screen_get_root_window(s) ((GdkSurface *) NULL)
+#define gdk_window_add_filter(w, f, d) ((void)0)
+#define GDK_ROOT_WINDOW() ((GdkSurface *) NULL)
+#define gdk_flush() ((void)0)
+#define gdk_display_get_n_monitors(d) verne_screen_n_monitors ()
+#define gdk_display_get_monitor(d, n) ((GdkMonitor *) NULL)
+#define gdk_device_manager_list_devices(m, t) NULL
+#define gdk_screen_get_number(s) 0
+#define gtk_tree_view_set_rules_hint(t, b) ((void)0)
+#define gtk_paned_get_child1(p) gtk_paned_get_start_child (p)
+#define gtk_paned_get_child2(p) gtk_paned_get_end_child (p)
+#define gtk_menu_bar_get_child_pack_direction(m) 0
+#define gtk_image_menu_item_get_always_show_image(i) TRUE
+#define gtk_get_event_widget(e) ((GtkWidget *) NULL)
+#define gtk_drag_dest_set_target_list(w, l) ((void)0)
+#define gtk_drag_dest_get_target_list(w) ((GtkTargetList *) NULL)
+#define gtk_builder_connect_signals(b, d) ((void)0)
+#define gtk_action_set_always_show_image(a, b) ((void)0)
+#define gtk_accel_map_save(f) ((void)0)
+#define gtk_accel_map_load(f) ((void)0)
+#define gtk_accel_map_get() NULL
+#define gdk_window_get_state(w) 0
+#define gdk_event_get_scroll_deltas(e, x, y) FALSE
+#define gtk_widget_send_focus_change(w, e) FALSE
+#define gtk_menu_item_set_accel_path(i, p) ((void)0)
+#define gtk_button_box_new(o) gtk_box_new (o, 6)
+#define gtk_activatable_sync_action_properties(a, act) ((void)0)
+#define gtk_activatable_do_set_related_action(a, act) gtk_activatable_set_related_action (a, act)
+#define gtk_action_get_accel_path(a) ((const gchar *) NULL)
+#define gtk_widget_destroyed(w, ptr) ((void)0)
+#define GTK_STYLE_CLASS_VIEW "view"
+#define GTK_STYLE_CLASS_TOOLBAR "toolbar"
+#define GTK_STYLE_CLASS_SIDEBAR "sidebar"
+#define GTK_STYLE_CLASS_PRIMARY_TOOLBAR "primary-toolbar"
+#define GTK_STYLE_CLASS_LINKED "linked"
+#define GTK_STYLE_CLASS_FLAT "flat"
+#define GTK_TARGET_SAME_WIDGET (1 << 0)
+#define GTK_TARGET_SAME_APP (1 << 1)
+#define GTK_TARGET_OTHER_APP (1 << 2)
+#define GDK_WATCH 150
+#define GDK_HAND2 60
+#define GDK_DEVICE_TYPE_MASTER 0
+#define GTK_PACK_DIRECTION_LTR 0
+#define GTK_ICON_LOOKUP_FORCE_SIZE 0
+#define GDK_WINDOW_STATE_TILED 0
+#define GDK_PROP_MODE_REPLACE 0
+#ifndef GTK_WINDOW_TOPLEVEL
+#define GTK_WINDOW_TOPLEVEL 0
+#define GTK_WINDOW_POPUP 1
+#endif
+#define GTK_TYPE_TOOL_BUTTON G_TYPE_INVALID
+#define GtkImageMenuItem GtkMenuItem
+#define GtkPackDirection int
+#define GtkAccelMap GObject
+#define GtkWidgetPath GtkWidget
+#define GdkWindowState int
+#define GdkEventWindowState GdkEventAny
+#define gtk_widget_path_new() NULL
+#define gtk_widget_path_copy(p) (p)
+#define gtk_widget_path_append_with_siblings(p, s, i) 0
+#define gtk_widget_path_append_for_widget(p, w) 0
+#define gtk_widget_get_path(w) NULL
+
+static inline GtkWidget *
+verne_gtk_window_new (int type)
+{
+	(void) type;
+	return (gtk_window_new) ();
+}
+#if defined(gtk_window_new)
+#undef gtk_window_new
+#endif
+#define gtk_window_new(type) verne_gtk_window_new (type)
+
 G_END_DECLS
 
+#endif /* !VERNE_GTK_COMPAT_SKIP */
 #endif /* VERNE_GTK_COMPAT_H */

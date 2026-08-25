@@ -1,5 +1,6 @@
 #include "config.h"
 #include "verne-gtk-compat.h"
+#include <string.h>
 
 struct _GtkClipboard {
 	GObject parent;
@@ -205,6 +206,37 @@ gtk_selection_data_set (GtkSelectionData *s, GdkAtom type, gint format, const gu
 	g_free (s->data);
 	s->data = (length >= 0) ? g_memdup2 (data, length) : NULL;
 	s->length = length;
+}
+
+void
+gtk_selection_data_set_text (GtkSelectionData *s, const gchar *str, gint len)
+{
+	if (len < 0)
+		len = str ? (gint) strlen (str) : 0;
+	gtk_selection_data_set (s, gdk_atom_intern ("UTF8_STRING", FALSE), 8, (const guchar *) str, len);
+}
+
+GtkTargetEntry *
+gtk_target_table_new_from_list (GtkTargetList *list, gint *n_targets)
+{
+	GtkTargetEntry *table;
+	guint n;
+
+	n = list && list->entries ? list->entries->len : 0;
+	if (n_targets)
+		*n_targets = (gint) n;
+	if (n == 0)
+		return NULL;
+	table = g_new (GtkTargetEntry, n);
+	memcpy (table, list->entries->data, n * sizeof (GtkTargetEntry));
+	return table;
+}
+
+void
+gtk_target_table_free (GtkTargetEntry *targets, gint n_targets)
+{
+	(void) n_targets;
+	g_free (targets);
 }
 
 void

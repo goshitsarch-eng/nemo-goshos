@@ -3251,8 +3251,7 @@ eel_canvas_draw (GtkWidget *widget, cairo_t *cr)
     	cairo_restore (cr);
 
 	/* Chain up to get exposes on child widgets */
-        if (GTK_WIDGET_CLASS (canvas_parent_class)->draw)
-                GTK_WIDGET_CLASS (canvas_parent_class)->draw (widget, cr);
+	verne_widget_chain_draw (canvas_parent_class, widget, cr);
 
         cairo_region_destroy (region);
 	return FALSE;
@@ -3474,9 +3473,6 @@ eel_canvas_set_pixels_per_unit (EelCanvas *canvas, double n)
 	double cx, cy;
 	int x1, y1;
 	int center_x, center_y;
-	GdkWindow *window;
-	GdkWindowAttr attributes;
-	gint attributes_mask;
 	GtkAllocation allocation;
 	GtkAdjustment *vadjustment, *hadjustment;
 
@@ -3506,44 +3502,7 @@ eel_canvas_set_pixels_per_unit (EelCanvas *canvas, double n)
 		eel_canvas_request_update (canvas);
 	}
 
-	/* Map a background None window over the bin_window to avoid
-	 * scrolling the window scroll causing exposes.
-	 */
-	window = NULL;
-	if (gtk_widget_get_mapped (widget)) {
-		attributes.window_type = GDK_WINDOW_CHILD;
-		gtk_widget_get_allocation (widget, &allocation);
-		attributes.x = allocation.x;
-		attributes.y = allocation.y;
-		attributes.width = allocation.width;
-		attributes.height = allocation.height;
-		attributes.wclass = GDK_INPUT_OUTPUT;
-		attributes.visual = gtk_widget_get_visual (widget);
-		attributes.event_mask = GDK_VISIBILITY_NOTIFY_MASK;
-		
-		attributes_mask = GDK_WA_X | GDK_WA_Y | GDK_WA_VISUAL;
-		
-		window = gdk_window_new (gtk_widget_get_parent_window (widget),
-					 &attributes, attributes_mask);
-		gdk_window_set_user_data (window, widget);
-		
-		gdk_window_show (window);
-	}
-
 	scroll_to (canvas, x1, y1);
-
-	/* If we created a an overlapping background None window, remove it how.
-	 *
-	 * TODO: We would like to temporarily set the bin_window background to
-	 * None to avoid clearing the bin_window to the background, but gdk doesn't
-	 * expose enough to let us do this, so we get a flash-effect here. At least
-	 * it looks better than scroll + expose.
-	 */
-	if (window != NULL) {
-		gdk_window_hide (window);
-		gdk_window_set_user_data (window, NULL);
-		gdk_window_destroy (window);
-	}
 
 	canvas->need_repick = TRUE;
 }
@@ -3679,8 +3638,8 @@ eel_canvas_request_redraw (EelCanvas *canvas, int x1, int y1, int x2, int y2)
 	bbox.width = x2 - x1;
 	bbox.height = y2 - y1;
 
-	gdk_window_invalidate_rect (gtk_layout_get_bin_window (GTK_LAYOUT (canvas)),
-				    &bbox, FALSE);
+	gtk_widget_queue_draw (GTK_WIDGET (canvas));
+	(void) bbox;
 }
 
 /**

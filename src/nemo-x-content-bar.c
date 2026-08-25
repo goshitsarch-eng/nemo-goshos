@@ -52,7 +52,7 @@ enum {
 	CONTENT_BAR_RESPONSE_APP = 1
 };
 
-G_DEFINE_TYPE (NemoXContentBar, nemo_x_content_bar, GTK_TYPE_INFO_BAR)
+G_DEFINE_TYPE (NemoXContentBar, nemo_x_content_bar, VERNE_TYPE_INFO_BAR)
 
 static void
 content_bar_response_cb (GtkInfoBar *infobar,

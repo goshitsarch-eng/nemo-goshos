@@ -131,7 +131,7 @@ static void rebuild_menu (FMTreeView *view);
 
 // static void add_action_popup_items (FMTreeView *view);
 
-G_DEFINE_TYPE (FMTreeView, fm_tree_view, GTK_TYPE_SCROLLED_WINDOW)
+G_DEFINE_TYPE (FMTreeView, fm_tree_view, VERNE_TYPE_SCROLLED_WINDOW)
 #define parent_class fm_tree_view_parent_class
 
 static void

@@ -390,7 +390,7 @@ static void disconnect_bookmark_signals (NemoView *view);
 static void run_action_callback (NemoAction *action, gpointer callback_data);
 static void update_accelerated_actions (NemoView *view);
 
-G_DEFINE_TYPE (NemoView, nemo_view, GTK_TYPE_SCROLLED_WINDOW);
+G_DEFINE_TYPE (NemoView, nemo_view, VERNE_TYPE_SCROLLED_WINDOW);
 #define parent_class nemo_view_parent_class
 
 /* virtual methods (public and non-public) */

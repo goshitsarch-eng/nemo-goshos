@@ -82,7 +82,7 @@ static gint menu_icon_pixels = 16;
 #endif
 
 typedef struct {
-	GtkScrolledWindow  parent;
+	VerneScrolledWindow  parent;
 	GtkTreeView        *tree_view;
     GtkTreeViewColumn  *eject_column;
     GtkCellRenderer    *eject_icon_cell_renderer;
@@ -265,7 +265,7 @@ G_DEFINE_TYPE_WITH_CODE (NemoShortcutsModel, _nemo_shortcuts_model, GTK_TYPE_TRE
 						_nemo_shortcuts_model_drag_source_init));
 static GtkTreeStore *nemo_shortcuts_model_new (NemoPlacesSidebar *sidebar);
 
-G_DEFINE_TYPE (NemoPlacesSidebar, nemo_places_sidebar, GTK_TYPE_SCROLLED_WINDOW);
+G_DEFINE_TYPE (NemoPlacesSidebar, nemo_places_sidebar, VERNE_TYPE_SCROLLED_WINDOW);
 
 static void
 breakpoint_changed_cb (NemoPlacesSidebar *sidebar)

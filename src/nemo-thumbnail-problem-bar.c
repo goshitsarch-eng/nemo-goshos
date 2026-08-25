@@ -46,7 +46,7 @@ struct NemoThumbnailProblemBarPrivate
 	gulong selection_handler_id;
 };
 
-G_DEFINE_TYPE (NemoThumbnailProblemBar, nemo_thumbnail_problem_bar, GTK_TYPE_INFO_BAR);
+G_DEFINE_TYPE (NemoThumbnailProblemBar, nemo_thumbnail_problem_bar, VERNE_TYPE_INFO_BAR);
 
 static void
 thumbnail_problem_bar_response_cb (GtkInfoBar *infobar,

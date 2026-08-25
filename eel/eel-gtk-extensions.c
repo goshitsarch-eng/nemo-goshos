@@ -316,7 +316,7 @@ eel_pop_up_menu_at_pointer (GtkMenu        *menu,
      * In Wayland, gtk_menu_popup_at_pointer() also leaves the menu impossible
      * to dismiss by clicking to the left of it, so use the rect path there
      * unconditionally. See https://github.com/linuxmint/nemo/issues/3218. */
-    if (!eel_check_is_wayland () && event != NULL && event->type == GDK_BUTTON_PRESS) {
+    if (!eel_check_is_wayland () && event != NULL && gdk_event_get_event_type (event) == GDK_BUTTON_PRESS) {
         gtk_menu_popup_at_pointer (menu, event);
     } else {
         GdkWindow *window = gtk_widget_get_window (gtk_widget_get_toplevel (widget));

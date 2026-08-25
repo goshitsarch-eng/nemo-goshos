@@ -53,7 +53,7 @@ struct NemoInterestingFolderBarPrivate
 	gulong selection_handler_id;
 };
 
-G_DEFINE_TYPE (NemoInterestingFolderBar, nemo_interesting_folder_bar, GTK_TYPE_INFO_BAR);
+G_DEFINE_TYPE (NemoInterestingFolderBar, nemo_interesting_folder_bar, VERNE_TYPE_INFO_BAR);
 
 static void
 interesting_folder_bar_response_cb (GtkInfoBar *infobar,

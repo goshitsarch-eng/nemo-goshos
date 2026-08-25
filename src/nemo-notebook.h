@@ -41,11 +41,7 @@ G_BEGIN_DECLS
 #define NEMO_NOTEBOOK_GET_CLASS(o)	(G_TYPE_INSTANCE_GET_CLASS ((o), NEMO_TYPE_NOTEBOOK, NemoNotebookClass))
 
 typedef struct _NemoNotebookClass	NemoNotebookClass;
-typedef struct _NemoNotebook		NemoNotebook;
-
-/* GTK4 GtkNotebook is final; Verne notebooks are GtkNotebooks with extra setup. */
 typedef GtkNotebook NemoNotebook;
-typedef struct _NemoNotebookClass NemoNotebookClass;
 
 struct _NemoNotebookClass
 {

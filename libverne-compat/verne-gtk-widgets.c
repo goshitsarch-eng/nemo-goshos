@@ -455,6 +455,11 @@ void gtk_menu_popup_at_pointer (GtkMenu *menu, const GdkEvent *trigger) {
 	(void) trigger;
 	gtk_popover_popup (GTK_POPOVER (menu));
 }
+void gtk_menu_popup_at_rect (GtkMenu *menu, GdkSurface *rect_window, const GdkRectangle *rect,
+			     GdkGravity rect_anchor, GdkGravity menu_anchor, const GdkEvent *trigger) {
+	(void) rect_window; (void) rect; (void) rect_anchor; (void) menu_anchor; (void) trigger;
+	gtk_popover_popup (GTK_POPOVER (menu));
+}
 void gtk_menu_popup_at_widget (GtkMenu *menu, GtkWidget *widget, GdkGravity widget_anchor, GdkGravity menu_anchor, const GdkEvent *trigger) {
 	(void) widget_anchor; (void) menu_anchor; (void) trigger;
 	if (gtk_widget_get_parent (GTK_WIDGET (menu)) == NULL)
@@ -502,8 +507,6 @@ static void gtk_menu_bar_init (GtkMenuBar *bar) {
 }
 GtkWidget *gtk_menu_bar_new (void) { return g_object_new (GTK_TYPE_MENU_BAR, NULL); }
 
-typedef struct _GtkMenuItemClass { GtkButtonClass parent_class; } GtkMenuItemClass;
-struct _GtkMenuItem { GtkButton parent; GtkWidget *submenu; GtkWidget *image; gchar *label; };
 G_DEFINE_TYPE (GtkMenuItem, gtk_menu_item, GTK_TYPE_BUTTON)
 static void gtk_menu_item_dispose (GObject *o) {
 	GtkMenuItem *item = GTK_MENU_ITEM (o);
@@ -626,4 +629,59 @@ gtk_icon_theme_load_icon (GtkIconTheme *theme, const gchar *name, gint size, Gtk
 		g_object_unref (p);
 	}
 	return pixbuf;
+}
+
+G_DEFINE_TYPE (VerneScrolledWindow, verne_scrolled_window, GTK_TYPE_BOX)
+
+static void
+verne_scrolled_window_class_init (VerneScrolledWindowClass *klass)
+{
+	klass->scrollbar_spacing = 0;
+}
+
+static void
+verne_scrolled_window_init (VerneScrolledWindow *sw)
+{
+	gtk_orientable_set_orientation (GTK_ORIENTABLE (sw), GTK_ORIENTATION_VERTICAL);
+	sw->inner = (gtk_scrolled_window_new) ();
+	gtk_widget_set_hexpand (sw->inner, TRUE);
+	gtk_widget_set_vexpand (sw->inner, TRUE);
+	gtk_box_append (GTK_BOX (sw), sw->inner);
+}
+
+GtkWidget *
+verne_scrolled_window_get_inner (gpointer widget)
+{
+	if (widget != NULL && VERNE_IS_SCROLLED_WINDOW (widget))
+		return VERNE_SCROLLED_WINDOW (widget)->inner;
+	return widget;
+}
+
+G_DEFINE_TYPE (VerneInfoBar, verne_info_bar, GTK_TYPE_BOX)
+
+static void
+verne_info_bar_class_init (VerneInfoBarClass *klass)
+{
+	(void) klass;
+}
+
+static void
+verne_info_bar_init (VerneInfoBar *bar)
+{
+	gtk_orientable_set_orientation (GTK_ORIENTABLE (bar), GTK_ORIENTATION_VERTICAL);
+	bar->inner = gtk_info_bar_new ();
+	bar->content_area = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 6);
+	bar->action_area = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 6);
+	(gtk_info_bar_add_child) (GTK_INFO_BAR (bar->inner), bar->content_area);
+	(gtk_info_bar_add_action_widget) (GTK_INFO_BAR (bar->inner), bar->action_area, 0);
+	gtk_widget_set_hexpand (bar->inner, TRUE);
+	gtk_box_append (GTK_BOX (bar), bar->inner);
+}
+
+GtkWidget *
+verne_info_bar_get_inner (gpointer widget)
+{
+	if (widget != NULL && VERNE_IS_INFO_BAR (widget))
+		return VERNE_INFO_BAR (widget)->inner;
+	return widget;
 }

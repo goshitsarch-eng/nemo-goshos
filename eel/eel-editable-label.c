@@ -1604,103 +1604,35 @@ eel_editable_label_draw (GtkWidget *widget,
 static void
 eel_editable_label_realize (GtkWidget *widget)
 {
-  EelEditableLabel *label;
-  GdkWindowAttr attributes;
-  gint attributes_mask;
-  GtkAllocation allocation;
-  GdkWindow *window;
-  GtkStyleContext *style;
+  EelEditableLabel *label = EEL_EDITABLE_LABEL (widget);
 
-  gtk_widget_set_realized (widget, TRUE);
-  label = EEL_EDITABLE_LABEL (widget);
-  gtk_widget_get_allocation (widget, &allocation);
+  GTK_WIDGET_CLASS (eel_editable_label_parent_class)->realize (widget);
 
-  attributes.wclass = GDK_INPUT_OUTPUT;
-  attributes.window_type = GDK_WINDOW_CHILD;
-  attributes.x = allocation.x;
-  attributes.y = allocation.y;
-  attributes.width = allocation.width;
-  attributes.height = allocation.height;
-  attributes.visual = gtk_widget_get_visual (widget);
-  attributes.event_mask = gtk_widget_get_events (widget) |
-    (GDK_EXPOSURE_MASK |
-     GDK_BUTTON_PRESS_MASK |
-     GDK_BUTTON_RELEASE_MASK |
-     GDK_BUTTON1_MOTION_MASK |
-     GDK_BUTTON3_MOTION_MASK |
-     GDK_POINTER_MOTION_HINT_MASK |
-     GDK_POINTER_MOTION_MASK |
-     GDK_ENTER_NOTIFY_MASK |
-     GDK_LEAVE_NOTIFY_MASK);
-
-  attributes_mask = GDK_WA_X | GDK_WA_Y  | GDK_WA_VISUAL;
-
-  window = gdk_window_new (gtk_widget_get_parent_window (widget),
-			   &attributes, attributes_mask);
-  gtk_widget_set_window (widget, window);
-  gdk_window_set_user_data (window, widget);
-
-  attributes.cursor = gdk_cursor_new (GDK_XTERM);
-  attributes.window_type = GDK_WINDOW_CHILD;
-  attributes.wclass = GDK_INPUT_ONLY;
-  attributes.event_mask = gtk_widget_get_events (widget);
-  attributes.event_mask |= (GDK_BUTTON_PRESS_MASK |
-                            GDK_BUTTON_RELEASE_MASK |
-                            GDK_BUTTON1_MOTION_MASK |
-                            GDK_BUTTON3_MOTION_MASK |
-                            GDK_POINTER_MOTION_HINT_MASK |
-                            GDK_POINTER_MOTION_MASK |
-                            GDK_ENTER_NOTIFY_MASK |
-                            GDK_LEAVE_NOTIFY_MASK);
-  attributes_mask = GDK_WA_X | GDK_WA_Y | GDK_WA_CURSOR;
-
-  label->text_area = gdk_window_new (gtk_widget_get_parent_window (widget),
-                                     &attributes, attributes_mask);
-  gdk_window_set_user_data (label->text_area, widget);
-  gtk_im_context_set_client_window (label->im_context, label->text_area);
-  g_object_unref (attributes.cursor);
-
-  style = gtk_widget_get_style_context (widget);
-  gtk_style_context_set_background (style, gtk_widget_get_window (widget));
+  label->text_area = gtk_widget_get_window (widget);
+  gtk_im_context_set_client_widget (label->im_context, widget);
 }
 
 static void
 eel_editable_label_unrealize (GtkWidget *widget)
 {
-  EelEditableLabel *label;
+  EelEditableLabel *label = EEL_EDITABLE_LABEL (widget);
 
-  label = EEL_EDITABLE_LABEL (widget);
+  gtk_im_context_set_client_widget (label->im_context, NULL);
+  label->text_area = NULL;
 
-  gtk_im_context_set_client_window (label->im_context, NULL);
-
-  if (label->text_area)
-    {
-      gdk_window_set_user_data (label->text_area, NULL);
-      gdk_window_destroy (label->text_area);
-      label->text_area = NULL;
-    }
-
-  (* GTK_WIDGET_CLASS (eel_editable_label_parent_class)->unrealize) (widget);
+  GTK_WIDGET_CLASS (eel_editable_label_parent_class)->unrealize (widget);
 }
 
 static void
 eel_editable_label_map (GtkWidget *widget)
 {
-  EelEditableLabel *label = EEL_EDITABLE_LABEL (widget);
-
-  (* GTK_WIDGET_CLASS (eel_editable_label_parent_class)->map) (widget);
-
-  gdk_window_show (label->text_area);
+  GTK_WIDGET_CLASS (eel_editable_label_parent_class)->map (widget);
 }
 
 static void
 eel_editable_label_unmap (GtkWidget *widget)
 {
-  EelEditableLabel *label = EEL_EDITABLE_LABEL (widget);
-
-  gdk_window_hide (label->text_area);
-
-  (* GTK_WIDGET_CLASS (eel_editable_label_parent_class)->unmap) (widget);
+  GTK_WIDGET_CLASS (eel_editable_label_parent_class)->unmap (widget);
 }
 
 static void
@@ -2177,7 +2109,7 @@ eel_editable_label_key_press (GtkWidget   *widget,
       return TRUE;
     }
 
-  if (GTK_WIDGET_CLASS (eel_editable_label_parent_class)->key_press_event (widget, event))
+  if (verne_widget_chain_key_press (eel_editable_label_parent_class, widget, event))
     /* Activate key bindings
      */
     return TRUE;
@@ -2197,7 +2129,7 @@ eel_editable_label_key_release (GtkWidget   *widget,
       return TRUE;
     }
 
-  return GTK_WIDGET_CLASS (eel_editable_label_parent_class)->key_release_event (widget, event);
+  return verne_widget_chain_key_release (eel_editable_label_parent_class, widget, event);
 }
 
 static void

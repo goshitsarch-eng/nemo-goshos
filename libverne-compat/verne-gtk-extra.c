@@ -325,3 +325,454 @@ gtk_style_context_get (GtkStyleContext *context, GtkStateFlags state, ...)
 	va_end (args);
 }
 
+gboolean
+verne_gdk_cairo_get_clip_rectangle (cairo_t *cr, cairo_rectangle_int_t *rect)
+{
+	double x1, y1, x2, y2;
+
+	cairo_clip_extents (cr, &x1, &y1, &x2, &y2);
+	if (x1 >= x2 || y1 >= y2)
+		return FALSE;
+	if (rect) {
+		rect->x = (int) x1;
+		rect->y = (int) y1;
+		rect->width = (int) (x2 - x1 + 0.5);
+		rect->height = (int) (y2 - y1 + 0.5);
+	}
+	return TRUE;
+}
+
+GdkSurface *
+gdk_window_new (GdkSurface *parent, GdkWindowAttr *attributes, gint attributes_mask)
+{
+	(void) attributes;
+	(void) attributes_mask;
+	return parent;
+}
+
+void gdk_window_destroy (GdkSurface *window) { (void) window; }
+void gdk_window_show (GdkSurface *window) { (void) window; }
+void gdk_window_hide (GdkSurface *window) { (void) window; }
+void gdk_window_set_user_data (GdkSurface *window, gpointer user_data) { (void) window; (void) user_data; }
+gpointer gdk_window_get_user_data (GdkSurface *window) { (void) window; return NULL; }
+void gdk_window_invalidate_rect (GdkSurface *window, const GdkRectangle *rect, gboolean invalidate_children)
+{
+	(void) window; (void) rect; (void) invalidate_children;
+}
+void
+gdk_window_get_geometry (GdkSurface *window, gint *x, gint *y, gint *width, gint *height)
+{
+	if (x) *x = 0;
+	if (y) *y = 0;
+	if (width) *width = window ? gdk_surface_get_width (window) : 0;
+	if (height) *height = window ? gdk_surface_get_height (window) : 0;
+}
+void gdk_window_get_position (GdkSurface *window, gint *x, gint *y)
+{
+	(void) window;
+	if (x) *x = 0;
+	if (y) *y = 0;
+}
+void gdk_window_move (GdkSurface *window, gint x, gint y) { (void) window; (void) x; (void) y; }
+void gdk_window_resize (GdkSurface *window, gint width, gint height) { (void) window; (void) width; (void) height; }
+void gdk_window_raise (GdkSurface *window) { (void) window; }
+void gdk_window_lower (GdkSurface *window) { (void) window; }
+void gdk_window_focus (GdkSurface *window, guint32 timestamp) { (void) window; (void) timestamp; }
+void gdk_window_set_cursor (GdkSurface *window, GdkCursor *cursor) { (void) window; (void) cursor; }
+
+GdkCursor *
+gdk_cursor_new (gint cursor_type)
+{
+	const char *name = "default";
+	if (cursor_type == GDK_XTERM)
+		name = "text";
+	return gdk_cursor_new_from_name (name, NULL);
+}
+
+GdkCursor *
+gdk_cursor_new_for_display (GdkDisplay *display, gint cursor_type)
+{
+	(void) display;
+	return gdk_cursor_new (cursor_type);
+}
+
+void
+gtk_window_get_size (GtkWindow *window, gint *width, gint *height)
+{
+	int w = gtk_widget_get_width (GTK_WIDGET (window));
+	int h = gtk_widget_get_height (GTK_WIDGET (window));
+	if (w <= 0 || h <= 0)
+		gtk_window_get_default_size (window, &w, &h);
+	if (width) *width = w;
+	if (height) *height = h;
+}
+
+GtkWidget *
+gtk_info_bar_get_content_area (GtkInfoBar *bar)
+{
+	GtkWidget *box;
+	gpointer w = bar;
+
+	if (w != NULL && VERNE_IS_INFO_BAR (w))
+		return VERNE_INFO_BAR (w)->content_area;
+	box = g_object_get_data (G_OBJECT (bar), "verne-content");
+	if (box == NULL) {
+		box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 6);
+		(gtk_info_bar_add_child) (bar, box);
+		g_object_set_data (G_OBJECT (bar), "verne-content", box);
+	}
+	return box;
+}
+
+GtkWidget *
+gtk_info_bar_get_action_area (GtkInfoBar *bar)
+{
+	GtkWidget *box;
+	gpointer w = bar;
+
+	if (w != NULL && VERNE_IS_INFO_BAR (w))
+		return VERNE_INFO_BAR (w)->action_area;
+	box = g_object_get_data (G_OBJECT (bar), "verne-action");
+	if (box == NULL) {
+		box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 6);
+		(gtk_info_bar_add_action_widget) (bar, box, 0);
+		g_object_set_data (G_OBJECT (bar), "verne-action", box);
+	}
+	return box;
+}
+
+void
+gtk_window_set_icon (GtkWindow *window, GdkPixbuf *pixbuf)
+{
+	(void) window;
+	(void) pixbuf;
+}
+
+static GMainLoop *verne_main_loop;
+static guint verne_main_depth;
+
+void
+gtk_main (void)
+{
+	GMainLoop *loop = g_main_loop_new (NULL, FALSE);
+	GMainLoop *prev = verne_main_loop;
+	verne_main_loop = loop;
+	verne_main_depth++;
+	g_main_loop_run (loop);
+	verne_main_depth--;
+	verne_main_loop = prev;
+	g_main_loop_unref (loop);
+}
+
+void
+gtk_main_quit (void)
+{
+	if (verne_main_loop)
+		g_main_loop_quit (verne_main_loop);
+}
+
+gboolean
+gtk_main_iteration (void)
+{
+	g_main_context_iteration (NULL, TRUE);
+	return g_main_context_pending (NULL);
+}
+
+gboolean
+gtk_main_iteration_do (gboolean blocking)
+{
+	return g_main_context_iteration (NULL, blocking);
+}
+
+guint
+gtk_main_level (void)
+{
+	return verne_main_depth;
+}
+
+void
+gtk_widget_get_preferred_width (GtkWidget *widget, gint *minimum, gint *natural)
+{
+	int min = 0, nat = 0;
+	gtk_widget_measure (widget, GTK_ORIENTATION_HORIZONTAL, -1, &min, &nat, NULL, NULL);
+	if (minimum) *minimum = min;
+	if (natural) *natural = nat;
+}
+
+void
+gtk_widget_get_preferred_height (GtkWidget *widget, gint *minimum, gint *natural)
+{
+	int min = 0, nat = 0;
+	gtk_widget_measure (widget, GTK_ORIENTATION_VERTICAL, -1, &min, &nat, NULL, NULL);
+	if (minimum) *minimum = min;
+	if (natural) *natural = nat;
+}
+
+cairo_surface_t *
+gdk_cairo_surface_create_from_pixbuf (const GdkPixbuf *pixbuf, int scale, GdkSurface *for_surface)
+{
+	cairo_surface_t *surface;
+	cairo_t *cr;
+	int w, h;
+	(void) for_surface;
+	if (pixbuf == NULL)
+		return NULL;
+	if (scale < 1)
+		scale = 1;
+	w = gdk_pixbuf_get_width (pixbuf);
+	h = gdk_pixbuf_get_height (pixbuf);
+	surface = cairo_image_surface_create (CAIRO_FORMAT_ARGB32, w, h);
+	cairo_surface_set_device_scale (surface, scale, scale);
+	cr = cairo_create (surface);
+	gdk_cairo_set_source_pixbuf (cr, pixbuf, 0, 0);
+	cairo_paint (cr);
+	cairo_destroy (cr);
+	return surface;
+}
+
+void
+gdk_screen_get_monitor_geometry (GdkScreen *screen, int monitor, GdkRectangle *dest)
+{
+	GdkDisplay *d = screen ? screen : gdk_display_get_default ();
+	GListModel *list = d ? gdk_display_get_monitors (d) : NULL;
+	GdkMonitor *m = NULL;
+	(void) monitor;
+	if (list && g_list_model_get_n_items (list) > 0)
+		m = g_list_model_get_item (list, 0);
+	if (m && dest)
+		gdk_monitor_get_geometry (m, dest);
+	else if (dest) {
+		dest->x = dest->y = 0;
+		dest->width = verne_screen_width ();
+		dest->height = verne_screen_height ();
+	}
+	if (m)
+		g_object_unref (m);
+}
+
+int
+gdk_screen_get_monitor_scale_factor (GdkScreen *screen, int monitor)
+{
+	(void) screen; (void) monitor;
+	return 1;
+}
+
+gchar *
+gdk_screen_get_monitor_plug_name (GdkScreen *screen, int monitor)
+{
+	(void) screen; (void) monitor;
+	return g_strdup ("default");
+}
+
+void
+gdk_monitor_get_workarea (GdkMonitor *monitor, GdkRectangle *workarea)
+{
+	if (monitor && workarea)
+		gdk_monitor_get_geometry (monitor, workarea);
+}
+
+GdkEvent *
+gdk_event_copy (const GdkEvent *event)
+{
+	return event ? gdk_event_ref ((GdkEvent *) event) : NULL;
+}
+
+void
+gdk_event_free (GdkEvent *event)
+{
+	if (event)
+		gdk_event_unref (event);
+}
+
+GdkEvent *
+gdk_event_new (GdkEventType type)
+{
+	(void) type;
+	return NULL;
+}
+
+GdkAtom
+gtk_drag_dest_find_target (GtkWidget *widget, GdkDragContext *context, GtkTargetList *list)
+{
+	(void) widget; (void) context; (void) list;
+	return gdk_atom_intern ("text/uri-list", FALSE);
+}
+
+void gtk_drag_get_data (GtkWidget *widget, GdkDragContext *context, GdkAtom target, guint32 time) {
+	(void) widget; (void) context; (void) target; (void) time;
+}
+void gtk_drag_highlight (GtkWidget *widget) { (void) widget; }
+void gtk_drag_unhighlight (GtkWidget *widget) { (void) widget; }
+gpointer gtk_drag_begin (GtkWidget *widget, GtkTargetList *targets, GdkDragAction actions, gint button, GdkEvent *event) {
+	(void) widget; (void) targets; (void) actions; (void) button; (void) event;
+	return NULL;
+}
+void gtk_drag_set_icon_surface (GdkDragContext *context, cairo_surface_t *surface) { (void) context; (void) surface; }
+void gtk_drag_dest_set_track_motion (GtkWidget *widget, gboolean track) { (void) widget; (void) track; }
+GtkTargetList *gtk_drag_source_get_target_list (GtkWidget *widget) { (void) widget; return gtk_target_list_new (NULL, 0); }
+GdkDragAction gdk_drag_context_get_selected_action (GdkDragContext *context) { (void) context; return GDK_ACTION_COPY; }
+GdkDragAction gdk_drag_context_get_suggested_action (GdkDragContext *context) { (void) context; return GDK_ACTION_COPY; }
+GdkDragAction gdk_drag_context_get_actions (GdkDragContext *context) { (void) context; return GDK_ACTION_COPY | GDK_ACTION_MOVE; }
+GdkSurface *gdk_drag_context_get_source_window (GdkDragContext *context) { (void) context; return NULL; }
+void gdk_drag_status (GdkDragContext *context, GdkDragAction action, guint32 time) { (void) context; (void) action; (void) time; }
+
+gboolean
+gtk_target_list_find (GtkTargetList *list, GdkAtom target, guint *info)
+{
+	(void) list; (void) target;
+	if (info) *info = 0;
+	return TRUE;
+}
+gboolean gtk_targets_include_text (GdkAtom *targets, gint n_targets) { (void) targets; (void) n_targets; return TRUE; }
+gboolean gtk_targets_include_uri (GdkAtom *targets, gint n_targets) { (void) targets; (void) n_targets; return TRUE; }
+
+guchar *
+gtk_selection_data_get_text (const GtkSelectionData *s)
+{
+	if (!s || !s->data)
+		return NULL;
+	return (guchar *) g_strndup ((char *) s->data, s->length);
+}
+
+void
+gtk_entry_set_icon_from_stock (GtkEntry *entry, GtkEntryIconPosition pos, const gchar *stock_id)
+{
+	gtk_entry_set_icon_from_icon_name (entry, pos, stock_id);
+}
+
+GtkWidget *gtk_tool_item_new (void) { return gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0); }
+void gtk_tool_item_set_expand (gpointer item, gboolean expand) {
+	gtk_widget_set_hexpand (GTK_WIDGET (item), expand);
+}
+
+void gtk_activatable_set_related_action (gpointer activatable, GtkAction *action) {
+	g_object_set_data (G_OBJECT (activatable), "verne-action", action);
+}
+GtkAction *gtk_activatable_get_related_action (gpointer activatable) {
+	return g_object_get_data (G_OBJECT (activatable), "verne-action");
+}
+void gtk_activatable_set_use_action_appearance (gpointer activatable, gboolean use) { (void) activatable; (void) use; }
+gboolean gtk_activatable_get_use_action_appearance (gpointer activatable) { (void) activatable; return TRUE; }
+
+gboolean gtk_bindings_activate_event (GObject *object, GdkEventKey *event) { (void) object; (void) event; return FALSE; }
+void gtk_propagate_event (GtkWidget *widget, GdkEvent *event) { (void) widget; (void) event; }
+
+GtkWidget *
+gtk_image_new_from_surface (cairo_surface_t *surface)
+{
+	(void) surface;
+	return gtk_image_new ();
+}
+void gtk_image_set_from_surface (GtkImage *image, cairo_surface_t *surface) { (void) image; (void) surface; }
+void gtk_render_icon_surface (GtkStyleContext *context, cairo_t *cr, cairo_surface_t *surface, gdouble x, gdouble y) {
+	(void) context;
+	if (surface) {
+		cairo_set_source_surface (cr, surface, x, y);
+		cairo_paint (cr);
+	}
+}
+
+gpointer
+gtk_icon_theme_lookup_icon_for_scale (GtkIconTheme *theme, const gchar *name, gint size, gint scale, GtkIconLookupFlags flags)
+{
+	(void) flags;
+	return gtk_icon_theme_lookup_icon (theme, name, NULL, size, scale, GTK_TEXT_DIR_NONE, 0);
+}
+gpointer
+gtk_icon_theme_lookup_by_gicon_for_scale (GtkIconTheme *theme, GIcon *icon, gint size, gint scale, GtkIconLookupFlags flags)
+{
+	(void) flags;
+	return gtk_icon_theme_lookup_by_gicon (theme, icon, size, scale, GTK_TEXT_DIR_NONE, 0);
+}
+GdkPixbuf *gtk_icon_info_load_icon (gpointer info, GError **error) { (void) info; (void) error; return NULL; }
+const gchar *gtk_icon_info_get_filename (gpointer info) { (void) info; return NULL; }
+GtkIconSize gtk_icon_size_from_name (const gchar *name) { (void) name; return GTK_ICON_SIZE_INHERIT; }
+
+GtkWidget *gtk_menu_shell_get_selected_item (gpointer menu_shell) { (void) menu_shell; return NULL; }
+
+void
+gtk_file_filter_add_custom (GtkFileFilter *filter, GtkFileFilterFlags needed, GtkFileFilterFunc func, gpointer data, GDestroyNotify notify)
+{
+	(void) needed; (void) func;
+	if (notify && data)
+		notify (data);
+	gtk_file_filter_add_pattern (filter, "*");
+}
+
+gchar *
+gtk_file_chooser_get_filename (GtkFileChooser *chooser)
+{
+	GFile *file = gtk_file_chooser_get_file (chooser);
+	gchar *path = file ? g_file_get_path (file) : NULL;
+	if (file)
+		g_object_unref (file);
+	return path;
+}
+
+GdkSurface *
+gdk_device_get_window_at_position (GdkDevice *device, gint *x, gint *y)
+{
+	double dx = 0, dy = 0;
+	GdkSurface *s = gdk_device_get_surface_at_position (device, &dx, &dy);
+	if (x) *x = (gint) dx;
+	if (y) *y = (gint) dy;
+	return s;
+}
+
+void gdk_window_set_background_rgba (GdkSurface *window, const GdkRGBA *rgba) { (void) window; (void) rgba; }
+void gdk_window_set_transient_for (GdkSurface *window, GdkSurface *parent) { (void) window; (void) parent; }
+GdkWindowTypeHint gdk_window_get_type_hint (GdkSurface *window) { (void) window; return GDK_WINDOW_TYPE_HINT_NORMAL; }
+cairo_surface_t *gdk_window_create_similar_surface (GdkSurface *window, cairo_content_t content, int w, int h) {
+	(void) window;
+	return cairo_image_surface_create (content == CAIRO_CONTENT_COLOR ? CAIRO_FORMAT_RGB24 : CAIRO_FORMAT_ARGB32, w, h);
+}
+cairo_surface_t *gdk_window_create_similar_image_surface (GdkSurface *window, cairo_format_t format, int w, int h, int scale) {
+	cairo_surface_t *s;
+	(void) window;
+	s = cairo_image_surface_create (format, w, h);
+	if (scale > 1)
+		cairo_surface_set_device_scale (s, scale, scale);
+	return s;
+}
+void gdk_window_move_to_rect (GdkSurface *window, const GdkRectangle *rect, GdkGravity rect_anchor, GdkGravity window_anchor, GdkAnchorHints hints, int dx, int dy) {
+	(void) window; (void) rect; (void) rect_anchor; (void) window_anchor; (void) hints; (void) dx; (void) dy;
+}
+void gdk_window_remove_filter (GdkSurface *window, gpointer func, gpointer data) { (void) window; (void) func; (void) data; }
+gboolean gdk_property_get (GdkSurface *window, GdkAtom property, GdkAtom type, gulong offset, gulong length, gint pdelete, GdkAtom *actual_type, gint *actual_format, gint *actual_length, guchar **data) {
+	(void) window; (void) property; (void) type; (void) offset; (void) length; (void) pdelete;
+	if (actual_type) *actual_type = NULL;
+	if (actual_format) *actual_format = 0;
+	if (actual_length) *actual_length = 0;
+	if (data) *data = NULL;
+	return FALSE;
+}
+void gdk_property_change (GdkSurface *window, GdkAtom property, GdkAtom type, gint format, gint mode, const guchar *data, gint nelements) {
+	(void) window; (void) property; (void) type; (void) format; (void) mode; (void) data; (void) nelements;
+}
+GdkSurface *gdk_selection_owner_get (GdkAtom selection) { (void) selection; return NULL; }
+gboolean gdk_display_supports_selection_notification (GdkDisplay *display) { (void) display; return FALSE; }
+gboolean gdk_screen_get_setting (GdkScreen *screen, const gchar *name, GValue *value) { (void) screen; (void) name; (void) value; return FALSE; }
+GList *gdk_screen_get_window_stack (GdkScreen *screen) { (void) screen; return NULL; }
+unsigned long gdk_x11_get_xatom_by_name (const gchar *name) { (void) name; return 0; }
+void gnome_desktop_get_session_user_pwent (void) { }
+
+void
+gtk_builder_add_callback_symbols (GtkBuilder *builder, const char *first, ...)
+{
+	(void) builder; (void) first;
+}
+
+void
+gtk_style_context_get_border_color (GtkStyleContext *context, GtkStateFlags state, GdkRGBA *color)
+{
+	(void) state;
+	if (color)
+		(gtk_style_context_get_color) (context, color);
+}
+
+void
+gtk_style_context_get_style (GtkStyleContext *context, ...)
+{
+	(void) context;
+}
+
