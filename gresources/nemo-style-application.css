@@ -58,12 +58,18 @@
 .nemo-window.nemo-desktop-window layout,
 .nemo-window.nemo-desktop-window layout.view,
 .nemo-window.nemo-desktop-window .view,
+.nemo-window.nemo-desktop-window .verne-chrome,
+.verne-window.nemo-desktop-window,
+.verne-window.verne-desktop,
+window.verne-desktop,
 window.verne-desktop notebook,
 window.verne-desktop paned,
 window.verne-desktop layout,
 window.verne-desktop layout.view,
-window.verne-desktop .view {
+window.verne-desktop .view,
+window.verne-desktop .verne-chrome {
 	background-color: transparent;
+	background-image: none;
 }
 
 .nemo-desktop-window,
