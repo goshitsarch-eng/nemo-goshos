@@ -631,7 +631,7 @@ verne_menu_popup_idle (gpointer data)
 		gtk_popover_set_autohide (GTK_POPOVER (p->menu), FALSE);
 		gtk_popover_set_has_arrow (GTK_POPOVER (p->menu), FALSE);
 		gtk_popover_popup (GTK_POPOVER (p->menu));
-		g_timeout_add (250, verne_menu_enable_autohide, g_object_ref (w));
+		g_timeout_add (800, verne_menu_enable_autohide, g_object_ref (w));
 	}
 	g_object_unref (p->menu);
 	g_free (p);
