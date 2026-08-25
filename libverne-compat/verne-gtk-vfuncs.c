@@ -541,23 +541,56 @@ wrapped_state_flags_changed (GtkWidget *widget, GtkStateFlags previous)
 static void
 wrapped_snapshot (GtkWidget *widget, GtkSnapshot *snapshot)
 {
-	VerneVfuncs *v = lookup_vfuncs_type (G_OBJECT_TYPE (widget));
+	GType type;
+	VerneDrawEvent draw = NULL;
+	void (*orig_snapshot) (GtkWidget *, GtkSnapshot *) = NULL;
 	int w, h;
 	cairo_t *cr;
+	GtkWidget *child;
 
 	w = gtk_widget_get_width (widget);
 	h = gtk_widget_get_height (widget);
-	if (v && v->draw && w > 0 && h > 0) {
+	if (w <= 0 || h <= 0) {
+		GtkAllocation allocation;
+		gtk_widget_get_allocation (widget, &allocation);
+		if (w <= 0)
+			w = allocation.width;
+		if (h <= 0)
+			h = allocation.height;
+	}
+
+	/* Walk the instance type so a subclass that only overrides events still
+	 * runs the ancestor GTK3 draw (EelCanvas) and the real GTK4 snapshot
+	 * (GtkLayout). orig_snapshot is often wrapped_snapshot itself. */
+	type = G_OBJECT_TYPE (widget);
+	while (type != 0 && type != GTK_TYPE_WIDGET && type != G_TYPE_OBJECT) {
+		VerneVfuncs *cand = NULL;
+		if (vfunc_table)
+			cand = g_hash_table_lookup (vfunc_table, GSIZE_TO_POINTER (type));
+		if (cand) {
+			if (draw == NULL && cand->draw)
+				draw = cand->draw;
+			if (orig_snapshot == NULL && cand->orig_snapshot &&
+			    cand->orig_snapshot != wrapped_snapshot)
+				orig_snapshot = cand->orig_snapshot;
+		}
+		type = g_type_parent (type);
+	}
+
+	if (draw && w > 0 && h > 0) {
 		cr = gtk_snapshot_append_cairo (snapshot, &GRAPHENE_RECT_INIT (0, 0, w, h));
-		v->draw (widget, cr);
+		draw (widget, cr);
 		cairo_destroy (cr);
 	}
-	if (v && v->orig_snapshot)
-		v->orig_snapshot (widget, snapshot);
+
+	if (orig_snapshot)
+		orig_snapshot (widget, snapshot);
 	else {
-		GtkWidget *child;
-		for (child = gtk_widget_get_first_child (widget); child; child = gtk_widget_get_next_sibling (child))
+		for (child = gtk_widget_get_first_child (widget); child; child = gtk_widget_get_next_sibling (child)) {
+			if (gtk_widget_get_width (child) <= 0 || gtk_widget_get_height (child) <= 0)
+				continue;
 			gtk_widget_snapshot_child (widget, child, snapshot);
+		}
 	}
 }
 
@@ -733,8 +766,9 @@ wrap_class (VerneVfuncs *v)
 	}
 	if (v->state_changed)
 		wclass->state_flags_changed = wrapped_state_flags_changed;
-	if (v->draw)
-		wclass->snapshot = wrapped_snapshot;
+	/* Always intercept snapshot so ancestor GTK3 draw (EelCanvas) runs even
+	 * when a subclass only overrides events and copies wrapped_snapshot. */
+	wclass->snapshot = wrapped_snapshot;
 	if (v->size_allocate)
 		wclass->size_allocate = wrapped_size_allocate;
 	if (v->pref_width || v->pref_height)

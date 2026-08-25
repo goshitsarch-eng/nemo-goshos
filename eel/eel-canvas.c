@@ -3195,26 +3195,32 @@ static gboolean
 eel_canvas_draw (GtkWidget *widget, cairo_t *cr)
 {
 	EelCanvas *canvas;
-        GdkWindow *bin_window;
         cairo_region_t *region;
+        cairo_rectangle_int_t clip_rect;
+	GtkAllocation allocation;
 
-        if (!gdk_cairo_get_clip_rectangle (cr, NULL))
-                return FALSE;
+	gtk_widget_get_allocation (widget, &allocation);
+	if (allocation.width < 1)
+		allocation.width = 1;
+	if (allocation.height < 1)
+		allocation.height = 1;
 
-        bin_window = gtk_layout_get_bin_window (GTK_LAYOUT (widget));
-
-        if (!gtk_cairo_should_draw_window (cr, bin_window))
-            return FALSE;
+        if (!gdk_cairo_get_clip_rectangle (cr, &clip_rect)) {
+		clip_rect.x = 0;
+		clip_rect.y = 0;
+		clip_rect.width = allocation.width;
+		clip_rect.height = allocation.height;
+	}
 
         cairo_save (cr);
 
-        gtk_cairo_transform_to_window (cr, widget, bin_window);
+        gtk_cairo_transform_to_window (cr, widget, gtk_layout_get_bin_window (GTK_LAYOUT (widget)));
 
         region = eel_cairo_get_clip_region (cr);
-
-        if (region == NULL) {
-            cairo_restore (cr);
-            return FALSE;
+        if (region == NULL || cairo_region_is_empty (region)) {
+		if (region)
+			cairo_region_destroy (region);
+		region = cairo_region_create_rectangle (&clip_rect);
         }
 
 #ifdef VERBOSE
@@ -3222,6 +3228,13 @@ eel_canvas_draw (GtkWidget *widget, cairo_t *cr)
 #endif
 	/* If there are any outstanding items that need updating, do them now */
 	canvas = EEL_CANVAS (widget);
+	if (!(canvas->root->flags & EEL_CANVAS_ITEM_REALIZED) &&
+	    EEL_CANVAS_ITEM_GET_CLASS (canvas->root)->realize)
+		EEL_CANVAS_ITEM_GET_CLASS (canvas->root)->realize (canvas->root);
+	if (!(canvas->root->flags & EEL_CANVAS_ITEM_MAPPED) &&
+	    EEL_CANVAS_ITEM_GET_CLASS (canvas->root)->map)
+		EEL_CANVAS_ITEM_GET_CLASS (canvas->root)->map (canvas->root);
+
 	if (canvas->idle_id) {
 		g_source_remove (canvas->idle_id);
 		canvas->idle_id = 0;
@@ -3265,8 +3278,14 @@ eel_canvas_draw_background (EelCanvas *canvas,
 	GtkStyleContext *style_context;
 	GdkRGBA color;
 
-        if (!gdk_cairo_get_clip_rectangle (cr, &rect))
-              return;
+        if (!gdk_cairo_get_clip_rectangle (cr, &rect)) {
+		GtkAllocation allocation;
+		gtk_widget_get_allocation (GTK_WIDGET (canvas), &allocation);
+		rect.x = 0;
+		rect.y = 0;
+		rect.width = MAX (allocation.width, 1);
+		rect.height = MAX (allocation.height, 1);
+	}
 
         cairo_save (cr);
 	/* By default, we use the style background. */

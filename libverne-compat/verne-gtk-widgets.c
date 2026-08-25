@@ -289,11 +289,33 @@ gtk_layout_dispose (GObject *object)
 }
 
 static void
+gtk_layout_measure (GtkWidget *widget, GtkOrientation orientation, int for_size,
+		    int *minimum, int *natural, int *minimum_baseline, int *natural_baseline)
+{
+	GtkLayoutPrivate *priv = gtk_layout_get_instance_private (GTK_LAYOUT (widget));
+	(void) for_size;
+	if (minimum_baseline)
+		*minimum_baseline = -1;
+	if (natural_baseline)
+		*natural_baseline = -1;
+	if (orientation == GTK_ORIENTATION_HORIZONTAL) {
+		*minimum = 0;
+		*natural = MAX ((int) priv->width, 1);
+	} else {
+		*minimum = 0;
+		*natural = MAX ((int) priv->height, 1);
+	}
+}
+
+static void
 gtk_layout_snapshot (GtkWidget *widget, GtkSnapshot *snapshot)
 {
 	GtkWidget *child;
-	for (child = gtk_widget_get_first_child (widget); child; child = gtk_widget_get_next_sibling (child))
+	for (child = gtk_widget_get_first_child (widget); child; child = gtk_widget_get_next_sibling (child)) {
+		if (gtk_widget_get_width (child) <= 0 || gtk_widget_get_height (child) <= 0)
+			continue;
 		gtk_widget_snapshot_child (widget, child, snapshot);
+	}
 }
 
 static void
@@ -325,6 +347,8 @@ gtk_layout_class_init (GtkLayoutClass *klass)
 	oc->dispose = gtk_layout_dispose;
 	wc->snapshot = gtk_layout_snapshot;
 	wc->size_allocate = gtk_layout_size_allocate;
+	wc->measure = gtk_layout_measure;
+	gtk_widget_class_set_css_name (wc, "layout");
 	g_object_class_override_property (oc, LAYOUT_PROP_HADJ, "hadjustment");
 	g_object_class_override_property (oc, LAYOUT_PROP_VADJ, "vadjustment");
 	g_object_class_override_property (oc, LAYOUT_PROP_HSCROLL, "hscroll-policy");
@@ -340,6 +364,11 @@ gtk_layout_init (GtkLayout *layout)
 	priv->vadj = gtk_adjustment_new (0, 0, 100, 1, 10, 10);
 	priv->child_pos = g_hash_table_new_full (g_direct_hash, g_direct_equal, NULL, g_free);
 	gtk_widget_set_overflow (GTK_WIDGET (layout), GTK_OVERFLOW_HIDDEN);
+	gtk_widget_set_hexpand (GTK_WIDGET (layout), TRUE);
+	gtk_widget_set_vexpand (GTK_WIDGET (layout), TRUE);
+	gtk_widget_set_halign (GTK_WIDGET (layout), GTK_ALIGN_FILL);
+	gtk_widget_set_valign (GTK_WIDGET (layout), GTK_ALIGN_FILL);
+	gtk_widget_add_css_class (GTK_WIDGET (layout), "view");
 }
 
 static void gtk_layout_scrollable_init (GtkScrollableInterface *iface) { (void) iface; }
@@ -654,20 +683,12 @@ GdkPixbuf *
 gtk_icon_theme_load_icon (GtkIconTheme *theme, const gchar *name, gint size, GtkIconLookupFlags flags, GError **error)
 {
 	GtkIconPaintable *p;
-	GdkPixbuf *pixbuf = NULL;
+	GdkPixbuf *pixbuf;
 	(void) flags;
 	p = gtk_icon_theme_lookup_icon (theme, name, NULL, size, 1, GTK_TEXT_DIR_NONE, 0);
-	if (p) {
-		GFile *file = gtk_icon_paintable_get_file (p);
-		if (file) {
-			gchar *path = g_file_get_path (file);
-			if (path)
-				pixbuf = gdk_pixbuf_new_from_file_at_size (path, size, size, error);
-			g_free (path);
-			g_object_unref (file);
-		}
+	pixbuf = gtk_icon_info_load_icon (p, error);
+	if (p)
 		g_object_unref (p);
-	}
 	return pixbuf;
 }
 
@@ -682,10 +703,19 @@ verne_scrolled_window_class_init (VerneScrolledWindowClass *klass)
 static void
 verne_scrolled_window_init (VerneScrolledWindow *sw)
 {
+	gtk_widget_set_hexpand (GTK_WIDGET (sw), TRUE);
+	gtk_widget_set_vexpand (GTK_WIDGET (sw), TRUE);
+	gtk_widget_set_halign (GTK_WIDGET (sw), GTK_ALIGN_FILL);
+	gtk_widget_set_valign (GTK_WIDGET (sw), GTK_ALIGN_FILL);
 	gtk_orientable_set_orientation (GTK_ORIENTABLE (sw), GTK_ORIENTATION_VERTICAL);
 	sw->inner = (gtk_scrolled_window_new) ();
 	gtk_widget_set_hexpand (sw->inner, TRUE);
 	gtk_widget_set_vexpand (sw->inner, TRUE);
+	gtk_widget_set_halign (sw->inner, GTK_ALIGN_FILL);
+	gtk_widget_set_valign (sw->inner, GTK_ALIGN_FILL);
+	gtk_widget_add_css_class (sw->inner, "view");
+	gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (sw->inner),
+					GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
 	gtk_box_append (GTK_BOX (sw), sw->inner);
 }
 

@@ -157,7 +157,9 @@ build_menu (GtkUIManager *self, UiNode *node, gboolean menubar)
 			const gchar *label = action ? gtk_action_get_label (action) : c->name;
 			if (menubar) {
 				GtkWidget *btn = gtk_menu_button_new ();
-				gtk_menu_button_set_label (GTK_MENU_BUTTON (btn), label ? label : "");
+				GtkWidget *lab = gtk_label_new_with_mnemonic (label ? label : "");
+				gtk_widget_add_css_class (btn, "flat");
+				gtk_menu_button_set_child (GTK_MENU_BUTTON (btn), lab);
 				gtk_menu_button_set_popover (GTK_MENU_BUTTON (btn), submenu);
 				gtk_box_append (GTK_BOX (shell), btn);
 				c->widget = btn;

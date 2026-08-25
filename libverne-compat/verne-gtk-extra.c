@@ -1,6 +1,8 @@
 #include "config.h"
 #include "verne-gtk-compat.h"
 #include <atk/atk.h>
+#include <gsk/gsk.h>
+#include <gdk-pixbuf/gdk-pixbuf.h>
 #include <stdarg.h>
 #include <string.h>
 #include <pwd.h>
@@ -872,8 +874,99 @@ gtk_icon_theme_lookup_by_gicon_for_scale (GtkIconTheme *theme, GIcon *icon, gint
 	(void) flags;
 	return gtk_icon_theme_lookup_by_gicon (theme, icon, size, scale, GTK_TEXT_DIR_NONE, 0);
 }
-GdkPixbuf *gtk_icon_info_load_icon (gpointer info, GError **error) { (void) info; (void) error; return NULL; }
-const gchar *gtk_icon_info_get_filename (gpointer info) { (void) info; return NULL; }
+
+static GQuark
+verne_icon_filename_quark (void)
+{
+	static GQuark q;
+	if (q == 0)
+		q = g_quark_from_static_string ("verne-icon-filename");
+	return q;
+}
+
+static GdkPixbuf *
+verne_pixbuf_from_paintable (GdkPaintable *paintable, int size, GError **error)
+{
+	GdkPixbuf *pixbuf = NULL;
+	int w, h;
+	cairo_surface_t *surface;
+	cairo_t *cr;
+	GtkSnapshot *snapshot;
+	GskRenderNode *node;
+
+	if (!GDK_IS_PAINTABLE (paintable))
+		return NULL;
+
+	if (GTK_IS_ICON_PAINTABLE (paintable)) {
+		GFile *file = gtk_icon_paintable_get_file (GTK_ICON_PAINTABLE (paintable));
+		if (file) {
+			char *path = g_file_get_path (file);
+			int load_size = size > 0 ? size : 48;
+			if (path)
+				pixbuf = gdk_pixbuf_new_from_file_at_size (path, load_size, load_size, error);
+			g_free (path);
+			g_object_unref (file);
+			if (pixbuf)
+				return pixbuf;
+			if (error)
+				g_clear_error (error);
+		}
+	}
+
+	w = gdk_paintable_get_intrinsic_width (paintable);
+	h = gdk_paintable_get_intrinsic_height (paintable);
+	if (w <= 0)
+		w = size > 0 ? size : 48;
+	if (h <= 0)
+		h = size > 0 ? size : 48;
+
+	surface = cairo_image_surface_create (CAIRO_FORMAT_ARGB32, w, h);
+	cr = cairo_create (surface);
+	snapshot = gtk_snapshot_new ();
+	gdk_paintable_snapshot (paintable, snapshot, w, h);
+	node = gtk_snapshot_free_to_node (snapshot);
+	if (node) {
+		gsk_render_node_draw (node, cr);
+		gsk_render_node_unref (node);
+	}
+	cairo_destroy (cr);
+	pixbuf = gdk_pixbuf_get_from_surface (surface, 0, 0, w, h);
+	cairo_surface_destroy (surface);
+	return pixbuf;
+}
+
+GdkPixbuf *
+gtk_icon_info_load_icon (gpointer info, GError **error)
+{
+	int size = 0;
+
+	if (info == NULL)
+		return NULL;
+	if (GDK_IS_PAINTABLE (info))
+		size = gdk_paintable_get_intrinsic_width (GDK_PAINTABLE (info));
+	return verne_pixbuf_from_paintable (GDK_IS_PAINTABLE (info) ? GDK_PAINTABLE (info) : NULL, size, error);
+}
+
+const gchar *
+gtk_icon_info_get_filename (gpointer info)
+{
+	char *path;
+	GFile *file;
+
+	if (info == NULL || !GTK_IS_ICON_PAINTABLE (info))
+		return NULL;
+	path = g_object_get_qdata (G_OBJECT (info), verne_icon_filename_quark ());
+	if (path)
+		return path;
+	file = gtk_icon_paintable_get_file (GTK_ICON_PAINTABLE (info));
+	if (file == NULL)
+		return NULL;
+	path = g_file_get_path (file);
+	g_object_unref (file);
+	if (path)
+		g_object_set_qdata_full (G_OBJECT (info), verne_icon_filename_quark (), path, g_free);
+	return path;
+}
 GtkIconSize gtk_icon_size_from_name (const gchar *name) { (void) name; return GTK_ICON_SIZE_INHERIT; }
 
 GtkWidget *gtk_menu_shell_get_selected_item (gpointer menu_shell) { (void) menu_shell; return NULL; }
