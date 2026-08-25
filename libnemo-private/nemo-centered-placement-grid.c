@@ -49,6 +49,9 @@ nemo_centered_placement_grid_new (NemoIconContainer *container, gboolean horizon
     snap_x = GET_VIEW_CONSTANT (container, snap_size_x);
     snap_y = GET_VIEW_CONSTANT (container, snap_size_y);
 
+    if (snap_x <= 0 || snap_y <= 0 || width <= 0 || height <= 0)
+        return NULL;
+
     num_columns = width / snap_x;
     num_rows = height / snap_y;
 
