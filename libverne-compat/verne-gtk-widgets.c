@@ -528,15 +528,18 @@ verne_menu_ensure_css (void)
 	provider = gtk_css_provider_new ();
 	gtk_css_provider_load_from_string (provider,
 		"window.popup.menu {\n"
-		"  background-color: @popover_bg_color;\n"
-		"  color: @popover_fg_color;\n"
+		"  background-color: #ffffff;\n"
+		"  background-image: none;\n"
+		"  color: #1e1e1e;\n"
+		"  opacity: 1;\n"
 		"  border-radius: 12px;\n"
-		"  border: 1px solid alpha(@borders, 0.85);\n"
+		"  border: 1px solid #c0c0c0;\n"
 		"  padding: 6px;\n"
 		"}\n"
 		"window.popup.menu button {\n"
 		"  padding: 6px 12px;\n"
 		"  border-radius: 6px;\n"
+		"  color: #1e1e1e;\n"
 		"}\n"
 		".menubar > button {\n"
 		"  padding: 4px 10px;\n"
@@ -705,9 +708,8 @@ gtk_menu_init (GtkMenu *menu)
 	gtk_window_set_decorated (GTK_WINDOW (menu), FALSE);
 	gtk_window_set_resizable (GTK_WINDOW (menu), FALSE);
 	gtk_window_set_deletable (GTK_WINDOW (menu), FALSE);
-	gtk_window_set_title (GTK_WINDOW (menu), "");
+	gtk_window_set_title (GTK_WINDOW (menu), " ");
 	gtk_window_set_hide_on_close (GTK_WINDOW (menu), TRUE);
-	gtk_widget_add_css_class (GTK_WIDGET (menu), "background");
 	gtk_widget_add_css_class (GTK_WIDGET (menu), "popup");
 	gtk_widget_add_css_class (GTK_WIDGET (menu), "menu");
 	menu->box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
@@ -746,14 +748,27 @@ typedef struct {
 	gboolean has_pos;
 } VernePopupData;
 
+static void
+verne_menu_hide_others (GtkMenu *keep)
+{
+	GListModel *model = gtk_window_get_toplevels ();
+	guint i, n = g_list_model_get_n_items (model);
+	for (i = 0; i < n; i++) {
+		gpointer w = g_list_model_get_item (model, i);
+		if (GTK_IS_MENU (w) && w != keep)
+			gtk_widget_set_visible (GTK_WIDGET (w), FALSE);
+		if (w)
+			g_object_unref (w);
+	}
+}
+
 static gboolean
 verne_menu_popup_idle (gpointer data)
 {
 	VernePopupData *p = data;
 	GtkWidget *w = GTK_WIDGET (p->menu);
 	GtkWidget *box;
-	int nat_w = 180, nat_h = 32, n = 0;
-	GtkWidget *ch;
+	int nat_w = 180, nat_h = 32;
 
 	if (!GTK_IS_MENU (p->menu)) {
 		g_object_unref (p->menu);
@@ -762,10 +777,6 @@ verne_menu_popup_idle (gpointer data)
 	}
 	verne_ensure_menu_attach (p->menu, NULL);
 	box = gtk_menu_get_box (p->menu);
-	if (box)
-		gtk_widget_show_all (box);
-	for (ch = box ? gtk_widget_get_first_child (box) : NULL; ch; ch = gtk_widget_get_next_sibling (ch))
-		n++;
 	verne_menu_hook_leaf_items (p->menu);
 	if (box) {
 		gtk_widget_measure (box, GTK_ORIENTATION_HORIZONTAL, -1, NULL, &nat_w, NULL, NULL);
@@ -782,14 +793,14 @@ verne_menu_popup_idle (gpointer data)
 		g_object_set_data (G_OBJECT (w), "verne-popup-y", GINT_TO_POINTER (p->y));
 	}
 	g_object_set_data (G_OBJECT (w), "verne-menu-hold", GINT_TO_POINTER (1));
+	verne_menu_hide_others (p->menu);
+	gtk_widget_set_opacity (w, 1.0);
 	gtk_widget_set_visible (w, TRUE);
 	gtk_window_present (GTK_WINDOW (p->menu));
 	gtk_widget_grab_focus (w);
 	if (p->has_pos)
 		verne_x11_move (GTK_WINDOW (p->menu), p->x, p->y);
 	g_timeout_add (350, verne_menu_watch_focus, g_object_ref (w));
-	g_debug ("Verne menu popup: %d items size=%dx%d at %d,%d mapped=%d",
-		 n, nat_w, nat_h, p->x, p->y, gtk_widget_get_mapped (w));
 	g_object_unref (p->menu);
 	g_free (p);
 	return G_SOURCE_REMOVE;

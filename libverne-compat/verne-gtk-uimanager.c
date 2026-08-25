@@ -191,8 +191,16 @@ static void
 rebuild (GtkUIManager *self)
 {
 	GList *l;
-	if (self->widgets)
+	if (self->widgets) {
+		GHashTableIter iter;
+		gpointer key, value;
+		g_hash_table_iter_init (&iter, self->widgets);
+		while (g_hash_table_iter_next (&iter, &key, &value)) {
+			if (GTK_IS_MENU (value))
+				gtk_widget_set_visible (GTK_WIDGET (value), FALSE);
+		}
 		g_hash_table_remove_all (self->widgets);
+	}
 	else
 		self->widgets = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
 

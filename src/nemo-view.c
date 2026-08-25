@@ -355,6 +355,9 @@ static void     reset_filter_state                             (NemoView      *v
 
 static void     nemo_view_merge_menus                      (NemoView      *view);
 static void     nemo_view_unmerge_menus                    (NemoView      *view);
+static void     nemo_view_notify_parent                    (GObject       *object,
+							    GParamSpec    *pspec,
+							    gpointer       data);
 static void     nemo_view_init_show_hidden_files           (NemoView      *view);
 static void     clipboard_changed_callback                     (NemoClipboardMonitor *monitor,
 								NemoView      *view);
@@ -2793,6 +2796,11 @@ nemo_view_init (NemoView *view)
 				 G_CALLBACK (nemo_view_update_menus), view, G_CONNECT_SWAPPED);
 
 	gtk_widget_show (GTK_WIDGET (view));
+
+	/* GTK4 dropped GtkWidget::parent-set. Merge view menus when the
+	 * widget is parented into an already-active slot. */
+	g_signal_connect (view, "notify::parent",
+			  G_CALLBACK (nemo_view_notify_parent), NULL);
 
 	g_signal_connect_swapped (nemo_preferences,
 				  "changed::" NEMO_PREFERENCES_ENABLE_DELETE,
@@ -11421,24 +11429,24 @@ nemo_view_scroll_event (GtkWidget *widget,
 
 
 static void
-nemo_view_parent_set (GtkWidget *widget,
-			  GtkWidget *old_parent)
+nemo_view_notify_parent (GObject    *object,
+			 GParamSpec *pspec,
+			 gpointer    data)
 {
 	NemoView *view;
 	GtkWidget *parent;
 
-	view = NEMO_VIEW (widget);
-
-	parent = gtk_widget_get_parent (widget);
-	g_assert (parent == NULL || old_parent == NULL);
+	(void) pspec;
+	(void) data;
+	view = NEMO_VIEW (object);
+	parent = gtk_widget_get_parent (GTK_WIDGET (view));
 
 	if (parent != NULL) {
-		g_assert (old_parent == NULL);
-
-		if (view->details->slot ==
-		    nemo_window_get_active_slot (view->details->window)) {
+		if (view->details->window != NULL &&
+		    view->details->slot ==
+		    nemo_window_get_active_slot (view->details->window) &&
+		    !view->details->active) {
 			view->details->active = TRUE;
-
 			nemo_view_merge_menus (view);
 			schedule_update_menus (view);
 		}
