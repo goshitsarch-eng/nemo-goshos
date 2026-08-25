@@ -136,6 +136,8 @@ build_menu_item_for_action (GtkUIManager *self, UiNode *node)
 	return item;
 }
 
+static void build_menu_add_node (GtkUIManager *self, UiNode *c, GtkWidget *shell, gboolean menubar);
+
 static GtkWidget *
 build_menu (GtkUIManager *self, UiNode *node, gboolean menubar)
 {
@@ -147,66 +149,42 @@ build_menu (GtkUIManager *self, UiNode *node, gboolean menubar)
 	else
 		shell = gtk_menu_new ();
 
-	for (l = node->children; l; l = l->next) {
-		UiNode *c = l->data;
-		GtkWidget *child;
-
-		if (c->type == GTK_UI_MANAGER_PLACEHOLDER) {
-			GtkWidget *sub = build_menu (self, c, menubar);
-			/* flatten placeholder children */
-			g_object_ref_sink (sub);
-			if (menubar) {
-				GtkWidget *ch = gtk_widget_get_first_child (sub);
-				while (ch) {
-					GtkWidget *next = gtk_widget_get_next_sibling (ch);
-					g_object_ref (ch);
-					gtk_container_remove (sub, ch);
-					gtk_box_append (GTK_BOX (shell), ch);
-					g_object_unref (ch);
-					ch = next;
-				}
-			} else if (GTK_IS_MENU (sub)) {
-				/* append items from submenu box */
-				GtkMenu *sm = GTK_MENU (sub);
-				GtkWidget *box = gtk_menu_get_box (sm);
-				GtkWidget *ch = gtk_widget_get_first_child (box);
-				while (ch) {
-					GtkWidget *next = gtk_widget_get_next_sibling (ch);
-					g_object_ref (ch);
-					gtk_box_remove (GTK_BOX (box), ch);
-					gtk_box_append (GTK_BOX (gtk_menu_get_box (GTK_MENU (shell))), ch);
-					g_object_unref (ch);
-					ch = next;
-				}
-			}
-			c->widget = shell;
-			g_object_unref (sub);
-			continue;
-		} else if (c->type == GTK_UI_MANAGER_MENU || (c->children && c->type != GTK_UI_MANAGER_SEPARATOR)) {
-			GtkWidget *submenu = build_menu (self, c, FALSE);
-			GtkAction *action = lookup_action (self, c->action ? c->action : c->name);
-			const gchar *label = action ? gtk_action_get_label (action) : c->name;
-			if (menubar) {
-				GtkWidget *btn = gtk_menu_button_new ();
-				GtkWidget *lab = gtk_label_new_with_mnemonic (label ? label : "");
-				gtk_widget_add_css_class (btn, "flat");
-				gtk_menu_button_set_child (GTK_MENU_BUTTON (btn), lab);
-				gtk_menu_button_set_popover (GTK_MENU_BUTTON (btn), submenu);
-				gtk_box_append (GTK_BOX (shell), btn);
-				c->widget = btn;
-				continue;
-			} else {
-				child = gtk_menu_item_new_with_mnemonic (label ? label : "");
-				gtk_menu_item_set_submenu (GTK_MENU_ITEM (child), submenu);
-			}
-		} else {
-			child = build_menu_item_for_action (self, c);
-		}
-		gtk_menu_shell_append (shell, child);
-		c->widget = child;
-	}
+	for (l = node->children; l; l = l->next)
+		build_menu_add_node (self, l->data, shell, menubar);
 	node->widget = shell;
 	return shell;
+}
+
+static void
+build_menu_add_node (GtkUIManager *self, UiNode *c, GtkWidget *shell, gboolean menubar)
+{
+	GtkWidget *child;
+
+	if (c->type == GTK_UI_MANAGER_ACCELERATOR)
+		return;
+	if (c->type == GTK_UI_MANAGER_PLACEHOLDER) {
+		GList *pl;
+		for (pl = c->children; pl; pl = pl->next)
+			build_menu_add_node (self, pl->data, shell, menubar);
+		c->widget = shell;
+		return;
+	}
+
+	if (c->type == GTK_UI_MANAGER_MENU ||
+	    (c->children && c->type != GTK_UI_MANAGER_SEPARATOR &&
+	     c->type != GTK_UI_MANAGER_MENUITEM && c->type != GTK_UI_MANAGER_TOOLITEM)) {
+		GtkWidget *submenu = build_menu (self, c, FALSE);
+		GtkAction *action = lookup_action (self, c->action ? c->action : c->name);
+		const gchar *label = action ? gtk_action_get_label (action) : c->name;
+		child = gtk_menu_item_new_with_mnemonic (label ? label : "");
+		gtk_menu_item_set_submenu (GTK_MENU_ITEM (child), submenu);
+		if (menubar)
+			gtk_widget_add_css_class (child, "flat");
+	} else {
+		child = build_menu_item_for_action (self, c);
+	}
+	gtk_menu_shell_append (shell, child);
+	c->widget = child;
 }
 
 static void
@@ -222,6 +200,9 @@ rebuild (GtkUIManager *self)
 		UiNode *n = l->data;
 		GtkWidget *w = NULL;
 		gchar *path;
+		if (n->type == GTK_UI_MANAGER_ACCELERATOR ||
+		    n->type == GTK_UI_MANAGER_TOOLBAR)
+			continue;
 		if (n->type == GTK_UI_MANAGER_MENUBAR || g_strcmp0 (n->name, "MenuBar") == 0)
 			w = build_menu (self, n, TRUE);
 		else

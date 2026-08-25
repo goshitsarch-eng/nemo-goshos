@@ -686,8 +686,9 @@ wrapped_show (GtkWidget *widget)
 	}
 
 	/* GTK4 gtk_widget_show / gtk_widget_real_show do not map toplevels.
-	 * Present after the GTK3 show hook so Adwaita chrome actually appears. */
-	if (GTK_IS_WINDOW (widget))
+	 * Present after the GTK3 show hook so Adwaita chrome actually appears.
+	 * GtkMenu is a GtkWindow but GTK3 show() on a menu does not pop it up. */
+	if (GTK_IS_WINDOW (widget) && !GTK_IS_MENU (widget))
 		verne_window_present_safe (GTK_WINDOW (widget));
 }
 
@@ -696,9 +697,8 @@ void
 verne_gtk_widget_show (GtkWidget *widget)
 {
 	g_return_if_fail (GTK_IS_WIDGET (widget));
-	/* GTK3 gtk_widget_show() on a GtkMenu does not pop it up. Mapping a
-	 * GtkPopover here realizes a native without gtk_popover_popup() and crashes. */
-	if (GTK_IS_POPOVER (widget))
+	/* GTK3 gtk_widget_show() on a GtkMenu does not pop it up. */
+	if (GTK_IS_POPOVER (widget) || GTK_IS_MENU (widget))
 		return;
 	gtk_widget_set_visible (widget, TRUE);
 	if (GTK_IS_WINDOW (widget))
