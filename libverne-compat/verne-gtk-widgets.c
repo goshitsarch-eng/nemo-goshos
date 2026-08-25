@@ -685,7 +685,8 @@ gtk_icon_theme_load_icon (GtkIconTheme *theme, const gchar *name, gint size, Gtk
 	GtkIconPaintable *p;
 	GdkPixbuf *pixbuf;
 	(void) flags;
-	p = gtk_icon_theme_lookup_icon (theme, name, NULL, size, 1, GTK_TEXT_DIR_NONE, 0);
+	p = gtk_icon_theme_lookup_icon (theme, name, NULL, size, 1, GTK_TEXT_DIR_NONE,
+					GTK_ICON_LOOKUP_FORCE_REGULAR);
 	pixbuf = gtk_icon_info_load_icon (p, error);
 	if (p)
 		g_object_unref (p);

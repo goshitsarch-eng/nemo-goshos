@@ -76,10 +76,12 @@ main (int argc, char *argv[])
 	verne_compat_init ();
 	adw_init ();
 	{
-		GdkDisplay *display = gdk_display_get_default ();
-		if (display) {
-			GtkIconTheme *theme = gtk_icon_theme_get_for_display (display);
-			gtk_icon_theme_set_theme_name (theme, "Adwaita");
+		GtkSettings *settings = gtk_settings_get_default ();
+		if (settings) {
+			g_object_set (settings,
+				      "gtk-theme-name", "Adwaita",
+				      "gtk-icon-theme-name", "Adwaita",
+				      NULL);
 		}
 	}
 

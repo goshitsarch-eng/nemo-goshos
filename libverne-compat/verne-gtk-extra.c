@@ -2,6 +2,8 @@
 #include "verne-gtk-compat.h"
 #include <atk/atk.h>
 #include <gsk/gsk.h>
+#include <gsk/gskcairorenderer.h>
+#include <gdk/deprecated/gdkpixbuf.h>
 #include <gdk-pixbuf/gdk-pixbuf.h>
 #include <stdarg.h>
 #include <string.h>
@@ -866,13 +868,15 @@ gpointer
 gtk_icon_theme_lookup_icon_for_scale (GtkIconTheme *theme, const gchar *name, gint size, gint scale, GtkIconLookupFlags flags)
 {
 	(void) flags;
-	return gtk_icon_theme_lookup_icon (theme, name, NULL, size, scale, GTK_TEXT_DIR_NONE, 0);
+	return gtk_icon_theme_lookup_icon (theme, name, NULL, size, scale, GTK_TEXT_DIR_NONE,
+					   GTK_ICON_LOOKUP_FORCE_REGULAR);
 }
 gpointer
 gtk_icon_theme_lookup_by_gicon_for_scale (GtkIconTheme *theme, GIcon *icon, gint size, gint scale, GtkIconLookupFlags flags)
 {
 	(void) flags;
-	return gtk_icon_theme_lookup_by_gicon (theme, icon, size, scale, GTK_TEXT_DIR_NONE, 0);
+	return gtk_icon_theme_lookup_by_gicon (theme, icon, size, scale, GTK_TEXT_DIR_NONE,
+					       GTK_ICON_LOOKUP_FORCE_REGULAR);
 }
 
 static GQuark
@@ -920,18 +924,32 @@ verne_pixbuf_from_paintable (GdkPaintable *paintable, int size, GError **error)
 	if (h <= 0)
 		h = size > 0 ? size : 48;
 
-	surface = cairo_image_surface_create (CAIRO_FORMAT_ARGB32, w, h);
-	cr = cairo_create (surface);
 	snapshot = gtk_snapshot_new ();
 	gdk_paintable_snapshot (paintable, snapshot, w, h);
 	node = gtk_snapshot_free_to_node (snapshot);
 	if (node) {
-		gsk_render_node_draw (node, cr);
+		GskRenderer *renderer = gsk_cairo_renderer_new ();
+		GdkDisplay *display = gdk_display_get_default ();
+		if (display && gsk_renderer_realize_for_display (renderer, display, NULL)) {
+			GdkTexture *texture = gsk_renderer_render_texture (renderer, node,
+									   &GRAPHENE_RECT_INIT (0, 0, w, h));
+			gsk_renderer_unrealize (renderer);
+			if (texture) {
+				pixbuf = gdk_pixbuf_get_from_texture (texture);
+				g_object_unref (texture);
+			}
+		}
+		g_object_unref (renderer);
+		if (pixbuf == NULL) {
+			surface = cairo_image_surface_create (CAIRO_FORMAT_ARGB32, w, h);
+			cr = cairo_create (surface);
+			gsk_render_node_draw (node, cr);
+			cairo_destroy (cr);
+			pixbuf = gdk_pixbuf_get_from_surface (surface, 0, 0, w, h);
+			cairo_surface_destroy (surface);
+		}
 		gsk_render_node_unref (node);
 	}
-	cairo_destroy (cr);
-	pixbuf = gdk_pixbuf_get_from_surface (surface, 0, 0, w, h);
-	cairo_surface_destroy (surface);
 	return pixbuf;
 }
 
