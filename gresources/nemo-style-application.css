@@ -2,32 +2,65 @@
 
 .verne-window,
 .nemo-window {
-	background-color: @window_bg_color;
-	color: @window_fg_color;
+	background-color: #fafafa;
+	color: #2e3436;
 }
 
+.verne-window headerbar,
+.nemo-window headerbar,
 .verne-window toolbar,
 .nemo-window toolbar,
 .verne-window menubar,
 .nemo-window menubar,
 .verne-window .toolbar,
-.nemo-window .toolbar {
-	background-color: @headerbar_bg_color;
-}
-
+.nemo-window .toolbar,
+.verne-window statusbar,
+.nemo-window statusbar,
+.verne-window eventbox,
+.nemo-window eventbox,
 .verne-window searchbar,
 .nemo-window searchbar,
 .verne-window .search-bar,
-.nemo-window .search-bar,
+.nemo-window .search-bar {
+	background-color: #ebebeb;
+	color: #2e3436;
+}
+
 .verne-window notebook,
-.nemo-window notebook,
-.verne-window statusbar,
-.nemo-window statusbar {
-	background-color: @window_bg_color;
+.nemo-window notebook {
+	background-color: #fafafa;
+}
+
+.verne-window .sidebar,
+.nemo-window .sidebar,
+.verne-window .places-sidebar,
+.nemo-window .places-sidebar,
+.verne-window .nemo-places-sidebar,
+.nemo-window .nemo-places-sidebar {
+	background-color: #f6f5f4;
+	color: #2e3436;
+}
+
+.verne-window layout.view,
+.nemo-window layout.view,
+.verne-window .nemo-canvas-container,
+.nemo-window .nemo-canvas-container,
+.verne-window treeview,
+.nemo-window treeview {
+	background-color: #ffffff;
+	color: #2e3436;
 }
 
 .nemo-window.nemo-desktop-window notebook,
-.nemo-window.nemo-desktop-window paned {
+.nemo-window.nemo-desktop-window paned,
+.nemo-window.nemo-desktop-window layout,
+.nemo-window.nemo-desktop-window layout.view,
+.nemo-window.nemo-desktop-window .view,
+window.verne-desktop notebook,
+window.verne-desktop paned,
+window.verne-desktop layout,
+window.verne-desktop layout.view,
+window.verne-desktop .view {
 	background-color: transparent;
 }
 

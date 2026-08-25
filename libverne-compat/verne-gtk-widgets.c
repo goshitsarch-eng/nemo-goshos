@@ -11,9 +11,26 @@
 G_DEFINE_TYPE (GtkContainer, gtk_container, GTK_TYPE_WIDGET)
 
 static void
+verne_snapshot_css_background (GtkWidget *widget, GtkSnapshot *snapshot)
+{
+	int width;
+	int height;
+
+	width = gtk_widget_get_width (widget);
+	height = gtk_widget_get_height (widget);
+	if (width <= 0 || height <= 0)
+		return;
+	gtk_snapshot_render_background (snapshot,
+					gtk_widget_get_style_context (widget),
+					0, 0, width, height);
+}
+
+static void
 gtk_container_snapshot (GtkWidget *widget, GtkSnapshot *snapshot)
 {
 	GtkWidget *child;
+
+	verne_snapshot_css_background (widget, snapshot);
 	for (child = gtk_widget_get_first_child (widget); child; child = gtk_widget_get_next_sibling (child)) {
 		if (gtk_widget_get_width (child) <= 0 || gtk_widget_get_height (child) <= 0)
 			continue;
@@ -123,6 +140,8 @@ static void
 gtk_bin_snapshot (GtkWidget *widget, GtkSnapshot *snapshot)
 {
 	GtkBin *bin = GTK_BIN (widget);
+
+	verne_snapshot_css_background (widget, snapshot);
 	if (bin->child)
 		gtk_widget_snapshot_child (widget, bin->child, snapshot);
 }
@@ -154,6 +173,7 @@ static void
 gtk_bin_class_init (GtkBinClass *klass)
 {
 	G_OBJECT_CLASS (klass)->dispose = gtk_bin_dispose;
+	GTK_WIDGET_CLASS (klass)->snapshot = gtk_bin_snapshot;
 	GTK_CONTAINER_CLASS (klass)->add = gtk_bin_add;
 	GTK_CONTAINER_CLASS (klass)->remove = gtk_bin_remove;
 }
@@ -180,8 +200,16 @@ gtk_bin_get_child (GtkBin *bin)
 typedef struct _GtkEventBoxClass { GtkBinClass parent_class; } GtkEventBoxClass;
 struct _GtkEventBox { GtkBin parent; };
 G_DEFINE_TYPE (GtkEventBox, gtk_event_box, GTK_TYPE_BIN)
-static void gtk_event_box_class_init (GtkEventBoxClass *c) { (void) c; }
-static void gtk_event_box_init (GtkEventBox *b) { (void) b; }
+static void
+gtk_event_box_class_init (GtkEventBoxClass *c)
+{
+	gtk_widget_class_set_css_name (GTK_WIDGET_CLASS (c), "eventbox");
+}
+static void
+gtk_event_box_init (GtkEventBox *b)
+{
+	gtk_widget_add_css_class (GTK_WIDGET (b), "eventbox");
+}
 GtkWidget *gtk_event_box_new (void) { return g_object_new (GTK_TYPE_EVENT_BOX, NULL); }
 void gtk_event_box_set_visible_window (GtkEventBox *box, gboolean visible) { (void) box; (void) visible; }
 void gtk_event_box_set_above_child (GtkEventBox *box, gboolean above) { (void) box; (void) above; }
@@ -315,6 +343,8 @@ static void
 gtk_layout_snapshot (GtkWidget *widget, GtkSnapshot *snapshot)
 {
 	GtkWidget *child;
+
+	verne_snapshot_css_background (widget, snapshot);
 	for (child = gtk_widget_get_first_child (widget); child; child = gtk_widget_get_next_sibling (child)) {
 		if (gtk_widget_get_width (child) <= 0 || gtk_widget_get_height (child) <= 0)
 			continue;
@@ -447,7 +477,11 @@ GdkSurface *gtk_layout_get_bin_window (GtkLayout *layout) {
 typedef struct _GtkStatusbarClass { GtkBoxClass parent_class; } GtkStatusbarClass;
 struct _GtkStatusbar { GtkBox parent; GtkLabel *label; guint next_id; GHashTable *stacks; };
 G_DEFINE_TYPE (GtkStatusbar, gtk_statusbar, GTK_TYPE_BOX)
-static void gtk_statusbar_class_init (GtkStatusbarClass *c) { (void) c; }
+static void
+gtk_statusbar_class_init (GtkStatusbarClass *c)
+{
+	gtk_widget_class_set_css_name (GTK_WIDGET_CLASS (c), "statusbar");
+}
 static void gtk_statusbar_init (GtkStatusbar *bar) {
 	bar->label = GTK_LABEL (gtk_label_new (NULL));
 	gtk_widget_set_hexpand (GTK_WIDGET (bar->label), TRUE);
@@ -455,6 +489,7 @@ static void gtk_statusbar_init (GtkStatusbar *bar) {
 	gtk_box_append (GTK_BOX (bar), GTK_WIDGET (bar->label));
 	bar->next_id = 1;
 	bar->stacks = g_hash_table_new_full (g_direct_hash, g_direct_equal, NULL, (GDestroyNotify) g_ptr_array_unref);
+	gtk_widget_add_css_class (GTK_WIDGET (bar), "statusbar");
 }
 GtkWidget *gtk_statusbar_new (void) { return g_object_new (GTK_TYPE_STATUSBAR, NULL); }
 guint gtk_statusbar_get_context_id (GtkStatusbar *bar, const gchar *context_description) {
@@ -496,7 +531,11 @@ GtkWidget *gtk_statusbar_get_message_area (GtkStatusbar *bar) { return GTK_WIDGE
 typedef struct _GtkToolbarClass { GtkBoxClass parent_class; } GtkToolbarClass;
 struct _GtkToolbar { GtkBox parent; };
 G_DEFINE_TYPE (GtkToolbar, gtk_toolbar, GTK_TYPE_BOX)
-static void gtk_toolbar_class_init (GtkToolbarClass *c) { (void) c; }
+static void
+gtk_toolbar_class_init (GtkToolbarClass *c)
+{
+	gtk_widget_class_set_css_name (GTK_WIDGET_CLASS (c), "toolbar");
+}
 static void gtk_toolbar_init (GtkToolbar *t) {
 	gtk_orientable_set_orientation (GTK_ORIENTABLE (t), GTK_ORIENTATION_HORIZONTAL);
 	gtk_widget_add_css_class (GTK_WIDGET (t), "toolbar");
@@ -904,7 +943,11 @@ void gtk_menu_shell_insert (gpointer menu_shell, GtkWidget *child, gint position
 typedef struct _GtkMenuBarClass { GtkBoxClass parent_class; } GtkMenuBarClass;
 struct _GtkMenuBar { GtkBox parent; };
 G_DEFINE_TYPE (GtkMenuBar, gtk_menu_bar, GTK_TYPE_BOX)
-static void gtk_menu_bar_class_init (GtkMenuBarClass *c) { (void) c; }
+static void
+gtk_menu_bar_class_init (GtkMenuBarClass *c)
+{
+	gtk_widget_class_set_css_name (GTK_WIDGET_CLASS (c), "menubar");
+}
 static void gtk_menu_bar_init (GtkMenuBar *bar) {
 	gtk_orientable_set_orientation (GTK_ORIENTABLE (bar), GTK_ORIENTATION_HORIZONTAL);
 	gtk_widget_add_css_class (GTK_WIDGET (bar), "menubar");

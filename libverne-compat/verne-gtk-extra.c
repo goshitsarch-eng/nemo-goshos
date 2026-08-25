@@ -232,7 +232,9 @@ gtk_window_set_type_hint (GtkWindow *window, GdkWindowTypeHint hint)
 		}
 		if (wallpaper == NULL) {
 			const char *fallbacks[] = {
+				"/usr/share/backgrounds/xfce/xfce-blue.jpg",
 				"/usr/share/backgrounds/xfce/xfce-shapes.svg",
+				"/usr/share/backgrounds/xfce/xfce-x.svg",
 				"/usr/share/backgrounds/gnome/adwaita-l.jpg",
 				"/usr/share/backgrounds/gnome/adwaita-l.webp",
 				NULL
@@ -251,9 +253,10 @@ gtk_window_set_type_hint (GtkWindow *window, GdkWindowTypeHint hint)
 			gchar *escaped = g_uri_escape_string (wallpaper, "/:", TRUE);
 			css = g_strdup_printf (
 				"window.verne-desktop, window.nemo-desktop-window {"
-				"  background-color: transparent;"
+				"  background-color: #2e3436;"
 				"  background-image: url(\"file://%s\");"
 				"  background-size: cover;"
+				"  background-repeat: no-repeat;"
 				"  background-position: center;"
 				"}", escaped);
 			g_free (escaped);
@@ -261,7 +264,7 @@ gtk_window_set_type_hint (GtkWindow *window, GdkWindowTypeHint hint)
 		} else {
 			css = g_strdup (
 				"window.verne-desktop, window.nemo-desktop-window {"
-				"  background-color: transparent;"
+				"  background-color: #2e3436;"
 				"}");
 		}
 		gtk_css_provider_load_from_string (desktop_css, css);
@@ -1346,6 +1349,9 @@ gtk_widget_override_background_color (GtkWidget *widget, GtkStateFlags state, co
 	gchar *css;
 	(void) state;
 	if (widget == NULL || color == NULL)
+		return;
+	/* Fully transparent overrides hide wallpaper CSS on desktop windows. */
+	if (color->alpha <= 0.01)
 		return;
 	css = g_strdup_printf ("* { background-color: rgba(%d,%d,%d,%g); }",
 			       (int) (color->red * 255.0),

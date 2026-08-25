@@ -305,6 +305,112 @@ process_system_theme (GtkSettings *gtk_settings)
 }
 
 static void
+register_source_tree_icon_theme (const gchar *src_icons)
+{
+    gchar *hicolor_src;
+    gchar *overlay;
+    gchar *index_path;
+    GDir *context_dir;
+    const gchar *context;
+    GString *index;
+    GString *directories;
+    gboolean first_dir = TRUE;
+
+    hicolor_src = g_build_filename (src_icons, "hicolor", NULL);
+    if (!g_file_test (hicolor_src, G_FILE_TEST_IS_DIR)) {
+        g_free (hicolor_src);
+        return;
+    }
+
+    overlay = g_build_filename (g_get_user_cache_dir (), "verne-icon-theme", NULL);
+    g_mkdir_with_parents (overlay, 0755);
+
+    directories = g_string_new (NULL);
+    context_dir = g_dir_open (hicolor_src, 0, NULL);
+    while (context_dir && (context = g_dir_read_name (context_dir)) != NULL) {
+        gchar *context_path = g_build_filename (hicolor_src, context, NULL);
+        GDir *size_dir;
+        const gchar *size;
+
+        if (!g_file_test (context_path, G_FILE_TEST_IS_DIR)) {
+            g_free (context_path);
+            continue;
+        }
+        size_dir = g_dir_open (context_path, 0, NULL);
+        while (size_dir && (size = g_dir_read_name (size_dir)) != NULL) {
+            gchar *size_path = g_build_filename (context_path, size, NULL);
+            GDir *file_dir;
+            const gchar *file;
+            gchar *dest_dir;
+
+            if (!g_file_test (size_path, G_FILE_TEST_IS_DIR)) {
+                g_free (size_path);
+                continue;
+            }
+            dest_dir = g_build_filename (overlay, "hicolor", size, context, NULL);
+            g_mkdir_with_parents (dest_dir, 0755);
+            file_dir = g_dir_open (size_path, 0, NULL);
+            while (file_dir && (file = g_dir_read_name (file_dir)) != NULL) {
+                gchar *src = g_build_filename (size_path, file, NULL);
+                gchar *dest = g_build_filename (dest_dir, file, NULL);
+                g_unlink (dest);
+                symlink (src, dest);
+                g_free (src);
+                g_free (dest);
+            }
+            if (file_dir)
+                g_dir_close (file_dir);
+            if (first_dir)
+                first_dir = FALSE;
+            else
+                g_string_append_c (directories, ',');
+            g_string_append_printf (directories, "%s/%s", size, context);
+            g_free (dest_dir);
+            g_free (size_path);
+        }
+        if (size_dir)
+            g_dir_close (size_dir);
+        g_free (context_path);
+    }
+    if (context_dir)
+        g_dir_close (context_dir);
+
+    index = g_string_new ("[Icon Theme]\nName=Hicolor\nComment=Verne source icons\nDirectories=");
+    g_string_append (index, directories->str);
+    g_string_append_c (index, '\n');
+    {
+        gchar **dirs = g_strsplit (directories->str, ",", -1);
+        int i;
+        for (i = 0; dirs && dirs[i]; i++) {
+            gchar **parts = g_strsplit (dirs[i], "/", 2);
+            const gchar *size = parts && parts[0] ? parts[0] : "scalable";
+            const gchar *ctx = parts && parts[1] ? parts[1] : "actions";
+            gboolean scalable = g_strcmp0 (size, "scalable") == 0;
+            g_string_append_printf (index,
+                                    "\n[%s]\nSize=%s\nContext=%s\nType=%s\n",
+                                    dirs[i],
+                                    scalable ? "16" : size,
+                                    ctx,
+                                    scalable ? "Scalable" : "Fixed");
+            if (scalable)
+                g_string_append (index, "MinSize=8\nMaxSize=256\n");
+            g_strfreev (parts);
+        }
+        g_strfreev (dirs);
+    }
+
+    index_path = g_build_filename (overlay, "hicolor", "index.theme", NULL);
+    g_file_set_contents (index_path, index->str, -1, NULL);
+    gtk_icon_theme_add_search_path (gtk_icon_theme_get_default (), overlay);
+
+    g_string_free (index, TRUE);
+    g_string_free (directories, TRUE);
+    g_free (index_path);
+    g_free (overlay);
+    g_free (hicolor_src);
+}
+
+static void
 init_icons_and_styles (void)
 {
     /* initialize search path for custom icons */
@@ -320,8 +426,10 @@ init_icons_and_styles (void)
             builddir = g_path_get_dirname (bindir);
             root = g_path_get_dirname (builddir);
             icons = g_build_filename (root, "data", "icons", NULL);
-            if (g_file_test (icons, G_FILE_TEST_IS_DIR))
+            if (g_file_test (icons, G_FILE_TEST_IS_DIR)) {
                 gtk_icon_theme_append_search_path (gtk_icon_theme_get_default (), icons);
+                register_source_tree_icon_theme (icons);
+            }
             g_free (bindir);
             g_free (builddir);
             g_free (root);
