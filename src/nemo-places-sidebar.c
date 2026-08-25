@@ -4209,7 +4209,7 @@ nemo_places_sidebar_init (NemoPlacesSidebar *sidebar)
 	/* icon renderer */
 	cell = gtk_cell_renderer_pixbuf_new ();
     g_object_set (cell,
-                  "follow-state", TRUE,
+                  "icon-size", GTK_ICON_SIZE_NORMAL,
                   NULL);
 	gtk_tree_view_column_pack_start (primary_column, cell, FALSE);
 	gtk_tree_view_column_set_attributes (primary_column, cell,
@@ -4262,7 +4262,6 @@ nemo_places_sidebar_init (NemoPlacesSidebar *sidebar)
 	gtk_tree_view_column_set_attributes (sidebar->eject_column, cell,
 					     "visible", PLACES_SIDEBAR_COLUMN_EJECT,
 					     "icon-name", PLACES_SIDEBAR_COLUMN_EJECT_ICON,
-                         "stock-size", PLACES_SIDEBAR_COLUMN_EJECT_ICON_SIZE,
                          NULL);
 
     /* eject icon trailing padding (adjusts to always avoid overlay-scrollbars) */

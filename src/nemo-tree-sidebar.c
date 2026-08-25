@@ -1549,7 +1549,7 @@ create_tree (FMTreeView *view)
                                              NULL, NULL);
 
     g_object_set (cell,
-                  "follow-state", TRUE,
+                  "icon-size", GTK_ICON_SIZE_NORMAL,
                   NULL);
 
 	cell = gtk_cell_renderer_text_new ();

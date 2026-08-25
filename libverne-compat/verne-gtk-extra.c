@@ -837,8 +837,37 @@ void gtk_tool_item_set_expand (gpointer item, gboolean expand) {
 	gtk_widget_set_hexpand (GTK_WIDGET (item), expand);
 }
 
-void gtk_activatable_set_related_action (gpointer activatable, GtkAction *action) {
+void
+gtk_activatable_set_related_action (gpointer activatable, GtkAction *action)
+{
+	const gchar *icon;
+	GtkWidget *image;
+
+	if (activatable == NULL)
+		return;
 	g_object_set_data (G_OBJECT (activatable), "verne-action", action);
+	if (action == NULL || !GTK_IS_WIDGET (activatable))
+		return;
+
+	if (GTK_IS_BUTTON (activatable)) {
+		icon = gtk_action_get_icon_name (action);
+		if (icon == NULL || icon[0] == '\0')
+			icon = gtk_action_get_stock_id (action);
+		if (icon && icon[0] != '\0') {
+			image = gtk_image_new_from_icon_name (icon, GTK_ICON_SIZE_LARGE_TOOLBAR);
+			gtk_button_set_child (GTK_BUTTON (activatable), image);
+		}
+		if (gtk_action_get_tooltip (action))
+			gtk_widget_set_tooltip_text (GTK_WIDGET (activatable), gtk_action_get_tooltip (action));
+		gtk_widget_set_sensitive (GTK_WIDGET (activatable), gtk_action_get_sensitive (action));
+		if (g_object_get_data (G_OBJECT (activatable), "verne-action-clicked") == NULL) {
+			g_signal_connect_swapped (activatable, "clicked", G_CALLBACK (gtk_action_activate), action);
+			g_object_set_data (G_OBJECT (activatable), "verne-action-clicked", GINT_TO_POINTER (1));
+		}
+		if (GTK_IS_TOGGLE_BUTTON (activatable) && GTK_IS_TOGGLE_ACTION (action))
+			gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (activatable),
+						      gtk_toggle_action_get_active (GTK_TOGGLE_ACTION (action)));
+	}
 }
 GtkAction *gtk_activatable_get_related_action (gpointer activatable) {
 	return g_object_get_data (G_OBJECT (activatable), "verne-action");

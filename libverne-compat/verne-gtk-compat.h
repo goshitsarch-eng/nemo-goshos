@@ -396,7 +396,7 @@ GtkWidget *gtk_button_get_image (GtkButton *button);
 GtkWidget *gtk_button_new_from_stock (const gchar *stock_id);
 
 #ifndef GTK_ICON_SIZE_MENU
-#define GTK_ICON_SIZE_MENU GTK_ICON_SIZE_INHERIT
+#define GTK_ICON_SIZE_MENU GTK_ICON_SIZE_NORMAL
 #define GTK_ICON_SIZE_BUTTON GTK_ICON_SIZE_NORMAL
 #define GTK_ICON_SIZE_SMALL_TOOLBAR GTK_ICON_SIZE_NORMAL
 #define GTK_ICON_SIZE_LARGE_TOOLBAR GTK_ICON_SIZE_LARGE
