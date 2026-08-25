@@ -805,7 +805,7 @@ setup_search_action (NemoWindowPane *pane)
 	GtkAction *action;
 
 	action = gtk_action_group_get_action (group, NEMO_ACTION_SEARCH);
-	g_signal_connect (action, "activate",
+	g_signal_connect (action, "toggled",
 			  G_CALLBACK (action_show_hide_search_callback), pane);
 }
 

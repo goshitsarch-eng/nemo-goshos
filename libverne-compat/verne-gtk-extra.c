@@ -199,21 +199,76 @@ gtk_window_set_type_hint (GtkWindow *window, GdkWindowTypeHint hint)
 	g_object_set_data (G_OBJECT (window), "verne-type-hint", GINT_TO_POINTER ((int) hint));
 	if (hint == GDK_WINDOW_TYPE_HINT_DESKTOP) {
 		static GtkCssProvider *desktop_css;
+		gchar *wallpaper = NULL;
+		gchar *css;
 		gtk_window_set_decorated (window, FALSE);
 		gtk_window_set_deletable (window, FALSE);
 		gtk_window_set_skip_taskbar_hint (window, TRUE);
 		gtk_window_set_skip_pager_hint (window, TRUE);
 		gtk_widget_add_css_class (GTK_WIDGET (window), "verne-desktop");
-		if (desktop_css == NULL) {
+		{
+			const char *schemas[] = {
+				"org.cinnamon.desktop.background",
+				"org.gnome.desktop.background",
+				NULL
+			};
+			int i;
+			for (i = 0; schemas[i]; i++) {
+				GSettingsSchema *schema = g_settings_schema_source_lookup (
+					g_settings_schema_source_get_default (), schemas[i], TRUE);
+				if (schema && g_settings_schema_has_key (schema, "picture-uri")) {
+					GSettings *settings = g_settings_new (schemas[i]);
+					gchar *uri = g_settings_get_string (settings, "picture-uri");
+					if (uri && g_str_has_prefix (uri, "file://"))
+						wallpaper = g_uri_unescape_string (uri + 7, NULL);
+					g_free (uri);
+					g_object_unref (settings);
+				}
+				if (schema)
+					g_settings_schema_unref (schema);
+				if (wallpaper)
+					break;
+			}
+		}
+		if (wallpaper == NULL) {
+			const char *fallbacks[] = {
+				"/usr/share/backgrounds/xfce/xfce-shapes.svg",
+				"/usr/share/backgrounds/gnome/adwaita-l.jpg",
+				"/usr/share/backgrounds/gnome/adwaita-l.webp",
+				NULL
+			};
+			int i;
+			for (i = 0; fallbacks[i]; i++) {
+				if (g_file_test (fallbacks[i], G_FILE_TEST_EXISTS)) {
+					wallpaper = g_strdup (fallbacks[i]);
+					break;
+				}
+			}
+		}
+		if (desktop_css == NULL)
 			desktop_css = gtk_css_provider_new ();
-			gtk_css_provider_load_from_string (desktop_css,
+		if (wallpaper) {
+			gchar *escaped = g_uri_escape_string (wallpaper, "/:", TRUE);
+			css = g_strdup_printf (
+				"window.verne-desktop, window.nemo-desktop-window {"
+				"  background-color: transparent;"
+				"  background-image: url(\"file://%s\");"
+				"  background-size: cover;"
+				"  background-position: center;"
+				"}", escaped);
+			g_free (escaped);
+			g_free (wallpaper);
+		} else {
+			css = g_strdup (
 				"window.verne-desktop, window.nemo-desktop-window {"
 				"  background-color: transparent;"
 				"}");
-			gtk_style_context_add_provider_for_display (gdk_display_get_default (),
-								    GTK_STYLE_PROVIDER (desktop_css),
-								    GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
 		}
+		gtk_css_provider_load_from_string (desktop_css, css);
+		g_free (css);
+		gtk_style_context_add_provider_for_display (gdk_display_get_default (),
+							    GTK_STYLE_PROVIDER (desktop_css),
+							    GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
 	}
 	verne_window_ensure_realize_hook (window);
 }
@@ -927,6 +982,15 @@ void gtk_tool_item_set_expand (gpointer item, gboolean expand) {
 	gtk_widget_set_hexpand (GTK_WIDGET (item), expand);
 }
 
+static void
+on_related_action_active (GObject *action, GParamSpec *pspec, gpointer activatable)
+{
+	(void) pspec;
+	if (GTK_IS_TOGGLE_BUTTON (activatable) && GTK_IS_TOGGLE_ACTION (action))
+		gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (activatable),
+					      gtk_toggle_action_get_active (GTK_TOGGLE_ACTION (action)));
+}
+
 void
 gtk_activatable_set_related_action (gpointer activatable, GtkAction *action)
 {
@@ -954,9 +1018,16 @@ gtk_activatable_set_related_action (gpointer activatable, GtkAction *action)
 			g_signal_connect_swapped (activatable, "clicked", G_CALLBACK (gtk_action_activate), action);
 			g_object_set_data (G_OBJECT (activatable), "verne-action-clicked", GINT_TO_POINTER (1));
 		}
-		if (GTK_IS_TOGGLE_BUTTON (activatable) && GTK_IS_TOGGLE_ACTION (action))
+		if (GTK_IS_TOGGLE_BUTTON (activatable) && GTK_IS_TOGGLE_ACTION (action)) {
 			gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (activatable),
 						      gtk_toggle_action_get_active (GTK_TOGGLE_ACTION (action)));
+			if (g_object_get_data (G_OBJECT (activatable), "verne-action-active") == NULL) {
+				g_signal_connect_object (action, "notify::active",
+							 G_CALLBACK (on_related_action_active),
+							 activatable, 0);
+				g_object_set_data (G_OBJECT (activatable), "verne-action-active", GINT_TO_POINTER (1));
+			}
+		}
 	}
 }
 GtkAction *gtk_activatable_get_related_action (gpointer activatable) {

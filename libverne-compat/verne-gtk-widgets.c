@@ -1,5 +1,6 @@
 #include "config.h"
 #include "verne-gtk-compat.h"
+#include <graphene.h>
 #include <gdk-pixbuf/gdk-pixbuf.h>
 #include <graphene.h>
 
@@ -496,6 +497,7 @@ static void gtk_toolbar_class_init (GtkToolbarClass *c) { (void) c; }
 static void gtk_toolbar_init (GtkToolbar *t) {
 	gtk_orientable_set_orientation (GTK_ORIENTABLE (t), GTK_ORIENTATION_HORIZONTAL);
 	gtk_widget_add_css_class (GTK_WIDGET (t), "toolbar");
+	gtk_widget_set_hexpand (GTK_WIDGET (t), TRUE);
 }
 GtkWidget *gtk_toolbar_new (void) { return g_object_new (GTK_TYPE_TOOLBAR, NULL); }
 void gtk_toolbar_insert (GtkToolbar *toolbar, GtkWidget *item, gint pos) {
@@ -520,46 +522,150 @@ static void gtk_menu_init (GtkMenu *menu) {
 	gtk_popover_set_autohide (GTK_POPOVER (menu), TRUE);
 }
 GtkWidget *gtk_menu_new (void) { return g_object_new (GTK_TYPE_MENU, NULL); }
+
+static GtkWidget *
+verne_widget_with_native (GtkWidget *widget)
+{
+	while (widget != NULL) {
+		if (gtk_widget_get_native (widget) != NULL)
+			return widget;
+		widget = gtk_widget_get_parent (widget);
+	}
+	return NULL;
+}
+
 static void
 verne_ensure_menu_parent (GtkMenu *menu, GtkWidget *fallback)
 {
-	GtkWidget *parent = gtk_widget_get_parent (GTK_WIDGET (menu));
 	GtkWidget *attach = menu->attach ? menu->attach : fallback;
-	if (parent == NULL && attach != NULL)
-		gtk_widget_set_parent (GTK_WIDGET (menu), attach);
+	GtkWidget *parent;
+	GtkWidget *w = GTK_WIDGET (menu);
+
+	attach = verne_widget_with_native (attach);
+	if (attach == NULL)
+		return;
+	parent = gtk_widget_get_parent (w);
+	if (parent == attach)
+		return;
+	if (parent != NULL)
+		gtk_widget_unparent (w);
+	gtk_widget_set_parent (w, attach);
+	menu->attach = attach;
+}
+
+static void
+verne_popover_point_at_pointer (GtkPopover *popover, GtkWidget *parent)
+{
+	GtkNative *native;
+	GdkSurface *surface;
+	GdkSeat *seat;
+	GdkDevice *ptr;
+	double sx = 0, sy = 0;
+	graphene_point_t np, wp;
+	GdkRectangle rect;
+
+	if (parent == NULL)
+		return;
+	native = gtk_widget_get_native (parent);
+	surface = native ? gtk_native_get_surface (native) : NULL;
+	seat = gdk_display_get_default_seat (gtk_widget_get_display (parent));
+	ptr = seat ? gdk_seat_get_pointer (seat) : NULL;
+	if (surface && ptr)
+		gdk_surface_get_device_position (surface, ptr, &sx, &sy, NULL);
+	np.x = (float) sx;
+	np.y = (float) sy;
+	if (GTK_IS_WIDGET (native) &&
+	    gtk_widget_compute_point (GTK_WIDGET (native), parent, &np, &wp)) {
+		rect.x = (int) wp.x;
+		rect.y = (int) wp.y;
+	} else {
+		rect.x = (int) sx;
+		rect.y = (int) sy;
+	}
+	rect.width = 1;
+	rect.height = 1;
+	gtk_popover_set_pointing_to (popover, &rect);
+}
+
+typedef struct {
+	GtkMenu *menu;
+	GdkRectangle rect;
+	gboolean has_rect;
+} VernePopupData;
+
+static gboolean
+verne_menu_enable_autohide (gpointer data)
+{
+	GtkWidget *w = data;
+	if (GTK_IS_POPOVER (w))
+		gtk_popover_set_autohide (GTK_POPOVER (w), TRUE);
+	g_object_unref (w);
+	return G_SOURCE_REMOVE;
+}
+
+static gboolean
+verne_menu_popup_idle (gpointer data)
+{
+	VernePopupData *p = data;
+	GtkWidget *w = GTK_WIDGET (p->menu);
+
+	if (GTK_IS_POPOVER (p->menu) && gtk_widget_get_parent (w) != NULL) {
+		if (p->has_rect)
+			gtk_popover_set_pointing_to (GTK_POPOVER (p->menu), &p->rect);
+		else
+			verne_popover_point_at_pointer (GTK_POPOVER (p->menu), gtk_widget_get_parent (w));
+		gtk_popover_set_autohide (GTK_POPOVER (p->menu), FALSE);
+		gtk_popover_set_has_arrow (GTK_POPOVER (p->menu), FALSE);
+		gtk_popover_popup (GTK_POPOVER (p->menu));
+		g_timeout_add (250, verne_menu_enable_autohide, g_object_ref (w));
+	}
+	g_object_unref (p->menu);
+	g_free (p);
+	return G_SOURCE_REMOVE;
+}
+
+static void
+verne_menu_popup_now (GtkMenu *menu, const GdkRectangle *rect)
+{
+	VernePopupData *p;
+
+	if (menu == NULL || gtk_widget_get_parent (GTK_WIDGET (menu)) == NULL)
+		return;
+	p = g_new0 (VernePopupData, 1);
+	p->menu = g_object_ref (menu);
+	if (rect) {
+		p->rect = *rect;
+		p->has_rect = TRUE;
+	}
+	g_idle_add (verne_menu_popup_idle, p);
 }
 
 void gtk_menu_popup_at_pointer (GtkMenu *menu, const GdkEvent *trigger) {
 	(void) trigger;
 	verne_ensure_menu_parent (menu, NULL);
-	if (gtk_widget_get_parent (GTK_WIDGET (menu)) != NULL)
-		gtk_popover_popup (GTK_POPOVER (menu));
+	verne_menu_popup_now (menu, NULL);
 }
 void gtk_menu_popup_at_rect (GtkMenu *menu, GdkSurface *rect_window, const GdkRectangle *rect,
 			     GdkGravity rect_anchor, GdkGravity menu_anchor, const GdkEvent *trigger) {
-	(void) rect_window; (void) rect; (void) rect_anchor; (void) menu_anchor; (void) trigger;
+	(void) rect_window; (void) rect_anchor; (void) menu_anchor; (void) trigger;
 	verne_ensure_menu_parent (menu, NULL);
-	if (gtk_widget_get_parent (GTK_WIDGET (menu)) != NULL)
-		gtk_popover_popup (GTK_POPOVER (menu));
+	verne_menu_popup_now (menu, rect);
 }
 void gtk_menu_popup_at_widget (GtkMenu *menu, GtkWidget *widget, GdkGravity widget_anchor, GdkGravity menu_anchor, const GdkEvent *trigger) {
 	(void) widget_anchor; (void) menu_anchor; (void) trigger;
 	verne_ensure_menu_parent (menu, widget);
-	if (gtk_widget_get_parent (GTK_WIDGET (menu)) != NULL)
-		gtk_popover_popup (GTK_POPOVER (menu));
+	verne_menu_popup_now (menu, NULL);
 }
 void gtk_menu_popup (GtkMenu *menu, GtkWidget *parent_menu_shell, GtkWidget *parent_menu_item, gpointer func, gpointer data, guint button, guint32 activate_time) {
 	(void) parent_menu_shell; (void) parent_menu_item; (void) func; (void) data; (void) button; (void) activate_time;
 	verne_ensure_menu_parent (menu, parent_menu_item ? parent_menu_item : parent_menu_shell);
-	if (gtk_widget_get_parent (GTK_WIDGET (menu)) != NULL)
-		gtk_popover_popup (GTK_POPOVER (menu));
+	verne_menu_popup_now (menu, NULL);
 }
 void gtk_menu_popdown (GtkMenu *menu) { gtk_popover_popdown (GTK_POPOVER (menu)); }
 void gtk_menu_attach_to_widget (GtkMenu *menu, GtkWidget *attach, gpointer detacher) {
 	(void) detacher;
 	menu->attach = attach;
-	if (gtk_widget_get_parent (GTK_WIDGET (menu)) == NULL)
-		gtk_widget_set_parent (GTK_WIDGET (menu), attach);
+	verne_ensure_menu_parent (menu, attach);
 }
 GtkWidget *gtk_menu_get_attach_widget (GtkMenu *menu) { return menu->attach; }
 GtkWidget *gtk_menu_get_box (GtkMenu *menu) { return menu->box; }
@@ -686,14 +792,111 @@ gtk_button_new_from_stock (const gchar *stock_id)
 	return (gtk_button_new_from_icon_name) (verne_map_icon_name (stock_id));
 }
 
-/* accel group stub */
+/* accel group */
+typedef struct {
+	guint key;
+	GdkModifierType mods;
+	GtkAction *action;
+} VerneAccelEntry;
+
 typedef struct _GtkAccelGroupClass { GObjectClass parent_class; } GtkAccelGroupClass;
-struct _GtkAccelGroup { GObject parent; };
+struct _GtkAccelGroup {
+	GObject parent;
+	GPtrArray *entries;
+};
+
+static void
+verne_accel_entry_free (gpointer data)
+{
+	VerneAccelEntry *e = data;
+	if (e->action)
+		g_object_unref (e->action);
+	g_free (e);
+}
+
+static void
+gtk_accel_group_finalize (GObject *object)
+{
+	GtkAccelGroup *g = (GtkAccelGroup *) object;
+	g_clear_pointer (&g->entries, g_ptr_array_unref);
+	G_OBJECT_CLASS (g_type_class_peek_parent (G_OBJECT_GET_CLASS (object)))->finalize (object);
+}
+
 G_DEFINE_TYPE (GtkAccelGroup, gtk_accel_group, G_TYPE_OBJECT)
-static void gtk_accel_group_class_init (GtkAccelGroupClass *c) { (void) c; }
-static void gtk_accel_group_init (GtkAccelGroup *g) { (void) g; }
+static void gtk_accel_group_class_init (GtkAccelGroupClass *c)
+{
+	G_OBJECT_CLASS (c)->finalize = gtk_accel_group_finalize;
+}
+static void gtk_accel_group_init (GtkAccelGroup *g)
+{
+	g->entries = g_ptr_array_new_with_free_func (verne_accel_entry_free);
+}
 GtkAccelGroup *gtk_accel_group_new (void) { return g_object_new (gtk_accel_group_get_type (), NULL); }
-void gtk_window_add_accel_group (GtkWindow *window, GtkAccelGroup *accel) { (void) window; (void) accel; }
+
+void
+verne_accel_group_connect_action (GtkAccelGroup *group, GtkAction *action, const gchar *accelerator)
+{
+	VerneAccelEntry *e;
+	guint key = 0;
+	GdkModifierType mods = 0;
+	guint i;
+
+	if (group == NULL || action == NULL || accelerator == NULL || accelerator[0] == '\0')
+		return;
+	gtk_accelerator_parse (accelerator, &key, &mods);
+	if (key == 0)
+		return;
+	key = gdk_keyval_to_lower (key);
+	for (i = 0; i < group->entries->len; i++) {
+		VerneAccelEntry *cur = g_ptr_array_index (group->entries, i);
+		if (cur->action == action && cur->key == key && cur->mods == mods)
+			return;
+	}
+	e = g_new0 (VerneAccelEntry, 1);
+	e->key = key;
+	e->mods = mods;
+	e->action = g_object_ref (action);
+	g_ptr_array_add (group->entries, e);
+}
+
+static gboolean
+verne_accel_key_pressed (GtkEventControllerKey *self, guint keyval, guint keycode,
+			 GdkModifierType state, gpointer data)
+{
+	GtkAccelGroup *group = data;
+	guint key = gdk_keyval_to_lower (keyval);
+	GdkModifierType mods = state & (GDK_CONTROL_MASK | GDK_ALT_MASK | GDK_SHIFT_MASK | GDK_SUPER_MASK);
+	guint i;
+
+	(void) self;
+	(void) keycode;
+	if (group == NULL || group->entries == NULL)
+		return FALSE;
+	for (i = 0; i < group->entries->len; i++) {
+		VerneAccelEntry *e = g_ptr_array_index (group->entries, i);
+		if (e->key == key && e->mods == mods && e->action && gtk_action_get_sensitive (e->action)) {
+			gtk_action_activate (e->action);
+			return TRUE;
+		}
+	}
+	return FALSE;
+}
+
+void gtk_window_add_accel_group (GtkWindow *window, GtkAccelGroup *accel)
+{
+	GtkEventController *controller;
+
+	if (window == NULL || accel == NULL)
+		return;
+	if (g_object_get_data (G_OBJECT (window), "verne-accel-controller"))
+		return;
+	controller = GTK_EVENT_CONTROLLER (gtk_event_controller_key_new ());
+	gtk_event_controller_set_propagation_phase (controller, GTK_PHASE_CAPTURE);
+	g_signal_connect (controller, "key-pressed", G_CALLBACK (verne_accel_key_pressed), accel);
+	gtk_widget_add_controller (GTK_WIDGET (window), controller);
+	g_object_set_data (G_OBJECT (window), "verne-accel-controller", controller);
+	g_object_set_data (G_OBJECT (window), "verne-accel-group", accel);
+}
 void gtk_window_remove_accel_group (GtkWindow *window, GtkAccelGroup *accel) { (void) window; (void) accel; }
 void gtk_widget_add_accelerator (GtkWidget *widget, const gchar *accel_signal, GtkAccelGroup *accel_group,
 				 guint accel_key, GdkModifierType accel_mods, GtkAccelFlags accel_flags)

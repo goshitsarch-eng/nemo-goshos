@@ -241,7 +241,9 @@ toolbar_create_toolbutton (NemoToolbar *self,
     gtk_button_set_image (GTK_BUTTON (button), image);
     action = gtk_action_group_get_action (self->priv->action_group, name);
     gtk_activatable_set_related_action (GTK_ACTIVATABLE (button), action);
-    gtk_button_set_label (GTK_BUTTON (button), NULL);
+    gtk_widget_set_hexpand (button, FALSE);
+    gtk_widget_set_vexpand (button, FALSE);
+    gtk_widget_set_size_request (button, 36, 32);
     gtk_widget_set_tooltip_text (button, gtk_action_get_tooltip (action));
     gtk_widget_set_can_focus (button, FALSE);
     gtk_style_context_add_class (gtk_widget_get_style_context (button), GTK_STYLE_CLASS_FLAT);
@@ -362,6 +364,8 @@ nemo_toolbar_constructed (GObject *obj)
     gtk_container_add (GTK_CONTAINER (box), self->priv->compact_view_button);
 
     gtk_container_add (GTK_CONTAINER (tool_box), GTK_WIDGET (box));
+    gtk_widget_set_hexpand (GTK_WIDGET (tool_box), FALSE);
+    gtk_widget_set_halign (GTK_WIDGET (tool_box), GTK_ALIGN_END);
     gtk_container_add (GTK_CONTAINER (self->priv->toolbar), GTK_WIDGET (tool_box));
 
     gtk_widget_show_all (GTK_WIDGET (tool_box));

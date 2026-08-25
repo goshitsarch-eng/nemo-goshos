@@ -348,9 +348,6 @@ eel_pop_up_context_menu (GtkMenu        *menu,
                          GtkWidget      *widget)
 {
     eel_pop_up_menu_at_pointer (menu, event, widget);
-
-	g_object_ref_sink (menu);
-	g_object_unref (menu);
 }
 
 GtkMenuItem *

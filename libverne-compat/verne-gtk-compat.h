@@ -338,6 +338,18 @@ verne_map_icon_name (const char *name)
 		name = name + 4;
 	if (g_strcmp0 (name, "view-compact-symbolic") == 0)
 		return "view-continuous-symbolic";
+	if (g_strcmp0 (name, "view-dual-symbolic") == 0)
+		return "view-paged-symbolic";
+	if (g_strcmp0 (name, "preview-symbolic") == 0)
+		return "image-x-generic-symbolic";
+	if (g_strcmp0 (name, "toolbox-symbolic") == 0)
+		return "emblem-system-symbolic";
+	if (g_strcmp0 (name, "text-case-symbolic") == 0)
+		return "insert-text-symbolic";
+	if (g_strcmp0 (name, "use-regex-symbolic") == 0)
+		return "edit-find-replace-symbolic";
+	if (g_strcmp0 (name, "tab-new-symbolic") == 0)
+		return "list-add-symbolic";
 	return name;
 }
 
@@ -405,6 +417,18 @@ void gtk_image_set_from_stock (GtkImage *image, const gchar *stock_id, int size)
 void gtk_button_set_image (GtkButton *button, GtkWidget *image);
 GtkWidget *gtk_button_get_image (GtkButton *button);
 GtkWidget *gtk_button_new_from_stock (const gchar *stock_id);
+
+static inline void
+verne_gtk_button_set_label (GtkButton *button, const char *label)
+{
+	if (label == NULL || label[0] == '\0')
+		return;
+	(gtk_button_set_label) (button, label);
+}
+#if defined(gtk_button_set_label)
+#undef gtk_button_set_label
+#endif
+#define gtk_button_set_label(b, l) verne_gtk_button_set_label ((b), (l))
 
 #ifndef GTK_ICON_SIZE_MENU
 #define GTK_ICON_SIZE_MENU GTK_ICON_SIZE_NORMAL
@@ -503,6 +527,7 @@ struct _GtkAction {
 	gboolean visible_horizontal;
 	gboolean visible_vertical;
 	gboolean is_important;
+	gchar *accelerator;
 };
 
 struct _GtkActionClass {
@@ -1582,6 +1607,14 @@ GList *gdk_screen_get_window_stack (GdkScreen *screen);
 unsigned long gdk_x11_get_xatom_by_name (const gchar *name);
 struct passwd *gnome_desktop_get_session_user_pwent (void);
 void gtk_builder_add_callback_symbols (GtkBuilder *builder, const char *first, ...) G_GNUC_NULL_TERMINATED;
+gboolean verne_gtk_builder_add_from_string (GtkBuilder *builder, const gchar *buffer, gssize length, GError **error);
+gboolean verne_gtk_builder_add_from_file (GtkBuilder *builder, const gchar *filename, GError **error);
+gboolean verne_gtk_builder_add_from_resource (GtkBuilder *builder, const gchar *path, GError **error);
+#define gtk_builder_add_from_string(b, buf, len, err) verne_gtk_builder_add_from_string ((b), (buf), (len), (err))
+#define gtk_builder_add_from_file(b, f, err) verne_gtk_builder_add_from_file ((b), (f), (err))
+#define gtk_builder_add_from_resource(b, p, err) verne_gtk_builder_add_from_resource ((b), (p), (err))
+void verne_accel_group_connect_action (GtkAccelGroup *group, GtkAction *action, const gchar *accelerator);
+void verne_action_group_bind_accels (GtkActionGroup *group, GtkAccelGroup *accel);
 void gtk_style_context_get_border_color (GtkStyleContext *context, GtkStateFlags state, GdkRGBA *color);
 void gtk_style_context_get_style (GtkStyleContext *context, ...) G_GNUC_NULL_TERMINATED;
 

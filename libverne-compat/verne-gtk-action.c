@@ -111,6 +111,7 @@ gtk_action_finalize (GObject *object)
 	g_free (action->tooltip);
 	g_free (action->stock_id);
 	g_free (action->icon_name);
+	g_free (action->accelerator);
 	g_clear_object (&action->gicon);
 	G_OBJECT_CLASS (gtk_action_parent_class)->finalize (object);
 }
@@ -268,11 +269,19 @@ gtk_toggle_action_get_property (GObject *object, guint prop_id, GValue *value, G
 		G_OBJECT_CLASS (gtk_toggle_action_parent_class)->get_property (object, prop_id, value, pspec);
 }
 
+static void
+gtk_toggle_action_real_activate (GtkAction *action)
+{
+	GtkToggleAction *toggle = GTK_TOGGLE_ACTION (action);
+	gtk_toggle_action_set_active (toggle, !toggle->active);
+}
+
 static void gtk_toggle_action_class_init (GtkToggleActionClass *klass)
 {
 	GObjectClass *oc = G_OBJECT_CLASS (klass);
 	oc->set_property = gtk_toggle_action_set_property;
 	oc->get_property = gtk_toggle_action_get_property;
+	GTK_ACTION_CLASS (klass)->activate = gtk_toggle_action_real_activate;
 	toggle_signals[TOGGLE_TOGGLED] =
 		g_signal_new ("toggled", G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_FIRST,
 			      G_STRUCT_OFFSET (GtkToggleActionClass, toggled), NULL, NULL, NULL, G_TYPE_NONE, 0);
@@ -380,6 +389,7 @@ struct _GtkActionGroup {
 	GtkTranslateFunc translate_func;
 	gpointer translate_data;
 	GDestroyNotify translate_notify;
+	GtkAccelGroup *accel;
 };
 
 G_DEFINE_TYPE (GtkActionGroup, gtk_action_group, G_TYPE_OBJECT)
@@ -459,9 +469,31 @@ gtk_action_group_add_action (GtkActionGroup *group, GtkAction *action)
 void
 gtk_action_group_add_action_with_accel (GtkActionGroup *group, GtkAction *action, const gchar *accelerator)
 {
-	(void) accelerator;
 	if (action->name)
 		g_hash_table_insert (group->actions, g_strdup (action->name), g_object_ref (action));
+	if (accelerator && accelerator[0] != '\0') {
+		g_free (action->accelerator);
+		action->accelerator = g_strdup (accelerator);
+	}
+	if (group->accel && action->accelerator)
+		verne_accel_group_connect_action (group->accel, action, action->accelerator);
+}
+
+void
+verne_action_group_bind_accels (GtkActionGroup *group, GtkAccelGroup *accel)
+{
+	GList *actions, *l;
+
+	if (group == NULL || accel == NULL)
+		return;
+	group->accel = accel;
+	actions = gtk_action_group_list_actions (group);
+	for (l = actions; l; l = l->next) {
+		GtkAction *a = l->data;
+		if (a && a->accelerator)
+			verne_accel_group_connect_action (accel, a, a->accelerator);
+	}
+	g_list_free (actions);
 }
 
 void
@@ -534,7 +566,7 @@ gtk_action_group_add_radio_actions (GtkActionGroup *group, const GtkRadioActionE
 			first = a;
 		if (entries[i].value == value)
 			gtk_toggle_action_set_active (GTK_TOGGLE_ACTION (a), TRUE);
-		gtk_action_group_add_action (group, GTK_ACTION (a));
+		gtk_action_group_add_action_with_accel (group, GTK_ACTION (a), entries[i].accelerator);
 		g_object_unref (a);
 	}
 	if (first) {

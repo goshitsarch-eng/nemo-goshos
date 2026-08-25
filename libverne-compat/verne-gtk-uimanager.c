@@ -276,6 +276,7 @@ void
 gtk_ui_manager_insert_action_group (GtkUIManager *self, GtkActionGroup *group, gint pos)
 {
 	self->action_groups = g_list_insert (self->action_groups, g_object_ref (group), pos < 0 ? -1 : pos);
+	verne_action_group_bind_accels (group, self->accel);
 }
 
 void
@@ -329,7 +330,32 @@ parse_start (GMarkupParseContext *context, const gchar *el, const gchar **names,
 	}
 	if (name == NULL)
 		name = action;
-	node = ui_node_new (name, action, tag_type (el), ctx->merge_id);
+	/* Merge into an existing same-named sibling (GTK3 UI manager behavior). */
+	{
+		GList *l;
+		UiNode *existing = NULL;
+		GtkUIManagerItemType t = tag_type (el);
+		if (name) {
+			for (l = parent->children; l; l = l->next) {
+				UiNode *c = l->data;
+				if (g_strcmp0 (c->name, name) == 0) {
+					existing = c;
+					break;
+				}
+			}
+		}
+		if (existing && (existing->type == t ||
+				 existing->type == GTK_UI_MANAGER_PLACEHOLDER ||
+				 t == GTK_UI_MANAGER_PLACEHOLDER ||
+				 existing->type == GTK_UI_MANAGER_MENU ||
+				 existing->type == GTK_UI_MANAGER_POPUP ||
+				 t == GTK_UI_MANAGER_MENU ||
+				 t == GTK_UI_MANAGER_POPUP)) {
+			ctx->stack = g_list_prepend (ctx->stack, existing);
+			return;
+		}
+		node = ui_node_new (name, action, t, ctx->merge_id);
+	}
 	parent->children = g_list_append (parent->children, node);
 	ctx->stack = g_list_prepend (ctx->stack, node);
 }
