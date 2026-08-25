@@ -10,13 +10,17 @@ verne_compat_lib = static_library('verne-compat',
     'verne-gtk-uimanager.c',
     'verne-gtk-widgets.c',
     'verne-gtk-clipboard.c',
+    'verne-gtk-dnd.c',
     'verne-gtk-extra.c',
     'verne-gail.c',
     'verne-stubs.c',
   ],
-  dependencies: [ gtk, adwaita, atk, glib, gobject, gdk_pixbuf_dep ],
+  dependencies: [ gtk, adwaita, atk, glib, gobject, gdk_pixbuf_dep, x11 ],
   include_directories: [ rootInclude, verne_compat_inc ],
-  c_args: ['-DG_LOG_DOMAIN="VerneCompat"'],
+  c_args: [
+    '-DG_LOG_DOMAIN="VerneCompat"',
+    '-DVERNE_UNINSTALLED_SCHEMA_DIR="@0@"'.format(meson.project_build_root() / 'data'),
+  ],
 )
 
 verne_compat = declare_dependency(

@@ -129,7 +129,18 @@ static void gtk_bin_init (GtkBin *bin) { bin->child = NULL; gtk_widget_set_layou
 GtkWidget *
 gtk_bin_get_child (GtkBin *bin)
 {
-	return bin ? bin->child : NULL;
+	gpointer obj = bin;
+	if (obj == NULL)
+		return NULL;
+	if (VERNE_IS_SCROLLED_WINDOW (obj))
+		return (gtk_scrolled_window_get_child) (verne_to_gtk_sw (obj));
+	if (GTK_IS_SCROLLED_WINDOW (obj) && !VERNE_IS_SCROLLED_WINDOW (obj))
+		return (gtk_scrolled_window_get_child) ((GtkScrolledWindow *) obj);
+	if (GTK_IS_WINDOW (obj))
+		return gtk_window_get_child (GTK_WINDOW (obj));
+	if (G_TYPE_CHECK_INSTANCE_TYPE (obj, GTK_TYPE_BIN))
+		return ((GtkBin *) obj)->child;
+	return NULL;
 }
 
 /* ---------- GtkEventBox : GtkBin ---------- */

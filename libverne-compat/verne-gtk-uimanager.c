@@ -244,6 +244,14 @@ static void
 gtk_ui_manager_class_init (GtkUIManagerClass *klass)
 {
 	G_OBJECT_CLASS (klass)->finalize = gtk_ui_manager_finalize;
+	g_signal_new ("connect-proxy", G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_FIRST,
+		      0, NULL, NULL, NULL, G_TYPE_NONE, 2, GTK_TYPE_ACTION, GTK_TYPE_WIDGET);
+	g_signal_new ("disconnect-proxy", G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_FIRST,
+		      0, NULL, NULL, NULL, G_TYPE_NONE, 2, GTK_TYPE_ACTION, GTK_TYPE_WIDGET);
+	g_signal_new ("add-widget", G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_FIRST,
+		      0, NULL, NULL, NULL, G_TYPE_NONE, 1, GTK_TYPE_WIDGET);
+	g_signal_new ("actions-changed", G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_FIRST,
+		      0, NULL, NULL, NULL, G_TYPE_NONE, 0);
 }
 
 static void

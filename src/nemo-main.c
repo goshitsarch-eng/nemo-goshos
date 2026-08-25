@@ -73,8 +73,8 @@ main (int argc, char *argv[])
 
 	g_set_prgname ("nemo");
 	g_set_application_name (_("Verne"));
-	adw_init ();
 	verne_compat_init ();
+	adw_init ();
 
 #ifdef HAVE_EXEMPI
 	xmp_init();

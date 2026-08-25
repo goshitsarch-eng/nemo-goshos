@@ -2,6 +2,7 @@
 #include "config.h"
 #include "verne-gtk-compat.h"
 
+#include <string.h>
 #include <graphene.h>
 
 typedef struct {
@@ -764,6 +765,27 @@ register_event_signals (void)
 		{ "delete-event", 1 },
 		{ "window-state-event", 1 },
 		{ "popup-menu", 0 },
+		{ "selection-done", 0 },
+		{ "event-after", 1 },
+		{ "event_after", 1 },
+		{ "focus", 1 },
+		{ "size-allocate", 1 },
+	};
+	static const struct {
+		const char *name;
+		GType ret;
+		guint n_params;
+		GType p0, p1, p2, p3, p4, p5;
+	} drag_signals[] = {
+		{ "drag-begin", G_TYPE_NONE, 1, G_TYPE_POINTER, 0, 0, 0, 0, 0 },
+		{ "drag-end", G_TYPE_NONE, 1, G_TYPE_POINTER, 0, 0, 0, 0, 0 },
+		{ "drag-data-delete", G_TYPE_NONE, 1, G_TYPE_POINTER, 0, 0, 0, 0, 0 },
+		{ "drag-leave", G_TYPE_NONE, 2, G_TYPE_POINTER, G_TYPE_UINT, 0, 0, 0, 0 },
+		{ "drag-motion", G_TYPE_BOOLEAN, 4, G_TYPE_POINTER, G_TYPE_INT, G_TYPE_INT, G_TYPE_UINT, 0, 0 },
+		{ "drag-drop", G_TYPE_BOOLEAN, 4, G_TYPE_POINTER, G_TYPE_INT, G_TYPE_INT, G_TYPE_UINT, 0, 0 },
+		{ "drag-failed", G_TYPE_BOOLEAN, 2, G_TYPE_POINTER, G_TYPE_INT, 0, 0, 0, 0 },
+		{ "drag-data-get", G_TYPE_NONE, 4, G_TYPE_POINTER, G_TYPE_POINTER, G_TYPE_UINT, G_TYPE_UINT, 0, 0 },
+		{ "drag-data-received", G_TYPE_NONE, 6, G_TYPE_POINTER, G_TYPE_INT, G_TYPE_INT, G_TYPE_POINTER, G_TYPE_UINT, G_TYPE_UINT },
 	};
 	guint i;
 
@@ -786,15 +808,58 @@ register_event_signals (void)
 				      NULL, G_TYPE_BOOLEAN, 1, G_TYPE_POINTER);
 		}
 	}
+	for (i = 0; i < G_N_ELEMENTS (drag_signals); i++) {
+		GType params[6];
+		guint n;
+
+		if (g_signal_lookup (drag_signals[i].name, GTK_TYPE_WIDGET) != 0)
+			continue;
+		n = drag_signals[i].n_params;
+		params[0] = drag_signals[i].p0;
+		params[1] = drag_signals[i].p1;
+		params[2] = drag_signals[i].p2;
+		params[3] = drag_signals[i].p3;
+		params[4] = drag_signals[i].p4;
+		params[5] = drag_signals[i].p5;
+		g_signal_newv (drag_signals[i].name, GTK_TYPE_WIDGET,
+			       G_SIGNAL_RUN_LAST, NULL,
+			       drag_signals[i].ret == G_TYPE_BOOLEAN ? g_signal_accumulator_true_handled : NULL,
+			       NULL, NULL, drag_signals[i].ret, n, params);
+	}
 	orig_gtk_widget_realize = wclass->realize;
 	wclass->realize = global_widget_realize;
 }
+
+static void
+verne_set_uninstalled_schema_dir (void)
+{
+#ifdef VERNE_UNINSTALLED_SCHEMA_DIR
+	const char *cur = g_getenv ("GSETTINGS_SCHEMA_DIR");
+	if (cur == NULL || cur[0] == '\0')
+		g_setenv ("GSETTINGS_SCHEMA_DIR", VERNE_UNINSTALLED_SCHEMA_DIR, FALSE);
+	else if (strstr (cur, VERNE_UNINSTALLED_SCHEMA_DIR) == NULL) {
+		char *joined = g_strconcat (VERNE_UNINSTALLED_SCHEMA_DIR, ":", cur, NULL);
+		g_setenv ("GSETTINGS_SCHEMA_DIR", joined, TRUE);
+		g_free (joined);
+	}
+#endif
+}
+
+#ifdef __GNUC__
+__attribute__((constructor))
+static void
+verne_schema_dir_ctor (void)
+{
+	verne_set_uninstalled_schema_dir ();
+}
+#endif
 
 void
 verne_compat_init (void)
 {
 	static gboolean inited;
 
+	verne_set_uninstalled_schema_dir ();
 	if (inited)
 		return;
 	inited = TRUE;

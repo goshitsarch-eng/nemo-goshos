@@ -1,27 +1,19 @@
 #include "config.h"
 #include "verne-gtk-compat.h"
+#include "verne-gtk-clipboard-private.h"
 #include <string.h>
-
-struct _GtkClipboard {
-	GObject parent;
-	GdkClipboard *gdk;
-	GObject *owner;
-	GtkClipboardGetFunc get_func;
-	GtkClipboardClearFunc clear_func;
-	gpointer user_data;
-	GtkTargetEntry *targets;
-	guint n_targets;
-};
-
-struct _GtkTargetList {
-	guint ref;
-	GArray *entries;
-};
+#include <gio/gio.h>
 
 G_DEFINE_TYPE (GtkClipboard, gtk_clipboard, G_TYPE_OBJECT)
 static GHashTable *clipboards;
 
-static void gtk_clipboard_class_init (GtkClipboardClass *c) { (void) c; }
+static void gtk_clipboard_class_init (GtkClipboardClass *c)
+{
+	g_signal_new ("owner-change", G_TYPE_FROM_CLASS (c), G_SIGNAL_RUN_FIRST,
+		      0, NULL, NULL, NULL, G_TYPE_NONE, 1, G_TYPE_POINTER);
+	g_signal_new ("owner_change", G_TYPE_FROM_CLASS (c), G_SIGNAL_RUN_FIRST,
+		      0, NULL, NULL, NULL, G_TYPE_NONE, 1, G_TYPE_POINTER);
+}
 static void gtk_clipboard_init (GtkClipboard *c) { (void) c; }
 
 GdkAtom
@@ -119,6 +111,7 @@ gtk_clipboard_set_with_data (GtkClipboard *clipboard, const GtkTargetEntry *targ
 	g_free (clipboard->targets);
 	clipboard->targets = g_memdup2 (targets, n_targets * sizeof (GtkTargetEntry));
 	clipboard->n_targets = n_targets;
+	verne_clipboard_install_content (clipboard);
 }
 
 void
@@ -153,17 +146,48 @@ gtk_clipboard_request_contents (GtkClipboard *clipboard, GdkAtom target, GtkClip
 	GtkSelectionData *s = selection_new (target);
 	if (clipboard->get_func)
 		clipboard->get_func (clipboard, s, 0, clipboard->user_data);
-	else {
-		gdk_clipboard_read_text_async (clipboard->gdk, NULL, NULL, NULL);
-	}
 	cb (clipboard, s, data);
 	gtk_selection_data_free (s);
+}
+
+typedef struct {
+	GtkClipboard *clipboard;
+	GtkClipboardTextReceivedFunc cb;
+	gpointer data;
+} VerneClipboardTextReq;
+
+static void
+clipboard_text_ready (GObject *source, GAsyncResult *result, gpointer data)
+{
+	VerneClipboardTextReq *req = data;
+	char *text = gdk_clipboard_read_text_finish (GDK_CLIPBOARD (source), result, NULL);
+	req->cb (req->clipboard, text ? text : "", req->data);
+	g_free (text);
+	g_free (req);
 }
 
 void
 gtk_clipboard_request_text (GtkClipboard *clipboard, GtkClipboardTextReceivedFunc cb, gpointer data)
 {
-	gdk_clipboard_read_text_async (clipboard->gdk, NULL, NULL, NULL);
+	if (clipboard->get_func) {
+		GtkSelectionData *s = selection_new (gdk_atom_intern ("text/plain", FALSE));
+		gchar *text = NULL;
+		clipboard->get_func (clipboard, s, 0, clipboard->user_data);
+		if (s->data && s->length > 0)
+			text = g_strndup ((char *) s->data, s->length);
+		cb (clipboard, text ? text : "", data);
+		g_free (text);
+		gtk_selection_data_free (s);
+		return;
+	}
+	if (clipboard->gdk) {
+		VerneClipboardTextReq *req = g_new0 (VerneClipboardTextReq, 1);
+		req->clipboard = clipboard;
+		req->cb = cb;
+		req->data = data;
+		gdk_clipboard_read_text_async (clipboard->gdk, NULL, clipboard_text_ready, req);
+		return;
+	}
 	cb (clipboard, "", data);
 }
 
@@ -186,10 +210,44 @@ gtk_clipboard_wait_for_contents (GtkClipboard *clipboard, GdkAtom target)
 	return s;
 }
 
+typedef struct {
+	GMainLoop *loop;
+	char **text_out;
+} VerneClipboardWaitText;
+
+static void
+clipboard_wait_text_ready (GObject *source, GAsyncResult *result, gpointer data)
+{
+	VerneClipboardWaitText *wait = data;
+	*wait->text_out = gdk_clipboard_read_text_finish (GDK_CLIPBOARD (source), result, NULL);
+	if (wait->loop && g_main_loop_is_running (wait->loop))
+		g_main_loop_quit (wait->loop);
+}
+
 gchar *
 gtk_clipboard_wait_for_text (GtkClipboard *clipboard)
 {
-	return gdk_clipboard_read_text_finish (clipboard->gdk, NULL, NULL);
+	if (clipboard->get_func) {
+		GtkSelectionData *s = selection_new (gdk_atom_intern ("text/plain", FALSE));
+		gchar *text = NULL;
+		clipboard->get_func (clipboard, s, 0, clipboard->user_data);
+		if (s->data && s->length > 0)
+			text = g_strndup ((char *) s->data, s->length);
+		gtk_selection_data_free (s);
+		return text;
+	}
+	if (clipboard->gdk) {
+		GMainLoop *loop = g_main_loop_new (NULL, FALSE);
+		char *text = NULL;
+		VerneClipboardWaitText wait = { loop, &text };
+		gdk_clipboard_read_text_async (clipboard->gdk, NULL,
+					       clipboard_wait_text_ready, &wait);
+		g_timeout_add (500, (GSourceFunc) g_main_loop_quit, loop);
+		g_main_loop_run (loop);
+		g_main_loop_unref (loop);
+		return text;
+	}
+	return NULL;
 }
 
 const guchar *gtk_selection_data_get_data (const GtkSelectionData *s) { return s ? s->data : NULL; }
@@ -264,31 +322,21 @@ GtkSelectionData *gtk_selection_data_copy (const GtkSelectionData *s) {
 }
 void gtk_selection_data_free (GtkSelectionData *s) { if (!s) return; g_free (s->data); g_free (s); }
 
-void gtk_drag_dest_set (GtkWidget *widget, GtkDestDefaults flags, const GtkTargetEntry *targets, gint n_targets, GdkDragAction actions) {
-	(void) flags; (void) targets; (void) n_targets;
-	gtk_widget_add_controller (widget, GTK_EVENT_CONTROLLER (gtk_drop_target_new (G_TYPE_STRING, actions ? actions : GDK_ACTION_COPY)));
-}
-void gtk_drag_dest_unset (GtkWidget *widget) { (void) widget; }
-void gtk_drag_source_set (GtkWidget *widget, GdkModifierType start_button_mask, const GtkTargetEntry *targets, gint n_targets, GdkDragAction actions) {
-	GtkDragSource *src = gtk_drag_source_new ();
-	(void) start_button_mask; (void) targets; (void) n_targets;
-	gtk_drag_source_set_actions (src, actions ? actions : GDK_ACTION_COPY);
-	gtk_widget_add_controller (widget, GTK_EVENT_CONTROLLER (src));
-}
-void gtk_drag_source_unset (GtkWidget *widget) { (void) widget; }
-void gtk_drag_finish (gpointer context, gboolean success, gboolean del, guint32 time) {
-	(void) context; (void) success; (void) del; (void) time;
-}
-GdkDragContext *gtk_drag_begin_with_coordinates (GtkWidget *widget, GtkTargetList *targets, GdkDragAction actions, gint button, GdkEvent *event, gint x, gint y) {
-	(void) widget; (void) targets; (void) actions; (void) button; (void) event; (void) x; (void) y;
-	return NULL;
-}
-void gtk_drag_set_icon_pixbuf (GdkDragContext *context, GdkPixbuf *pixbuf, gint hot_x, gint hot_y) { (void) context; (void) pixbuf; (void) hot_x; (void) hot_y; }
-void gtk_drag_set_icon_name (GdkDragContext *context, const gchar *name, gint hot_x, gint hot_y) { (void) context; (void) name; (void) hot_x; (void) hot_y; }
-void gtk_drag_set_icon_default (GdkDragContext *context) { (void) context; }
-void gtk_drag_set_icon_widget (GdkDragContext *context, GtkWidget *widget, gint hot_x, gint hot_y) { (void) context; (void) widget; (void) hot_x; (void) hot_y; }
-GtkWidget *gtk_drag_get_source_widget (GdkDragContext *context) { (void) context; return NULL; }
-gboolean gtk_drag_check_threshold (GtkWidget *widget, gint start_x, gint start_y, gint current_x, gint current_y) {
-	(void) widget;
-	return (ABS (current_x - start_x) > 4) || (ABS (current_y - start_y) > 4);
+gboolean
+gtk_target_list_find (GtkTargetList *list, GdkAtom target, guint *info)
+{
+	guint i;
+
+	if (!list || !list->entries)
+		return FALSE;
+	for (i = 0; i < list->entries->len; i++) {
+		GtkTargetEntry *e = &g_array_index (list->entries, GtkTargetEntry, i);
+		if (e->target == (gchar *) target ||
+		    g_strcmp0 (e->target, (const char *) target) == 0) {
+			if (info)
+				*info = e->info;
+			return TRUE;
+		}
+	}
+	return FALSE;
 }

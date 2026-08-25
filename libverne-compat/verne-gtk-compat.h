@@ -730,7 +730,7 @@ void gtk_statusbar_remove_all (GtkStatusbar *bar, guint context_id);
 GtkWidget *gtk_statusbar_get_message_area (GtkStatusbar *bar);
 
 #define GTK_TYPE_BIN (gtk_bin_get_type ())
-#define GTK_BIN(obj) (G_TYPE_CHECK_INSTANCE_CAST ((obj), GTK_TYPE_BIN, GtkBin))
+#define GTK_BIN(obj) ((GtkBin *)(obj))
 #define GTK_BIN_CLASS(klass) (G_TYPE_CHECK_CLASS_CAST ((klass), GTK_TYPE_BIN, GtkBinClass))
 #define GTK_IS_BIN(obj) (G_TYPE_CHECK_INSTANCE_TYPE ((obj), GTK_TYPE_BIN))
 #define GTK_IS_BIN_CLASS(klass) (G_TYPE_CHECK_CLASS_TYPE ((klass), GTK_TYPE_BIN))
@@ -852,8 +852,11 @@ typedef enum {
 
 void gtk_drag_dest_set (GtkWidget *widget, GtkDestDefaults flags, const GtkTargetEntry *targets, gint n_targets, GdkDragAction actions);
 void gtk_drag_dest_unset (GtkWidget *widget);
+void gtk_drag_dest_set_target_list (GtkWidget *widget, GtkTargetList *list);
+GtkTargetList *gtk_drag_dest_get_target_list (GtkWidget *widget);
 void gtk_drag_source_set (GtkWidget *widget, GdkModifierType start_button_mask, const GtkTargetEntry *targets, gint n_targets, GdkDragAction actions);
 void gtk_drag_source_unset (GtkWidget *widget);
+void gtk_drag_source_set_target_list (GtkWidget *widget, GtkTargetList *list);
 void gtk_drag_finish (gpointer context, gboolean success, gboolean del, guint32 time);
 GdkDragContext *gtk_drag_begin_with_coordinates (GtkWidget *widget, GtkTargetList *targets, GdkDragAction actions, gint button, GdkEvent *event, gint x, gint y);
 void gtk_drag_set_icon_pixbuf (GdkDragContext *context, GdkPixbuf *pixbuf, gint hot_x, gint hot_y);
@@ -861,7 +864,6 @@ void gtk_drag_set_icon_name (GdkDragContext *context, const gchar *name, gint ho
 void gtk_drag_set_icon_default (GdkDragContext *context);
 void gtk_drag_set_icon_widget (GdkDragContext *context, GtkWidget *widget, gint hot_x, gint hot_y);
 GtkWidget *gtk_drag_get_source_widget (GdkDragContext *context);
-gboolean gtk_drag_check_threshold (GtkWidget *widget, gint start_x, gint start_y, gint current_x, gint current_y);
 
 /* icon theme */
 GtkIconTheme *gtk_icon_theme_get_for_screen (GdkDisplay *screen);
@@ -905,8 +907,8 @@ void gtk_widget_style_get (GtkWidget *widget, const gchar *first_property_name, 
 /* window helpers */
 #define gtk_window_set_wmclass(w,a,b) ((void)0)
 #define gtk_window_resize(w,width,height) gtk_window_set_default_size(w,width,height)
-#define gtk_window_move(w,x,y) ((void)0)
-#define gtk_window_get_position(w,x,y) G_STMT_START { if (x) *(x)=0; if (y) *(y)=0; } G_STMT_END
+void gtk_window_move (GtkWindow *window, gint x, gint y);
+void gtk_window_get_position (GtkWindow *window, gint *x, gint *y);
 #define gtk_window_parse_geometry(w,g) FALSE
 #define gtk_window_set_has_resize_grip(w,b) ((void)0)
 #define gtk_window_reshow_with_initial_size(w) ((void)0)
@@ -1324,7 +1326,7 @@ typedef struct { gint x; gint y; } GdkPoint;
 #endif
 
 typedef struct {
-	GtkWidgetClass parent_class;
+	GtkBoxClass parent_class;
 	gint scrollbar_spacing;
 	gboolean (* scroll_child) (GtkScrolledWindow *sw, GtkScrollType scroll, gboolean horizontal);
 	void (* move_focus_out) (GtkScrolledWindow *sw, GtkDirectionType direction);
@@ -1347,9 +1349,13 @@ static inline GtkScrolledWindow *
 verne_to_gtk_sw (gpointer widget)
 {
 	if (widget != NULL && VERNE_IS_SCROLLED_WINDOW (widget))
-		return GTK_SCROLLED_WINDOW (VERNE_SCROLLED_WINDOW (widget)->inner);
-	return GTK_SCROLLED_WINDOW (widget);
+		return (GtkScrolledWindow *) VERNE_SCROLLED_WINDOW (widget)->inner;
+	return (GtkScrolledWindow *) widget;
 }
+#undef GTK_SCROLLED_WINDOW
+#define GTK_SCROLLED_WINDOW(w) verne_to_gtk_sw (w)
+#undef GTK_IS_SCROLLED_WINDOW
+#define GTK_IS_SCROLLED_WINDOW(w) ((w) != NULL && (VERNE_IS_SCROLLED_WINDOW (w) || G_TYPE_CHECK_INSTANCE_TYPE ((w), (gtk_scrolled_window_get_type) ())))
 
 #define gtk_scrolled_window_set_policy(sw, h, v) (gtk_scrolled_window_set_policy) (verne_to_gtk_sw (sw), h, v)
 #define gtk_scrolled_window_set_hadjustment(sw, a) (gtk_scrolled_window_set_hadjustment) (verne_to_gtk_sw (sw), a)
@@ -1577,7 +1583,6 @@ typedef GtkWidget GtkToolItem;
 typedef GtkWidget GtkMenuShell;
 
 #define gtk_widget_path_unref(p) ((void)0)
-#define gtk_drag_source_set_target_list(w, l) ((void)0)
 #define gtk_container_class_handle_border_width(c) ((void)0)
 #define gtk_menu_reposition(m) ((void)0)
 #define gtk_menu_item_get_reserve_indicator(i) FALSE
@@ -1601,9 +1606,9 @@ static inline void
 verne_gtk_init (int *argc, char ***argv)
 {
 	(void) argc; (void) argv;
+	verne_compat_init ();
 	adw_init ();
 	(gtk_init) ();
-	verne_compat_init ();
 }
 #define gtk_init(argc, argv) verne_gtk_init (argc, argv)
 
@@ -1639,8 +1644,6 @@ verne_gtk_tree_view_get_tooltip_context (GtkTreeView *tree_view, gint *x, gint *
 #define gtk_menu_bar_get_child_pack_direction(m) 0
 #define gtk_image_menu_item_get_always_show_image(i) TRUE
 #define gtk_get_event_widget(e) ((GtkWidget *) NULL)
-#define gtk_drag_dest_set_target_list(w, l) ((void)0)
-#define gtk_drag_dest_get_target_list(w) ((GtkTargetList *) NULL)
 #define gtk_builder_connect_signals(b, d) ((void)0)
 #define gtk_action_set_always_show_image(a, b) ((void)0)
 #define gtk_accel_map_save(f) ((void)0)

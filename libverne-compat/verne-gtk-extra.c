@@ -9,6 +9,7 @@
 #ifdef GDK_WINDOWING_X11
 #include <gdk/x11/gdkx.h>
 #include <X11/Xlib.h>
+#include <X11/Xatom.h>
 #endif
 
 /* ---------- GdkColor boxed type (removed in GTK4) ---------- */
@@ -185,16 +186,105 @@ gtk_grab_remove (GtkWidget *widget)
 		g_object_set_data (G_OBJECT (d), "verne-grab-widget", NULL);
 }
 
+static void verne_window_ensure_realize_hook (GtkWindow *window);
+
 void
 gtk_window_set_type_hint (GtkWindow *window, GdkWindowTypeHint hint)
 {
 	g_object_set_data (G_OBJECT (window), "verne-type-hint", GINT_TO_POINTER ((int) hint));
+	if (hint == GDK_WINDOW_TYPE_HINT_DESKTOP) {
+		gtk_window_set_decorated (window, FALSE);
+		gtk_window_set_deletable (window, FALSE);
+	}
+	verne_window_ensure_realize_hook (window);
 }
 
 GdkWindowTypeHint
 gtk_window_get_type_hint (GtkWindow *window)
 {
 	return (GdkWindowTypeHint) GPOINTER_TO_INT (g_object_get_data (G_OBJECT (window), "verne-type-hint"));
+}
+
+static void
+verne_window_apply_x11 (GtkWindow *window)
+{
+#ifdef GDK_WINDOWING_X11
+	GtkNative *native;
+	GdkSurface *surface;
+	Display *dpy;
+	Window xid;
+	GdkWindowTypeHint hint;
+	gpointer xptr, yptr;
+
+	native = gtk_widget_get_native (GTK_WIDGET (window));
+	surface = native ? gtk_native_get_surface (native) : NULL;
+	if (surface == NULL || !GDK_IS_X11_SURFACE (surface))
+		return;
+	dpy = gdk_x11_display_get_xdisplay (gdk_surface_get_display (surface));
+	xid = gdk_x11_surface_get_xid (surface);
+	if (dpy == NULL || xid == 0)
+		return;
+
+	hint = gtk_window_get_type_hint (window);
+	if (hint == GDK_WINDOW_TYPE_HINT_DESKTOP || hint == GDK_WINDOW_TYPE_HINT_DIALOG) {
+		Atom type = XInternAtom (dpy, "_NET_WM_WINDOW_TYPE", False);
+		Atom value = XInternAtom (dpy,
+					  hint == GDK_WINDOW_TYPE_HINT_DESKTOP
+					  ? "_NET_WM_WINDOW_TYPE_DESKTOP"
+					  : "_NET_WM_WINDOW_TYPE_DIALOG",
+					  False);
+		XChangeProperty (dpy, xid, type, XA_ATOM, 32, PropModeReplace,
+				 (unsigned char *) &value, 1);
+		if (hint == GDK_WINDOW_TYPE_HINT_DESKTOP)
+			XLowerWindow (dpy, xid);
+	}
+
+	xptr = g_object_get_data (G_OBJECT (window), "verne-win-x");
+	yptr = g_object_get_data (G_OBJECT (window), "verne-win-y");
+	if (xptr || yptr)
+		XMoveWindow (dpy, xid,
+			     GPOINTER_TO_INT (xptr),
+			     GPOINTER_TO_INT (yptr));
+#else
+	(void) window;
+#endif
+}
+
+static void
+verne_window_on_realize (GtkWidget *widget, gpointer data)
+{
+	(void) data;
+	verne_window_apply_x11 (GTK_WINDOW (widget));
+}
+
+static void
+verne_window_ensure_realize_hook (GtkWindow *window)
+{
+	if (g_object_get_data (G_OBJECT (window), "verne-x11-hooked"))
+		return;
+	g_object_set_data (G_OBJECT (window), "verne-x11-hooked", GINT_TO_POINTER (1));
+	g_signal_connect (window, "realize", G_CALLBACK (verne_window_on_realize), NULL);
+	if (gtk_widget_get_realized (GTK_WIDGET (window)))
+		verne_window_apply_x11 (window);
+}
+
+void
+gtk_window_move (GtkWindow *window, gint x, gint y)
+{
+	g_object_set_data (G_OBJECT (window), "verne-win-x", GINT_TO_POINTER (x));
+	g_object_set_data (G_OBJECT (window), "verne-win-y", GINT_TO_POINTER (y));
+	verne_window_ensure_realize_hook (window);
+	if (gtk_widget_get_realized (GTK_WIDGET (window)))
+		verne_window_apply_x11 (window);
+}
+
+void
+gtk_window_get_position (GtkWindow *window, gint *x, gint *y)
+{
+	if (x)
+		*x = GPOINTER_TO_INT (g_object_get_data (G_OBJECT (window), "verne-win-x"));
+	if (y)
+		*y = GPOINTER_TO_INT (g_object_get_data (G_OBJECT (window), "verne-win-y"));
 }
 
 void
@@ -721,38 +811,6 @@ verne_cell_renderer_class_set_render (GtkCellRendererClass *klass, VerneCellRend
 	klass->snapshot = verne_cell_snapshot;
 }
 
-GdkAtom
-gtk_drag_dest_find_target (GtkWidget *widget, GdkDragContext *context, GtkTargetList *list)
-{
-	(void) widget; (void) context; (void) list;
-	return gdk_atom_intern ("text/uri-list", FALSE);
-}
-
-void gtk_drag_get_data (GtkWidget *widget, GdkDragContext *context, GdkAtom target, guint32 time) {
-	(void) widget; (void) context; (void) target; (void) time;
-}
-void gtk_drag_highlight (GtkWidget *widget) { (void) widget; }
-void gtk_drag_unhighlight (GtkWidget *widget) { (void) widget; }
-gpointer gtk_drag_begin (GtkWidget *widget, GtkTargetList *targets, GdkDragAction actions, gint button, GdkEvent *event) {
-	(void) widget; (void) targets; (void) actions; (void) button; (void) event;
-	return NULL;
-}
-void gtk_drag_set_icon_surface (GdkDragContext *context, cairo_surface_t *surface) { (void) context; (void) surface; }
-void gtk_drag_dest_set_track_motion (GtkWidget *widget, gboolean track) { (void) widget; (void) track; }
-GtkTargetList *gtk_drag_source_get_target_list (GtkWidget *widget) { (void) widget; return gtk_target_list_new (NULL, 0); }
-GdkDragAction gdk_drag_context_get_selected_action (GdkDragContext *context) { (void) context; return GDK_ACTION_COPY; }
-GdkDragAction gdk_drag_context_get_suggested_action (GdkDragContext *context) { (void) context; return GDK_ACTION_COPY; }
-GdkDragAction gdk_drag_context_get_actions (GdkDragContext *context) { (void) context; return GDK_ACTION_COPY | GDK_ACTION_MOVE; }
-GdkSurface *gdk_drag_context_get_source_window (GdkDragContext *context) { (void) context; return NULL; }
-void gdk_drag_status (GdkDragContext *context, GdkDragAction action, guint32 time) { (void) context; (void) action; (void) time; }
-
-gboolean
-gtk_target_list_find (GtkTargetList *list, GdkAtom target, guint *info)
-{
-	(void) list; (void) target;
-	if (info) *info = 0;
-	return TRUE;
-}
 gboolean gtk_targets_include_text (GdkAtom *targets, gint n_targets) { (void) targets; (void) n_targets; return TRUE; }
 gboolean gtk_targets_include_uri (GdkAtom *targets, gint n_targets) { (void) targets; (void) n_targets; return TRUE; }
 

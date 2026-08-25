@@ -2,6 +2,20 @@
 #include "verne-gtk-compat.h"
 
 enum {
+	ACTION_PROP_0,
+	ACTION_PROP_NAME,
+	ACTION_PROP_SENSITIVE,
+	ACTION_PROP_VISIBLE,
+	ACTION_PROP_LABEL,
+	ACTION_PROP_TOOLTIP,
+	ACTION_PROP_ICON_NAME,
+	ACTION_PROP_STOCK_ID,
+	ACTION_PROP_SHORT_LABEL,
+	ACTION_PROP_IS_IMPORTANT,
+	ACTION_N_PROPS
+};
+
+enum {
 	ACTION_ACTIVATE,
 	ACTION_LAST
 };
@@ -9,6 +23,83 @@ enum {
 static guint action_signals[ACTION_LAST];
 
 G_DEFINE_TYPE (GtkAction, gtk_action, G_TYPE_OBJECT)
+
+static void
+gtk_action_set_property (GObject *object, guint prop_id, const GValue *value, GParamSpec *pspec)
+{
+	GtkAction *action = GTK_ACTION (object);
+	switch (prop_id) {
+	case ACTION_PROP_NAME:
+		if (action->name == NULL)
+			action->name = g_value_dup_string (value);
+		break;
+	case ACTION_PROP_SENSITIVE:
+		gtk_action_set_sensitive (action, g_value_get_boolean (value));
+		break;
+	case ACTION_PROP_VISIBLE:
+		gtk_action_set_visible (action, g_value_get_boolean (value));
+		break;
+	case ACTION_PROP_LABEL:
+		gtk_action_set_label (action, g_value_get_string (value));
+		break;
+	case ACTION_PROP_TOOLTIP:
+		gtk_action_set_tooltip (action, g_value_get_string (value));
+		break;
+	case ACTION_PROP_ICON_NAME:
+		gtk_action_set_icon_name (action, g_value_get_string (value));
+		break;
+	case ACTION_PROP_STOCK_ID:
+		gtk_action_set_stock_id (action, g_value_get_string (value));
+		break;
+	case ACTION_PROP_SHORT_LABEL:
+		gtk_action_set_short_label (action, g_value_get_string (value));
+		break;
+	case ACTION_PROP_IS_IMPORTANT:
+		action->is_important = g_value_get_boolean (value);
+		break;
+	default:
+		G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
+		break;
+	}
+}
+
+static void
+gtk_action_get_property (GObject *object, guint prop_id, GValue *value, GParamSpec *pspec)
+{
+	GtkAction *action = GTK_ACTION (object);
+	switch (prop_id) {
+	case ACTION_PROP_NAME:
+		g_value_set_string (value, action->name);
+		break;
+	case ACTION_PROP_SENSITIVE:
+		g_value_set_boolean (value, action->sensitive);
+		break;
+	case ACTION_PROP_VISIBLE:
+		g_value_set_boolean (value, action->visible);
+		break;
+	case ACTION_PROP_LABEL:
+		g_value_set_string (value, action->label);
+		break;
+	case ACTION_PROP_TOOLTIP:
+		g_value_set_string (value, action->tooltip);
+		break;
+	case ACTION_PROP_ICON_NAME:
+		g_value_set_string (value, action->icon_name);
+		break;
+	case ACTION_PROP_STOCK_ID:
+		g_value_set_string (value, action->stock_id);
+		break;
+	case ACTION_PROP_SHORT_LABEL:
+		g_value_set_string (value, gtk_action_get_short_label (action));
+		break;
+	case ACTION_PROP_IS_IMPORTANT:
+		g_value_set_boolean (value, action->is_important);
+		break;
+	default:
+		G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
+		break;
+	}
+}
 
 static void
 gtk_action_finalize (GObject *object)
@@ -31,27 +122,44 @@ gtk_action_real_activate (GtkAction *action)
 }
 
 static void
+gtk_action_real_connect_proxy (GtkAction *action, GtkWidget *proxy)
+{
+	(void) action;
+	(void) proxy;
+}
+
+static void
 gtk_action_class_init (GtkActionClass *klass)
 {
 	GObjectClass *oclass = G_OBJECT_CLASS (klass);
 	oclass->finalize = gtk_action_finalize;
+	oclass->set_property = gtk_action_set_property;
+	oclass->get_property = gtk_action_get_property;
 	klass->activate = gtk_action_real_activate;
+	klass->connect_proxy = gtk_action_real_connect_proxy;
+	klass->disconnect_proxy = gtk_action_real_connect_proxy;
 	action_signals[ACTION_ACTIVATE] =
 		g_signal_new ("activate", G_TYPE_FROM_CLASS (klass),
 			      G_SIGNAL_RUN_FIRST, G_STRUCT_OFFSET (GtkActionClass, activate),
 			      NULL, NULL, NULL, G_TYPE_NONE, 0);
-	g_object_class_install_property (oclass, 1,
+	g_object_class_install_property (oclass, ACTION_PROP_NAME,
+		g_param_spec_string ("name", NULL, NULL, NULL, G_PARAM_READWRITE | G_PARAM_CONSTRUCT));
+	g_object_class_install_property (oclass, ACTION_PROP_SENSITIVE,
 		g_param_spec_boolean ("sensitive", NULL, NULL, TRUE, G_PARAM_READWRITE));
-	g_object_class_install_property (oclass, 2,
+	g_object_class_install_property (oclass, ACTION_PROP_VISIBLE,
 		g_param_spec_boolean ("visible", NULL, NULL, TRUE, G_PARAM_READWRITE));
-	g_object_class_install_property (oclass, 3,
+	g_object_class_install_property (oclass, ACTION_PROP_LABEL,
 		g_param_spec_string ("label", NULL, NULL, NULL, G_PARAM_READWRITE));
-	g_object_class_install_property (oclass, 4,
+	g_object_class_install_property (oclass, ACTION_PROP_TOOLTIP,
 		g_param_spec_string ("tooltip", NULL, NULL, NULL, G_PARAM_READWRITE));
-	g_object_class_install_property (oclass, 5,
+	g_object_class_install_property (oclass, ACTION_PROP_ICON_NAME,
 		g_param_spec_string ("icon-name", NULL, NULL, NULL, G_PARAM_READWRITE));
-	g_object_class_install_property (oclass, 6,
-		g_param_spec_boolean ("active", NULL, NULL, FALSE, G_PARAM_READWRITE));
+	g_object_class_install_property (oclass, ACTION_PROP_STOCK_ID,
+		g_param_spec_string ("stock-id", NULL, NULL, NULL, G_PARAM_READWRITE));
+	g_object_class_install_property (oclass, ACTION_PROP_SHORT_LABEL,
+		g_param_spec_string ("short_label", NULL, NULL, NULL, G_PARAM_READWRITE));
+	g_object_class_install_property (oclass, ACTION_PROP_IS_IMPORTANT,
+		g_param_spec_boolean ("is-important", NULL, NULL, FALSE, G_PARAM_READWRITE));
 }
 
 static void
@@ -102,6 +210,7 @@ void gtk_action_set_label (GtkAction *action, const gchar *label) {
 const gchar *gtk_action_get_label (GtkAction *action) { return action ? action->label : NULL; }
 void gtk_action_set_short_label (GtkAction *action, const gchar *label) {
 	g_free (action->short_label); action->short_label = g_strdup (label);
+	g_object_notify (G_OBJECT (action), "short_label");
 }
 const gchar *gtk_action_get_short_label (GtkAction *action) { return action && action->short_label ? action->short_label : gtk_action_get_label (action); }
 void gtk_action_set_tooltip (GtkAction *action, const gchar *tooltip) {
@@ -137,14 +246,38 @@ void gtk_action_unblock_activate (GtkAction *action) { (void) action; }
 /* Toggle */
 enum { TOGGLE_TOGGLED, TOGGLE_LAST };
 static guint toggle_signals[TOGGLE_LAST];
+enum { TOGGLE_PROP_ACTIVE = 1 };
 
 G_DEFINE_TYPE (GtkToggleAction, gtk_toggle_action, GTK_TYPE_ACTION)
 
+static void
+gtk_toggle_action_set_property (GObject *object, guint prop_id, const GValue *value, GParamSpec *pspec)
+{
+	if (prop_id == TOGGLE_PROP_ACTIVE)
+		gtk_toggle_action_set_active (GTK_TOGGLE_ACTION (object), g_value_get_boolean (value));
+	else
+		G_OBJECT_CLASS (gtk_toggle_action_parent_class)->set_property (object, prop_id, value, pspec);
+}
+
+static void
+gtk_toggle_action_get_property (GObject *object, guint prop_id, GValue *value, GParamSpec *pspec)
+{
+	if (prop_id == TOGGLE_PROP_ACTIVE)
+		g_value_set_boolean (value, GTK_TOGGLE_ACTION (object)->active);
+	else
+		G_OBJECT_CLASS (gtk_toggle_action_parent_class)->get_property (object, prop_id, value, pspec);
+}
+
 static void gtk_toggle_action_class_init (GtkToggleActionClass *klass)
 {
+	GObjectClass *oc = G_OBJECT_CLASS (klass);
+	oc->set_property = gtk_toggle_action_set_property;
+	oc->get_property = gtk_toggle_action_get_property;
 	toggle_signals[TOGGLE_TOGGLED] =
 		g_signal_new ("toggled", G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_FIRST,
 			      G_STRUCT_OFFSET (GtkToggleActionClass, toggled), NULL, NULL, NULL, G_TYPE_NONE, 0);
+	g_object_class_install_property (oc, TOGGLE_PROP_ACTIVE,
+		g_param_spec_boolean ("active", NULL, NULL, FALSE, G_PARAM_READWRITE));
 }
 static void gtk_toggle_action_init (GtkToggleAction *action) { action->active = FALSE; }
 
@@ -265,6 +398,14 @@ gtk_action_group_finalize (GObject *object)
 static void gtk_action_group_class_init (GtkActionGroupClass *klass)
 {
 	G_OBJECT_CLASS (klass)->finalize = gtk_action_group_finalize;
+	g_signal_new ("connect-proxy", G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_FIRST,
+		      0, NULL, NULL, NULL, G_TYPE_NONE, 2, GTK_TYPE_ACTION, GTK_TYPE_WIDGET);
+	g_signal_new ("disconnect-proxy", G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_FIRST,
+		      0, NULL, NULL, NULL, G_TYPE_NONE, 2, GTK_TYPE_ACTION, GTK_TYPE_WIDGET);
+	g_signal_new ("pre-activate", G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_FIRST,
+		      0, NULL, NULL, NULL, G_TYPE_NONE, 1, GTK_TYPE_ACTION);
+	g_signal_new ("post-activate", G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_FIRST,
+		      0, NULL, NULL, NULL, G_TYPE_NONE, 1, GTK_TYPE_ACTION);
 }
 static void gtk_action_group_init (GtkActionGroup *group)
 {
