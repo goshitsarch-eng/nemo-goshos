@@ -602,6 +602,14 @@ on_menu_selection_done (GtkMenuShell *menushell,
 	window->details->menu_hide_delay_id = g_timeout_add (0, (GSourceFunc) hide_menu_on_delay, window);
 }
 
+static gboolean
+nemo_window_present_idle (gpointer data)
+{
+	if (GTK_IS_WINDOW (data))
+		gtk_widget_show (GTK_WIDGET (data));
+	return G_SOURCE_REMOVE;
+}
+
 static void
 nemo_window_constructed (GObject *self)
 {
@@ -768,6 +776,11 @@ nemo_window_constructed (GObject *self)
                               "notify::scale-factor",
                               G_CALLBACK (nemo_window_reload),
                               window);
+
+	/* GTK4 does not map toplevels from gtk_widget_show; present once the
+	 * slot has had a chance to load so Adwaita chrome is not stuck unmapped. */
+	if (!window->details->disable_chrome)
+		g_idle_add (nemo_window_present_idle, window);
 }
 
 static void
@@ -902,12 +915,22 @@ nemo_window_view_visible (NemoWindow *window,
 
 	slot = nemo_window_get_slot_for_view (window, view);
 
+	if (slot == NULL) {
+		gtk_widget_show (GTK_WIDGET (window));
+		return;
+	}
+
 	if (slot->visible) {
 		return;
 	}
 
 	slot->visible = TRUE;
 	pane = slot->pane;
+
+	if (pane == NULL || !GTK_IS_WIDGET (pane)) {
+		gtk_widget_show (GTK_WIDGET (window));
+		return;
+	}
 
 	if (gtk_widget_get_visible (GTK_WIDGET (pane))) {
 		return;
@@ -929,7 +952,8 @@ nemo_window_view_visible (NemoWindow *window,
 	for (walk = window->details->panes; walk; walk = walk->next) {
 		pane = walk->data;
 
-		if (!gtk_widget_get_visible (GTK_WIDGET (pane))) {
+		if (pane == NULL || !GTK_IS_WIDGET (pane) ||
+		    !gtk_widget_get_visible (GTK_WIDGET (pane))) {
 			return;
 		}
 
@@ -2480,9 +2504,9 @@ NemoWindow *
 nemo_window_new (GtkApplication *application,
                  GdkScreen *screen)
 {
+	(void) screen;
 	return g_object_new (NEMO_TYPE_WINDOW,
 			     "application", application,
-			     "screen", screen,
 			     NULL);
 }
 

@@ -283,6 +283,9 @@ void gtk_paned_pack2 (GtkPaned *paned, GtkWidget *child, gboolean resize, gboole
 
 void gtk_widget_destroy (GtkWidget *widget);
 void gtk_widget_show_all (GtkWidget *widget);
+void verne_gtk_widget_show (GtkWidget *widget);
+#undef gtk_widget_show
+#define gtk_widget_show(w) verne_gtk_widget_show (w)
 void gtk_widget_reparent (GtkWidget *widget, GtkWidget *new_parent);
 void gtk_widget_get_allocation (GtkWidget *widget, GtkAllocation *allocation);
 void gtk_widget_set_allocation (GtkWidget *widget, const GtkAllocation *allocation);

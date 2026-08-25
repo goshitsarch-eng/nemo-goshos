@@ -45,6 +45,10 @@ typedef struct {
 	VerneWindowStateEvent window_state;
 	VerneShowFunc hide;
 	gboolean wrapped;
+	gboolean in_realize;
+	gboolean in_unrealize;
+	gboolean in_show;
+	gboolean in_size_allocate;
 } VerneVfuncs;
 
 static void (*orig_gtk_widget_realize) (GtkWidget *);
@@ -365,27 +369,157 @@ ensure_controllers (GtkWidget *widget)
 	(void) v;
 }
 
+static VerneVfuncs *
+lookup_vfuncs_realize (GType type)
+{
+	VerneVfuncs *v;
+
+	if (vfunc_table == NULL)
+		return NULL;
+	while (type != 0 && type != GTK_TYPE_WIDGET && type != G_TYPE_OBJECT) {
+		v = g_hash_table_lookup (vfunc_table, GSIZE_TO_POINTER (type));
+		if (v != NULL && !v->in_realize)
+			return v;
+		type = g_type_parent (type);
+	}
+	return NULL;
+}
+
+static VerneVfuncs *
+lookup_vfuncs_unrealize (GType type)
+{
+	VerneVfuncs *v;
+
+	if (vfunc_table == NULL)
+		return NULL;
+	while (type != 0 && type != GTK_TYPE_WIDGET && type != G_TYPE_OBJECT) {
+		v = g_hash_table_lookup (vfunc_table, GSIZE_TO_POINTER (type));
+		if (v != NULL && !v->in_unrealize)
+			return v;
+		type = g_type_parent (type);
+	}
+	return NULL;
+}
+
+static VerneVfuncs *
+lookup_vfuncs_show (GType type)
+{
+	VerneVfuncs *v;
+
+	if (vfunc_table == NULL)
+		return NULL;
+	while (type != 0 && type != GTK_TYPE_WIDGET && type != G_TYPE_OBJECT) {
+		v = g_hash_table_lookup (vfunc_table, GSIZE_TO_POINTER (type));
+		if (v != NULL && !v->in_show)
+			return v;
+		type = g_type_parent (type);
+	}
+	return NULL;
+}
+
+static VerneVfuncs *
+lookup_vfuncs_size_allocate (GType type)
+{
+	VerneVfuncs *v;
+
+	if (vfunc_table == NULL)
+		return NULL;
+	while (type != 0 && type != GTK_TYPE_WIDGET && type != G_TYPE_OBJECT) {
+		v = g_hash_table_lookup (vfunc_table, GSIZE_TO_POINTER (type));
+		if (v != NULL && !v->in_size_allocate)
+			return v;
+		type = g_type_parent (type);
+	}
+	return NULL;
+}
+
+static void
+call_gtk4_realize (GtkWidget *widget, VerneVfuncs *v)
+{
+	if (gtk_widget_get_realized (widget))
+		return;
+	if (v && v->orig_realize)
+		v->orig_realize (widget);
+	else if (orig_gtk_widget_realize)
+		orig_gtk_widget_realize (widget);
+}
+
+static GQuark
+verne_presenting_quark (void)
+{
+	static GQuark q;
+	if (q == 0)
+		q = g_quark_from_static_string ("verne-presenting-window");
+	return q;
+}
+
+static void
+verne_window_present_safe (GtkWindow *window)
+{
+	GtkWidget *widget;
+
+	g_return_if_fail (GTK_IS_WINDOW (window));
+	widget = GTK_WIDGET (window);
+
+	if (g_object_get_qdata (G_OBJECT (window), verne_presenting_quark ()))
+		return;
+	g_object_set_qdata (G_OBJECT (window), verne_presenting_quark (), GINT_TO_POINTER (1));
+
+	if (!gtk_widget_get_visible (widget))
+		gtk_widget_set_visible (widget, TRUE);
+
+	if (!gtk_widget_get_realized (widget))
+		gtk_widget_realize (widget);
+
+	if (gtk_widget_get_realized (widget) && !gtk_widget_get_mapped (widget))
+		gtk_widget_map (widget);
+
+	if (gtk_widget_get_realized (widget))
+		gtk_window_present (window);
+
+	g_object_set_qdata (G_OBJECT (window), verne_presenting_quark (), NULL);
+}
+
 static void
 wrapped_realize (GtkWidget *widget)
 {
-	VerneVfuncs *v = lookup_vfuncs_type (G_OBJECT_TYPE (widget));
+	VerneVfuncs *v = lookup_vfuncs_realize (G_OBJECT_TYPE (widget));
 
 	ensure_controllers (widget);
-	if (v && v->realize)
+	if (v == NULL) {
+		if (orig_gtk_widget_realize)
+			orig_gtk_widget_realize (widget);
+		return;
+	}
+
+	v->in_realize = TRUE;
+
+	/* GTK3 realize handlers usually chain to the parent class. Run them
+	 * first so that chain reaches GTK4 native realize. Handlers that do
+	 * not chain (and gtk_widget_set_realized is a no-op here) leave the
+	 * widget unrealized; fall back to the saved GTK4 vfunc. */
+	if (v->realize)
 		v->realize (widget);
-	else if (v && v->orig_realize)
-		v->orig_realize (widget);
+
+	call_gtk4_realize (widget, v);
+
+	v->in_realize = FALSE;
 }
 
 static void
 wrapped_unrealize (GtkWidget *widget)
 {
-	VerneVfuncs *v = lookup_vfuncs_type (G_OBJECT_TYPE (widget));
+	VerneVfuncs *v = lookup_vfuncs_unrealize (G_OBJECT_TYPE (widget));
 
-	if (v && v->unrealize)
+	if (v == NULL)
+		return;
+
+	v->in_unrealize = TRUE;
+	if (v->unrealize)
 		v->unrealize (widget);
-	else if (v && v->orig_unrealize)
+	if (gtk_widget_get_realized (widget) && v->orig_unrealize)
 		v->orig_unrealize (widget);
+	v->in_unrealize = FALSE;
 }
 
 static void
@@ -425,17 +559,23 @@ wrapped_snapshot (GtkWidget *widget, GtkSnapshot *snapshot)
 static void
 wrapped_size_allocate (GtkWidget *widget, int width, int height, int baseline)
 {
-	VerneVfuncs *v = lookup_vfuncs_type (G_OBJECT_TYPE (widget));
+	VerneVfuncs *v = lookup_vfuncs_size_allocate (G_OBJECT_TYPE (widget));
 	GtkAllocation alloc;
 
 	alloc.x = 0;
 	alloc.y = 0;
 	alloc.width = width;
 	alloc.height = height;
-	if (v && v->size_allocate)
+
+	if (v == NULL)
+		return;
+
+	v->in_size_allocate = TRUE;
+	if (v->size_allocate)
 		v->size_allocate (widget, &alloc);
-	else if (v && v->orig_size_allocate)
+	else if (v->orig_size_allocate)
 		v->orig_size_allocate (widget, width, height, baseline);
+	v->in_size_allocate = FALSE;
 }
 
 static void
@@ -477,14 +617,35 @@ wrapped_dispose (GObject *object)
 static void
 wrapped_show (GtkWidget *widget)
 {
-	VerneVfuncs *v = lookup_vfuncs_type (G_OBJECT_TYPE (widget));
+	VerneVfuncs *v = lookup_vfuncs_show (G_OBJECT_TYPE (widget));
 
-	if (v && v->show)
-		v->show (widget);
-	else if (v && v->orig_show)
-		v->orig_show (widget);
-	else
+	if (v) {
+		v->in_show = TRUE;
+		if (v->show)
+			v->show (widget);
+		else if (v->orig_show)
+			v->orig_show (widget);
+		else
+			gtk_widget_set_visible (widget, TRUE);
+		v->in_show = FALSE;
+	} else {
 		gtk_widget_set_visible (widget, TRUE);
+	}
+
+	/* GTK4 gtk_widget_show / gtk_widget_real_show do not map toplevels.
+	 * Present after the GTK3 show hook so Adwaita chrome actually appears. */
+	if (GTK_IS_WINDOW (widget))
+		verne_window_present_safe (GTK_WINDOW (widget));
+}
+
+#undef gtk_widget_show
+void
+verne_gtk_widget_show (GtkWidget *widget)
+{
+	g_return_if_fail (GTK_IS_WIDGET (widget));
+	gtk_widget_set_visible (widget, TRUE);
+	if (GTK_IS_WINDOW (widget))
+		verne_window_present_safe (GTK_WINDOW (widget));
 }
 
 static void
@@ -545,7 +706,7 @@ wrap_class (VerneVfuncs *v)
 		wclass->measure = wrapped_measure;
 	if (v->destroy)
 		oclass->dispose = wrapped_dispose;
-	if (v->show)
+	if (v->show || g_type_is_a (G_TYPE_FROM_CLASS (oclass), GTK_TYPE_WINDOW))
 		wclass->show = wrapped_show;
 	if (v->hide)
 		wclass->hide = wrapped_hide;
