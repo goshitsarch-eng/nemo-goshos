@@ -427,6 +427,8 @@ const gchar *gtk_action_group_get_name (GtkActionGroup *group) { return group->n
 GtkAction *
 gtk_action_group_get_action (GtkActionGroup *group, const gchar *action_name)
 {
+	if (group == NULL || group->actions == NULL)
+		return NULL;
 	return g_hash_table_lookup (group->actions, action_name);
 }
 
@@ -442,6 +444,8 @@ GList *
 gtk_action_group_list_actions (GtkActionGroup *group)
 {
 	GList *list = NULL;
+	if (group == NULL || group->actions == NULL)
+		return NULL;
 	g_hash_table_foreach (group->actions, list_action, &list);
 	return list;
 }
