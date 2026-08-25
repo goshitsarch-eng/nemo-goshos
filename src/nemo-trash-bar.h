@@ -40,7 +40,7 @@ typedef struct NemoTrashBarPrivate NemoTrashBarPrivate;
 
 typedef struct
 {
-	GtkInfoBar parent;
+	VerneInfoBar parent;
 
 	NemoTrashBarPrivate *priv;
 } NemoTrashBar;

@@ -390,7 +390,7 @@ static void disconnect_bookmark_signals (NemoView *view);
 static void run_action_callback (NemoAction *action, gpointer callback_data);
 static void update_accelerated_actions (NemoView *view);
 
-G_DEFINE_TYPE (NemoView, nemo_view, GTK_TYPE_SCROLLED_WINDOW);
+G_DEFINE_TYPE (NemoView, nemo_view, VERNE_TYPE_SCROLLED_WINDOW);
 #define parent_class nemo_view_parent_class
 
 /* virtual methods (public and non-public) */
@@ -2996,7 +2996,7 @@ nemo_view_destroy (GtkWidget *object)
 
     g_signal_handlers_disconnect_by_func (nemo_plugin_preferences, G_CALLBACK (plugin_prefs_changed), view);
 
-	GTK_WIDGET_CLASS (nemo_view_parent_class)->destroy (object);
+	verne_widget_chain_destroy (nemo_view_parent_class, GTK_WIDGET (object));
 }
 
 static void
@@ -11413,7 +11413,7 @@ nemo_view_scroll_event (GtkWidget *widget,
 		return TRUE;
 	}
 
-	return GTK_WIDGET_CLASS (parent_class)->scroll_event (widget, event);
+	return verne_widget_chain_scroll (parent_class, widget, event);
 }
 
 
@@ -11428,10 +11428,6 @@ nemo_view_parent_set (GtkWidget *widget,
 
 	parent = gtk_widget_get_parent (widget);
 	g_assert (parent == NULL || old_parent == NULL);
-
-	if (GTK_WIDGET_CLASS (parent_class)->parent_set != NULL) {
-		GTK_WIDGET_CLASS (parent_class)->parent_set (widget, old_parent);
-	}
 
 	if (parent != NULL) {
 		g_assert (old_parent == NULL);
@@ -11464,9 +11460,8 @@ nemo_view_class_init (NemoViewClass *klass)
 	oclass->finalize = nemo_view_finalize;
 	oclass->set_property = nemo_view_set_property;
 
-	widget_class->destroy = nemo_view_destroy;
-	widget_class->scroll_event = nemo_view_scroll_event;
-	widget_class->parent_set = nemo_view_parent_set;
+	verne_widget_class_set_destroy (widget_class, nemo_view_destroy);
+	verne_widget_class_set_scroll_event (widget_class, nemo_view_scroll_event);
 
 	g_type_class_add_private (klass, sizeof (NemoViewDetails));
 

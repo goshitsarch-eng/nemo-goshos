@@ -90,3 +90,33 @@ endforeach
 ################################################################################
 
 subdir('icons')
+
+################################################################################
+# Compile schemas into the build tree so uninstalled Verne can launch.
+
+glib_compile_schemas = find_program('glib-compile-schemas')
+
+install_data('org.cinnamon.desktop.gschema.xml',
+  install_dir: join_paths(get_option('datadir'), 'glib-2.0', 'schemas')
+)
+
+configure_file(
+  input: 'org.cinnamon.desktop.gschema.xml',
+  output: 'org.cinnamon.desktop.gschema.xml',
+  copy: true,
+)
+configure_file(
+  input: meson.project_source_root() / 'libnemo-private' / 'org.nemo.gschema.xml',
+  output: 'org.nemo.gschema.xml',
+  copy: true,
+)
+
+custom_target('gschemas.compiled',
+  output: 'gschemas.compiled',
+  command: [glib_compile_schemas, meson.current_build_dir()],
+  depend_files: [
+    'org.cinnamon.desktop.gschema.xml',
+    meson.project_source_root() / 'libnemo-private' / 'org.nemo.gschema.xml',
+  ],
+  build_by_default: true,
+)

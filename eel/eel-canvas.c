@@ -99,7 +99,7 @@ enum {
 
 static void eel_canvas_item_class_init     (EelCanvasItemClass *klass);
 static void eel_canvas_item_init           (EelCanvasItem      *item);
-static int  emit_event                       (EelCanvas *canvas, GdkEvent *event);
+static int  emit_event                       (EelCanvas *canvas, VerneGdkEvent *event);
 
 static guint item_signals[ITEM_LAST_SIGNAL] = { 0 };
 
@@ -1035,7 +1035,7 @@ void
 eel_canvas_item_grab_focus (EelCanvasItem *item)
 {
 	EelCanvasItem *focused_item;
-	GdkEvent ev;
+	VerneGdkEvent ev;
 
 	g_return_if_fail (EEL_IS_CANVAS_ITEM (item));
 	g_return_if_fail (gtk_widget_get_can_focus (GTK_WIDGET (item->canvas)));
@@ -2312,23 +2312,23 @@ eel_canvas_class_init (EelCanvasClass *klass)
 	gobject_class->set_property = eel_canvas_set_property;
 	gobject_class->get_property = eel_canvas_get_property;
 
-	widget_class->destroy = eel_canvas_destroy;
+	verne_widget_class_set_destroy (widget_class, eel_canvas_destroy);
 	widget_class->map = eel_canvas_map;
 	widget_class->unmap = eel_canvas_unmap;
-	widget_class->realize = eel_canvas_realize;
-	widget_class->unrealize = eel_canvas_unrealize;
-	widget_class->size_allocate = eel_canvas_size_allocate;
-	widget_class->button_press_event = eel_canvas_button;
-	widget_class->button_release_event = eel_canvas_button;
-	widget_class->motion_notify_event = eel_canvas_motion;
-	widget_class->draw = eel_canvas_draw;
-	widget_class->key_press_event = eel_canvas_key;
-	widget_class->key_release_event = eel_canvas_key;
-	widget_class->enter_notify_event = eel_canvas_crossing;
-	widget_class->leave_notify_event = eel_canvas_crossing;
-	widget_class->focus_in_event = eel_canvas_focus_in;
-	widget_class->focus_out_event = eel_canvas_focus_out;
-	widget_class->get_accessible = eel_canvas_get_accessible;
+	verne_widget_class_set_realize (widget_class, eel_canvas_realize);
+	verne_widget_class_set_unrealize (widget_class, eel_canvas_unrealize);
+	verne_widget_class_set_size_allocate (widget_class, eel_canvas_size_allocate);
+	verne_widget_class_set_button_press_event (widget_class, eel_canvas_button);
+	verne_widget_class_set_button_release_event (widget_class, eel_canvas_button);
+	verne_widget_class_set_motion_notify_event (widget_class, eel_canvas_motion);
+	verne_widget_class_set_draw (widget_class, eel_canvas_draw);
+	verne_widget_class_set_key_press_event (widget_class, eel_canvas_key);
+	verne_widget_class_set_key_release_event (widget_class, eel_canvas_key);
+	verne_widget_class_set_enter_notify_event (widget_class, eel_canvas_crossing);
+	verne_widget_class_set_leave_notify_event (widget_class, eel_canvas_crossing);
+	verne_widget_class_set_focus_in_event (widget_class, eel_canvas_focus_in);
+	verne_widget_class_set_focus_out_event (widget_class, eel_canvas_focus_out);
+	verne_widget_class_set_get_accessible (widget_class, eel_canvas_get_accessible);
 
 	klass->draw_background = eel_canvas_draw_background;
 	klass->request_update = eel_canvas_request_update_real;
@@ -2452,8 +2452,7 @@ eel_canvas_destroy (GtkWidget *object)
 
 	shutdown_transients (canvas);
 
-	if (GTK_WIDGET_CLASS (canvas_parent_class)->destroy)
-		(* GTK_WIDGET_CLASS (canvas_parent_class)->destroy) (object);
+	verne_widget_chain_destroy (canvas_parent_class, object);
 }
 
 /**
@@ -2680,7 +2679,7 @@ eel_canvas_size_allocate (GtkWidget *widget, GtkAllocation *allocation)
 	g_return_if_fail (allocation != NULL);
 
 	if (GTK_WIDGET_CLASS (canvas_parent_class)->size_allocate)
-		(* GTK_WIDGET_CLASS (canvas_parent_class)->size_allocate) (widget, allocation);
+		(* GTK_WIDGET_CLASS (canvas_parent_class)->size_allocate) (widget, allocation->width, allocation->height, -1);
 
 	canvas = EEL_CANVAS (widget);
 
@@ -2708,9 +2707,9 @@ eel_canvas_size_allocate (GtkWidget *widget, GtkAllocation *allocation)
  */
 
 static int
-emit_event (EelCanvas *canvas, GdkEvent *event)
+emit_event (EelCanvas *canvas, VerneGdkEvent *event)
 {
-	GdkEvent ev;
+	VerneGdkEvent ev;
 	gint finished;
 	EelCanvasItem *item;
 	EelCanvasItem *parent;
@@ -2845,7 +2844,7 @@ emit_event (EelCanvas *canvas, GdkEvent *event)
  * Also emits enter/leave events for items as appropriate.
  */
 static int
-pick_current_item (EelCanvas *canvas, GdkEvent *event)
+pick_current_item (EelCanvas *canvas, VerneGdkEvent *event)
 {
 	int button_down;
 	double x, y;
@@ -2942,7 +2941,7 @@ pick_current_item (EelCanvas *canvas, GdkEvent *event)
 	if ((canvas->new_current_item != canvas->current_item)
 	    && (canvas->current_item != NULL)
 	    && !canvas->left_grabbed_item) {
-		GdkEvent new_event;
+		VerneGdkEvent new_event;
 
 		new_event = canvas->pick_event;
 		new_event.type = GDK_LEAVE_NOTIFY;
@@ -2967,7 +2966,7 @@ pick_current_item (EelCanvas *canvas, GdkEvent *event)
 	canvas->current_item = canvas->new_current_item;
 
 	if (canvas->current_item != NULL) {
-		GdkEvent new_event;
+		VerneGdkEvent new_event;
 
 		new_event = canvas->pick_event;
 		new_event.type = GDK_ENTER_NOTIFY;
@@ -3034,10 +3033,10 @@ eel_canvas_button (GtkWidget *widget, GdkEventButton *event)
 		 */
 		event->state ^= mask;
 		canvas->state = event->state;
-		pick_current_item (canvas, (GdkEvent *) event);
+		pick_current_item (canvas, (VerneGdkEvent *) event);
 		event->state ^= mask;
 		canvas->state = event->state;
-		retval = emit_event (canvas, (GdkEvent *) event);
+		retval = emit_event (canvas, (VerneGdkEvent *) event);
 		break;
 
 	case GDK_BUTTON_RELEASE:
@@ -3045,10 +3044,10 @@ eel_canvas_button (GtkWidget *widget, GdkEventButton *event)
 		 * after the button has been released
 		 */
 		canvas->state = event->state;
-		retval = emit_event (canvas, (GdkEvent *) event);
+		retval = emit_event (canvas, (VerneGdkEvent *) event);
 		event->state ^= mask;
 		canvas->state = event->state;
-		pick_current_item (canvas, (GdkEvent *) event);
+		pick_current_item (canvas, (VerneGdkEvent *) event);
 		event->state ^= mask;
 		break;
 
@@ -3074,8 +3073,8 @@ eel_canvas_motion (GtkWidget *widget, GdkEventMotion *event)
 		return FALSE;
 
 	canvas->state = event->state;
-	pick_current_item (canvas, (GdkEvent *) event);
-	return emit_event (canvas, (GdkEvent *) event);
+	pick_current_item (canvas, (VerneGdkEvent *) event);
+	return emit_event (canvas, (VerneGdkEvent *) event);
 }
 
 /* Key event handler for the canvas */
@@ -3089,12 +3088,12 @@ eel_canvas_key (GtkWidget *widget, GdkEventKey *event)
 
 	canvas = EEL_CANVAS (widget);
 	
-	if (emit_event (canvas, (GdkEvent *) event))
+	if (emit_event (canvas, (VerneGdkEvent *) event))
 		return TRUE;
 	if (event->type == GDK_KEY_RELEASE)
-		return GTK_WIDGET_CLASS (canvas_parent_class)->key_release_event (widget, event);
+		return verne_widget_chain_key_release (canvas_parent_class, widget, event);
 	else
-		return GTK_WIDGET_CLASS (canvas_parent_class)->key_press_event (widget, event);
+		return verne_widget_chain_key_press (canvas_parent_class, widget, event);
 }
 
 
@@ -3113,7 +3112,7 @@ eel_canvas_crossing (GtkWidget *widget, GdkEventCrossing *event)
 		return FALSE;
 
 	canvas->state = event->state;
-	return pick_current_item (canvas, (GdkEvent *) event);
+	return pick_current_item (canvas, (VerneGdkEvent *) event);
 }
 
 /* Focus in handler for the canvas */
@@ -3125,7 +3124,7 @@ eel_canvas_focus_in (GtkWidget *widget, GdkEventFocus *event)
 	canvas = EEL_CANVAS (widget);
 
 	if (canvas->focused_item)
-		return emit_event (canvas, (GdkEvent *) event);
+		return emit_event (canvas, (VerneGdkEvent *) event);
 	else
 		return FALSE;
 }
@@ -3145,7 +3144,7 @@ eel_canvas_focus_out (GtkWidget *widget, GdkEventFocus *event)
 	canvas = EEL_CANVAS (widget);
 
 	if (canvas->focused_item)
-		return emit_event (canvas, (GdkEvent *) event);
+		return emit_event (canvas, (VerneGdkEvent *) event);
 	else
 		return FALSE;
 }
@@ -3252,8 +3251,7 @@ eel_canvas_draw (GtkWidget *widget, cairo_t *cr)
     	cairo_restore (cr);
 
 	/* Chain up to get exposes on child widgets */
-        if (GTK_WIDGET_CLASS (canvas_parent_class)->draw)
-                GTK_WIDGET_CLASS (canvas_parent_class)->draw (widget, cr);
+	verne_widget_chain_draw (canvas_parent_class, widget, cr);
 
         cairo_region_destroy (region);
 	return FALSE;
@@ -3475,9 +3473,6 @@ eel_canvas_set_pixels_per_unit (EelCanvas *canvas, double n)
 	double cx, cy;
 	int x1, y1;
 	int center_x, center_y;
-	GdkWindow *window;
-	GdkWindowAttr attributes;
-	gint attributes_mask;
 	GtkAllocation allocation;
 	GtkAdjustment *vadjustment, *hadjustment;
 
@@ -3507,44 +3502,7 @@ eel_canvas_set_pixels_per_unit (EelCanvas *canvas, double n)
 		eel_canvas_request_update (canvas);
 	}
 
-	/* Map a background None window over the bin_window to avoid
-	 * scrolling the window scroll causing exposes.
-	 */
-	window = NULL;
-	if (gtk_widget_get_mapped (widget)) {
-		attributes.window_type = GDK_WINDOW_CHILD;
-		gtk_widget_get_allocation (widget, &allocation);
-		attributes.x = allocation.x;
-		attributes.y = allocation.y;
-		attributes.width = allocation.width;
-		attributes.height = allocation.height;
-		attributes.wclass = GDK_INPUT_OUTPUT;
-		attributes.visual = gtk_widget_get_visual (widget);
-		attributes.event_mask = GDK_VISIBILITY_NOTIFY_MASK;
-		
-		attributes_mask = GDK_WA_X | GDK_WA_Y | GDK_WA_VISUAL;
-		
-		window = gdk_window_new (gtk_widget_get_parent_window (widget),
-					 &attributes, attributes_mask);
-		gdk_window_set_user_data (window, widget);
-		
-		gdk_window_show (window);
-	}
-
 	scroll_to (canvas, x1, y1);
-
-	/* If we created a an overlapping background None window, remove it how.
-	 *
-	 * TODO: We would like to temporarily set the bin_window background to
-	 * None to avoid clearing the bin_window to the background, but gdk doesn't
-	 * expose enough to let us do this, so we get a flash-effect here. At least
-	 * it looks better than scroll + expose.
-	 */
-	if (window != NULL) {
-		gdk_window_hide (window);
-		gdk_window_set_user_data (window, NULL);
-		gdk_window_destroy (window);
-	}
 
 	canvas->need_repick = TRUE;
 }
@@ -3680,8 +3638,8 @@ eel_canvas_request_redraw (EelCanvas *canvas, int x1, int y1, int x2, int y2)
 	bbox.width = x2 - x1;
 	bbox.height = y2 - y1;
 
-	gdk_window_invalidate_rect (gtk_layout_get_bin_window (GTK_LAYOUT (canvas)),
-				    &bbox, FALSE);
+	gtk_widget_queue_draw (GTK_WIDGET (canvas));
+	(void) bbox;
 }
 
 /**

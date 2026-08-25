@@ -36,7 +36,7 @@ typedef struct NemoThumbnailProblemBarPrivate NemoThumbnailProblemBarPrivate;
 
 typedef struct
 {
-	GtkInfoBar parent;
+	VerneInfoBar parent;
 
 	NemoThumbnailProblemBarPrivate *priv;
 } NemoThumbnailProblemBar;

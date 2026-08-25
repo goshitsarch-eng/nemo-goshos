@@ -117,6 +117,9 @@ main (int argc, char *argv[])
 	textdomain (GETTEXT_PACKAGE);
 
 	g_set_prgname ("nemo-desktop");
+	g_set_application_name (_("Verne Desktop"));
+	verne_compat_init ();
+	adw_init ();
 
 #ifdef HAVE_GTK_LAYER_SHELL
 	if (check_layer_shell_support ())

@@ -270,7 +270,7 @@ destroy (GtkWidget *object)
 	g_free (entry->details->current_directory);
 	entry->details->current_directory = NULL;
 	
-	GTK_WIDGET_CLASS (nemo_location_entry_parent_class)->destroy (object);
+	verne_widget_chain_destroy (nemo_location_entry_parent_class, GTK_WIDGET (object));
 }
 
 static void
@@ -314,7 +314,7 @@ nemo_location_entry_focus_in (GtkWidget     *widget,
 		entry->details->setting_special_text = FALSE;
 	}
 
-	return GTK_WIDGET_CLASS (nemo_location_entry_parent_class)->focus_in_event (widget, event);
+	return verne_widget_chain_focus_in (nemo_location_entry_parent_class, widget, event);
 }
 
 static void
@@ -357,8 +357,8 @@ nemo_location_entry_class_init (NemoLocationEntryClass *class)
 	GtkEntryClass *entry_class;
 
 	widget_class = GTK_WIDGET_CLASS (class);
-	widget_class->focus_in_event = nemo_location_entry_focus_in;
-	widget_class->destroy = destroy;
+	verne_widget_class_set_focus_in_event (widget_class, nemo_location_entry_focus_in);
+	verne_widget_class_set_destroy (widget_class, destroy);
 
 	gobject_class = G_OBJECT_CLASS (class);
 	gobject_class->finalize = finalize;

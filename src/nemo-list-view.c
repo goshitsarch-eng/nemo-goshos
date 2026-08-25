@@ -1097,7 +1097,6 @@ button_press_callback (GtkWidget *widget, GdkEventButton *event, gpointer callba
 	GtkTreePath *path;
 	gboolean call_parent;
 	GtkTreeSelection *selection;
-	GtkWidgetClass *tree_view_class;
 
 	int expander_size, horizontal_separator;
 	gboolean on_expander;
@@ -1105,7 +1104,6 @@ button_press_callback (GtkWidget *widget, GdkEventButton *event, gpointer callba
 
 	view = NEMO_LIST_VIEW (callback_data);
 	tree_view = GTK_TREE_VIEW (widget);
-	tree_view_class = GTK_WIDGET_GET_CLASS (tree_view);
 	selection = gtk_tree_view_get_selection (tree_view);
 	blank_click = FALSE;
 
@@ -1248,7 +1246,7 @@ button_press_callback (GtkWidget *widget, GdkEventButton *event, gpointer callba
 								 row_activated_callback,
 								 view);
 
-				tree_view_class->button_press_event (widget, event);
+				gtk_widget_grab_focus (widget);
 
 				g_signal_handlers_unblock_by_func (tree_view,
 								   row_activated_callback,
@@ -1286,7 +1284,7 @@ button_press_callback (GtkWidget *widget, GdkEventButton *event, gpointer callba
 		/* Deselect if people click outside any row. It's OK to
 		   let default code run; it won't reselect anything. */
 		gtk_tree_selection_unselect_all (gtk_tree_view_get_selection (tree_view));
-		tree_view_class->button_press_event (widget, event);
+		gtk_widget_grab_focus (widget);
 
 		if (event->button == 3) {
 			do_popup_menu (widget, view, event);

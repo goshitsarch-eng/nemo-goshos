@@ -2746,7 +2746,7 @@ destroy (GtkWidget *object)
 
 	remove_search_entry_timeout (container);
 
-	GTK_WIDGET_CLASS (nemo_icon_container_parent_class)->destroy (object);
+	verne_widget_chain_destroy (nemo_icon_container_parent_class, GTK_WIDGET (object));
 }
 
 static void
@@ -2857,7 +2857,7 @@ size_allocate (GtkWidget *widget,
         }
     }
 
-	GTK_WIDGET_CLASS (nemo_icon_container_parent_class)->size_allocate (widget, allocation);
+	verne_widget_chain_size_allocate (nemo_icon_container_parent_class, widget, allocation);
 
 	container->details->has_been_allocated = TRUE;
 
@@ -2975,7 +2975,8 @@ style_updated (GtkWidget *widget)
 	 * because that resets the background of the window.
 	 */
 	if (!nemo_icon_container_get_is_desktop (container)) {
-		GTK_WIDGET_CLASS (nemo_icon_container_parent_class)->style_updated (widget);
+		if (GTK_WIDGET_CLASS (nemo_icon_container_parent_class)->css_changed)
+			GTK_WIDGET_CLASS (nemo_icon_container_parent_class)->css_changed (widget, NULL);
 	}
 
 	if (gtk_widget_get_realized (widget)) {
@@ -3013,7 +3014,7 @@ button_press_event (GtkWidget *widget,
 	}
 
 	/* Invoke the canvas event handler and see if an item picks up the event. */
-	clicked_on_item = GTK_WIDGET_CLASS (nemo_icon_container_parent_class)->button_press_event (widget, event);
+	clicked_on_item = verne_widget_chain_button_press (nemo_icon_container_parent_class, widget, event);
 
 	/* Move focus to icon container, unless we're still renaming (to avoid exiting
 	 * renaming mode)
@@ -3488,7 +3489,7 @@ button_release_event (GtkWidget *widget,
 
 	if (event->button == RUBBERBAND_BUTTON && details->rubberband_info.active) {
 		stop_rubberbanding (container, event->time);
-        return GTK_WIDGET_CLASS (nemo_icon_container_parent_class)->button_release_event (widget, event);
+        return verne_widget_chain_button_release (nemo_icon_container_parent_class, widget, event);
 	}
 
 	if (event->button == details->drag_button) {
@@ -3517,7 +3518,7 @@ button_release_event (GtkWidget *widget,
 		return TRUE;
 	}
 
-	return GTK_WIDGET_CLASS (nemo_icon_container_parent_class)->button_release_event (widget, event);
+	return verne_widget_chain_button_release (nemo_icon_container_parent_class, widget, event);
 }
 
 static int
@@ -3587,7 +3588,7 @@ motion_notify_event (GtkWidget *widget,
 		}
 	}
 
-	return GTK_WIDGET_CLASS (nemo_icon_container_parent_class)->motion_notify_event (widget, event);
+	return verne_widget_chain_motion (nemo_icon_container_parent_class, widget, event);
 }
 
 static void
@@ -4305,7 +4306,7 @@ key_press_event (GtkWidget *widget,
 	}
 
 	if (!handled) {
-		handled = GTK_WIDGET_CLASS (nemo_icon_container_parent_class)->key_press_event (widget, event);
+		handled = verne_widget_chain_key_press (nemo_icon_container_parent_class, widget, event);
 	}
 
 	/* For non-desktop containers, forward keypresses to the filter bar.
@@ -4869,21 +4870,21 @@ nemo_icon_container_class_init (NemoIconContainerClass *class)
 	/* GtkWidget class.  */
 
 	widget_class = GTK_WIDGET_CLASS (class);
-	widget_class->destroy = destroy;
-	widget_class->size_allocate = size_allocate;
+	verne_widget_class_set_destroy (widget_class, destroy);
+	verne_widget_class_set_size_allocate (widget_class, size_allocate);
 	widget_class->get_request_mode = get_request_mode;
-	widget_class->get_preferred_width = get_prefered_width;
-	widget_class->get_preferred_height = get_prefered_height;
-	widget_class->realize = realize;
-	widget_class->unrealize = unrealize;
-	widget_class->button_press_event = button_press_event;
-	widget_class->button_release_event = button_release_event;
-	widget_class->motion_notify_event = motion_notify_event;
-	widget_class->key_press_event = key_press_event;
-	widget_class->popup_menu = popup_menu;
-	widget_class->get_accessible = get_accessible;
-	widget_class->style_updated = style_updated;
-	widget_class->grab_notify = grab_notify_cb;
+	verne_widget_class_set_get_preferred_width (widget_class, get_prefered_width);
+	verne_widget_class_set_get_preferred_height (widget_class, get_prefered_height);
+	verne_widget_class_set_realize (widget_class, realize);
+	verne_widget_class_set_unrealize (widget_class, unrealize);
+	verne_widget_class_set_button_press_event (widget_class, button_press_event);
+	verne_widget_class_set_button_release_event (widget_class, button_release_event);
+	verne_widget_class_set_motion_notify_event (widget_class, motion_notify_event);
+	verne_widget_class_set_key_press_event (widget_class, key_press_event);
+	verne_widget_class_set_popup_menu (widget_class, popup_menu);
+	verne_widget_class_set_get_accessible (widget_class, get_accessible);
+	verne_widget_class_set_style_updated (widget_class, style_updated);
+	verne_widget_class_set_grab_notify (widget_class, grab_notify_cb);
 
 	canvas_class = EEL_CANVAS_CLASS (class);
 	canvas_class->draw_background = draw_canvas_background;

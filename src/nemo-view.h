@@ -59,7 +59,7 @@ typedef struct NemoViewClass NemoViewClass;
 typedef struct NemoViewDetails NemoViewDetails;
 
 struct NemoView {
-	GtkScrolledWindow parent;
+	VerneScrolledWindow parent;
 
 	NemoViewDetails *details;
 };

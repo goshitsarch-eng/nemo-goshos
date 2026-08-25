@@ -52,7 +52,7 @@ struct NemoTrashBarPrivate
 	gulong selection_handler_id;
 };
 
-G_DEFINE_TYPE (NemoTrashBar, nemo_trash_bar, GTK_TYPE_INFO_BAR);
+G_DEFINE_TYPE (NemoTrashBar, nemo_trash_bar, VERNE_TYPE_INFO_BAR);
 
 static void
 selection_changed_cb (NemoView *view,

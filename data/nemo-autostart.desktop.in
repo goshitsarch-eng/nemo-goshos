@@ -1,7 +1,7 @@
 [Desktop Entry]
 Type=Application
-Name=Nemo
-Comment=Start Nemo desktop at log in
+Name=Verne Desktop
+Comment=Start Verne desktop at log in
 Exec=nemo-desktop
 OnlyShowIn=X-Cinnamon;
 AutostartCondition=GSettings org.nemo.desktop show-desktop-icons

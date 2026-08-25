@@ -41,7 +41,7 @@ typedef struct NemoXContentBarPrivate NemoXContentBarPrivate;
 
 typedef struct
 {
-	GtkInfoBar parent;
+	VerneInfoBar parent;
 
 	NemoXContentBarPrivate *priv;
 } NemoXContentBar;

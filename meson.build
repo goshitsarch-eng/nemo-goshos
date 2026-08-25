@@ -75,7 +75,9 @@ glib_version = '>=2.45.7'
 
 math    = cc.find_library('m', required: true)
 
-gtk     = dependency('gtk+-3.0',                    version: '>=3.10.0')
+gtk     = dependency('gtk4',                        version: '>=4.10')
+adwaita = dependency('libadwaita-1',                version: '>=1.4')
+atk     = dependency('atk',                         version: '>=2.0')
 gio     = dependency('gio-2.0',                     version: glib_version)
 gio_unix= dependency('gio-unix-2.0',                version: glib_version)
 glib    = dependency('glib-2.0',                    version: glib_version)
@@ -83,11 +85,12 @@ gmodule = dependency('gmodule-no-export-2.0',       version: glib_version)
 gobject = dependency('gobject-2.0',                 version: '>=2.0')
 go_intr = dependency('gobject-introspection-1.0',   version: '>=1.0')
 json    = dependency('json-glib-1.0',               version: '>=1.6')
+gdk_pixbuf = dependency('gdk-pixbuf-2.0')
 
-cinnamon= dependency('cinnamon-desktop',            version: '>=4.8.0')
-gail    = dependency('gail-3.0')
 x11     = dependency('x11')
-xapp    = dependency('xapp',                        version: '>=2.0.0')
+cinnamon = []
+gail     = []
+xapp     = []
 
 # Facultative dependencies
 
@@ -141,7 +144,7 @@ conf.set('HAVE_SELINUX', libselinux_enabled)
 
 gtk_layer_shell_enabled = get_option('gtk_layer_shell')
 if gtk_layer_shell_enabled
-  gtk_layer_shell = dependency('gtk-layer-shell-0', version: '>=0.8', required: true)
+  gtk_layer_shell = dependency('gtk4-layer-shell-0', version: '>=1.0', required: true)
   wayland_client = dependency('wayland-client', required: true)
   conf.set('HAVE_GTK_LAYER_SHELL', gtk_layer_shell.found())
 endif
@@ -177,11 +180,21 @@ nemo_definitions =  [
   '-DNEMO_DATADIR="@0@"'.format(nemoDataPath),
   '-DNEMO_EXTENSIONDIR="@0@"'.format(nemoExtensionPath),
   '-DLIBEXECDIR="@0@"'.format(libExecPath),
-  '-DG_LOG_DOMAIN="Nemo"'
+  '-DG_LOG_DOMAIN="Nemo"',
+  '-DGDK_DISABLE_DEPRECATION_WARNINGS',
+  '-DGTK_DISABLE_DEPRECATION_WARNINGS',
+  '-DADW_DISABLE_DEPRECATION_WARNINGS',
 ]
+
+atk_inc_args = run_command('pkg-config', '--cflags-only-I', 'atk', check: true).stdout().strip().split()
+add_project_arguments(
+  ['-include', meson.project_source_root() / 'libverne-compat' / 'verne-gtk-compat.h'] + atk_inc_args,
+  language: 'c',
+)
 
 po_subdir = join_paths(meson.project_source_root(), 'po')
 
+subdir('libverne-compat')
 subdir('cut-n-paste-code/libegg')
 subdir('data')
 subdir('eel')
@@ -205,7 +218,7 @@ gnome.post_install(
 )
 
 message('\n'.join(['',
-'        @0@-@1@'.format(meson.project_name(), meson.project_version()),
+'        Verne (Nemo) @0@  [GTK4 + Adwaita]'.format(meson.project_version()),
 '',
 '    prefix:                 @0@'.format(prefix),
 '    source code location:   @0@'.format(meson.project_source_root()),

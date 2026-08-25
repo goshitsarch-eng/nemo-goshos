@@ -221,26 +221,26 @@ eel_editable_label_class_init (EelEditableLabelClass *class)
   gobject_class->get_property = eel_editable_label_get_property;
   gobject_class->finalize = eel_editable_label_finalize;
 
-  widget_class->get_preferred_width = eel_editable_label_get_preferred_width;
-  widget_class->get_preferred_height = eel_editable_label_get_preferred_height;
-  widget_class->size_allocate = eel_editable_label_size_allocate;
-  widget_class->state_changed = eel_editable_label_state_changed;
-  widget_class->style_updated = eel_editable_label_style_updated;
+  verne_widget_class_set_get_preferred_width (widget_class, eel_editable_label_get_preferred_width);
+  verne_widget_class_set_get_preferred_height (widget_class, eel_editable_label_get_preferred_height);
+  verne_widget_class_set_size_allocate (widget_class, eel_editable_label_size_allocate);
+  verne_widget_class_set_state_changed (widget_class, eel_editable_label_state_changed);
+  verne_widget_class_set_style_updated (widget_class, eel_editable_label_style_updated);
   widget_class->direction_changed = eel_editable_label_direction_changed;
-  widget_class->draw = eel_editable_label_draw;
-  widget_class->realize = eel_editable_label_realize;
-  widget_class->unrealize = eel_editable_label_unrealize;
+  verne_widget_class_set_draw (widget_class, eel_editable_label_draw);
+  verne_widget_class_set_realize (widget_class, eel_editable_label_realize);
+  verne_widget_class_set_unrealize (widget_class, eel_editable_label_unrealize);
   widget_class->map = eel_editable_label_map;
   widget_class->unmap = eel_editable_label_unmap;
-  widget_class->button_press_event = eel_editable_label_button_press;
-  widget_class->button_release_event = eel_editable_label_button_release;
-  widget_class->motion_notify_event = eel_editable_label_motion;
+  verne_widget_class_set_button_press_event (widget_class, eel_editable_label_button_press);
+  verne_widget_class_set_button_release_event (widget_class, eel_editable_label_button_release);
+  verne_widget_class_set_motion_notify_event (widget_class, eel_editable_label_motion);
   widget_class->focus = eel_editable_label_focus;
-  widget_class->key_press_event = eel_editable_label_key_press;
-  widget_class->key_release_event = eel_editable_label_key_release;
-  widget_class->focus_in_event = eel_editable_label_focus_in;
-  widget_class->focus_out_event = eel_editable_label_focus_out;
-  widget_class->get_accessible = eel_editable_label_get_accessible;
+  verne_widget_class_set_key_press_event (widget_class, eel_editable_label_key_press);
+  verne_widget_class_set_key_release_event (widget_class, eel_editable_label_key_release);
+  verne_widget_class_set_focus_in_event (widget_class, eel_editable_label_focus_in);
+  verne_widget_class_set_focus_out_event (widget_class, eel_editable_label_focus_out);
+  verne_widget_class_set_get_accessible (widget_class, eel_editable_label_get_accessible);
 
   class->move_cursor = eel_editable_label_move_cursor;
   class->delete_from_cursor = eel_editable_label_delete_from_cursor;
@@ -522,11 +522,9 @@ eel_editable_label_editable_init (GtkEditableInterface *iface)
   iface->do_delete_text = editable_delete_text_emit;
   iface->insert_text = editable_insert_text;
   iface->delete_text = editable_delete_text;
-  iface->get_chars = editable_get_chars;
+  iface->get_text = (const char * (*) (GtkEditable *)) editable_get_chars;
   iface->set_selection_bounds = editable_set_selection_bounds;
   iface->get_selection_bounds = editable_get_selection_bounds;
-  iface->set_position = editable_real_set_position;
-  iface->get_position = editable_get_position;
 }
 
 
@@ -1183,7 +1181,8 @@ eel_editable_label_size_allocate (GtkWidget     *widget,
 {
   EelEditableLabel *label = EEL_EDITABLE_LABEL (widget);
 
-  (* GTK_WIDGET_CLASS (eel_editable_label_parent_class)->size_allocate) (widget, allocation);
+  if (GTK_WIDGET_CLASS (eel_editable_label_parent_class)->size_allocate)
+    GTK_WIDGET_CLASS (eel_editable_label_parent_class)->size_allocate (widget, allocation->width, allocation->height, -1);
 
   gdk_window_move_resize (label->text_area, allocation->x, allocation->y,
                           allocation->width, allocation->height);
@@ -1201,8 +1200,8 @@ eel_editable_label_state_changed (GtkWidget   *widget,
   if (!gtk_widget_is_sensitive (widget))
     eel_editable_label_select_region (label, 0, 0);
 
-  if (GTK_WIDGET_CLASS (eel_editable_label_parent_class)->state_changed)
-    GTK_WIDGET_CLASS (eel_editable_label_parent_class)->state_changed (widget, prev_state);
+  if (GTK_WIDGET_CLASS (eel_editable_label_parent_class)->state_flags_changed)
+    GTK_WIDGET_CLASS (eel_editable_label_parent_class)->state_flags_changed (widget, prev_state);
 }
 
 static void 
@@ -1214,7 +1213,8 @@ eel_editable_label_style_updated (GtkWidget *widget)
   
   label = EEL_EDITABLE_LABEL (widget);
 
-  GTK_WIDGET_CLASS (eel_editable_label_parent_class)->style_updated (widget);
+  if (GTK_WIDGET_CLASS (eel_editable_label_parent_class)->css_changed)
+    GTK_WIDGET_CLASS (eel_editable_label_parent_class)->css_changed (widget, NULL);
 
   /* We have to clear the layout, fonts etc. may have changed */
   eel_editable_label_recompute (label);
@@ -1604,103 +1604,35 @@ eel_editable_label_draw (GtkWidget *widget,
 static void
 eel_editable_label_realize (GtkWidget *widget)
 {
-  EelEditableLabel *label;
-  GdkWindowAttr attributes;
-  gint attributes_mask;
-  GtkAllocation allocation;
-  GdkWindow *window;
-  GtkStyleContext *style;
+  EelEditableLabel *label = EEL_EDITABLE_LABEL (widget);
 
-  gtk_widget_set_realized (widget, TRUE);
-  label = EEL_EDITABLE_LABEL (widget);
-  gtk_widget_get_allocation (widget, &allocation);
+  GTK_WIDGET_CLASS (eel_editable_label_parent_class)->realize (widget);
 
-  attributes.wclass = GDK_INPUT_OUTPUT;
-  attributes.window_type = GDK_WINDOW_CHILD;
-  attributes.x = allocation.x;
-  attributes.y = allocation.y;
-  attributes.width = allocation.width;
-  attributes.height = allocation.height;
-  attributes.visual = gtk_widget_get_visual (widget);
-  attributes.event_mask = gtk_widget_get_events (widget) |
-    (GDK_EXPOSURE_MASK |
-     GDK_BUTTON_PRESS_MASK |
-     GDK_BUTTON_RELEASE_MASK |
-     GDK_BUTTON1_MOTION_MASK |
-     GDK_BUTTON3_MOTION_MASK |
-     GDK_POINTER_MOTION_HINT_MASK |
-     GDK_POINTER_MOTION_MASK |
-     GDK_ENTER_NOTIFY_MASK |
-     GDK_LEAVE_NOTIFY_MASK);
-
-  attributes_mask = GDK_WA_X | GDK_WA_Y  | GDK_WA_VISUAL;
-
-  window = gdk_window_new (gtk_widget_get_parent_window (widget),
-			   &attributes, attributes_mask);
-  gtk_widget_set_window (widget, window);
-  gdk_window_set_user_data (window, widget);
-
-  attributes.cursor = gdk_cursor_new (GDK_XTERM);
-  attributes.window_type = GDK_WINDOW_CHILD;
-  attributes.wclass = GDK_INPUT_ONLY;
-  attributes.event_mask = gtk_widget_get_events (widget);
-  attributes.event_mask |= (GDK_BUTTON_PRESS_MASK |
-                            GDK_BUTTON_RELEASE_MASK |
-                            GDK_BUTTON1_MOTION_MASK |
-                            GDK_BUTTON3_MOTION_MASK |
-                            GDK_POINTER_MOTION_HINT_MASK |
-                            GDK_POINTER_MOTION_MASK |
-                            GDK_ENTER_NOTIFY_MASK |
-                            GDK_LEAVE_NOTIFY_MASK);
-  attributes_mask = GDK_WA_X | GDK_WA_Y | GDK_WA_CURSOR;
-
-  label->text_area = gdk_window_new (gtk_widget_get_parent_window (widget),
-                                     &attributes, attributes_mask);
-  gdk_window_set_user_data (label->text_area, widget);
-  gtk_im_context_set_client_window (label->im_context, label->text_area);
-  g_object_unref (attributes.cursor);
-
-  style = gtk_widget_get_style_context (widget);
-  gtk_style_context_set_background (style, gtk_widget_get_window (widget));
+  label->text_area = gtk_widget_get_window (widget);
+  gtk_im_context_set_client_widget (label->im_context, widget);
 }
 
 static void
 eel_editable_label_unrealize (GtkWidget *widget)
 {
-  EelEditableLabel *label;
+  EelEditableLabel *label = EEL_EDITABLE_LABEL (widget);
 
-  label = EEL_EDITABLE_LABEL (widget);
+  gtk_im_context_set_client_widget (label->im_context, NULL);
+  label->text_area = NULL;
 
-  gtk_im_context_set_client_window (label->im_context, NULL);
-
-  if (label->text_area)
-    {
-      gdk_window_set_user_data (label->text_area, NULL);
-      gdk_window_destroy (label->text_area);
-      label->text_area = NULL;
-    }
-
-  (* GTK_WIDGET_CLASS (eel_editable_label_parent_class)->unrealize) (widget);
+  GTK_WIDGET_CLASS (eel_editable_label_parent_class)->unrealize (widget);
 }
 
 static void
 eel_editable_label_map (GtkWidget *widget)
 {
-  EelEditableLabel *label = EEL_EDITABLE_LABEL (widget);
-
-  (* GTK_WIDGET_CLASS (eel_editable_label_parent_class)->map) (widget);
-
-  gdk_window_show (label->text_area);
+  GTK_WIDGET_CLASS (eel_editable_label_parent_class)->map (widget);
 }
 
 static void
 eel_editable_label_unmap (GtkWidget *widget)
 {
-  EelEditableLabel *label = EEL_EDITABLE_LABEL (widget);
-
-  gdk_window_hide (label->text_area);
-
-  (* GTK_WIDGET_CLASS (eel_editable_label_parent_class)->unmap) (widget);
+  GTK_WIDGET_CLASS (eel_editable_label_parent_class)->unmap (widget);
 }
 
 static void
@@ -2177,7 +2109,7 @@ eel_editable_label_key_press (GtkWidget   *widget,
       return TRUE;
     }
 
-  if (GTK_WIDGET_CLASS (eel_editable_label_parent_class)->key_press_event (widget, event))
+  if (verne_widget_chain_key_press (eel_editable_label_parent_class, widget, event))
     /* Activate key bindings
      */
     return TRUE;
@@ -2197,7 +2129,7 @@ eel_editable_label_key_release (GtkWidget   *widget,
       return TRUE;
     }
 
-  return GTK_WIDGET_CLASS (eel_editable_label_parent_class)->key_release_event (widget, event);
+  return verne_widget_chain_key_release (eel_editable_label_parent_class, widget, event);
 }
 
 static void

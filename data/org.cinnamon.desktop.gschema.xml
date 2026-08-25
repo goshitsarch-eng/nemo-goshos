@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.cinnamon.desktop.lockdown" path="/org/cinnamon/desktop/lockdown/" gettext-domain="nemo">
+    <key name="disable-command-line" type="b">
+      <default>false</default>
+      <summary>Disable command line</summary>
+    </key>
+    <key name="disable-lock-screen" type="b">
+      <default>false</default>
+      <summary>Disable lock screen</summary>
+    </key>
+    <key name="disable-log-out" type="b">
+      <default>false</default>
+      <summary>Disable log out</summary>
+    </key>
+    <key name="disable-user-switching" type="b">
+      <default>false</default>
+      <summary>Disable user switching</summary>
+    </key>
+  </schema>
+
+  <schema id="org.cinnamon.desktop.background" path="/org/cinnamon/desktop/background/" gettext-domain="nemo">
+    <key name="picture-uri" type="s">
+      <default>''</default>
+      <summary>Picture URI</summary>
+    </key>
+    <key name="picture-options" type="s">
+      <default>'zoom'</default>
+      <summary>Picture options</summary>
+    </key>
+    <key name="primary-color" type="s">
+      <default>'#000000'</default>
+      <summary>Primary color</summary>
+    </key>
+    <key name="secondary-color" type="s">
+      <default>'#000000'</default>
+      <summary>Secondary color</summary>
+    </key>
+  </schema>
+
+  <schema id="org.cinnamon.desktop.media-handling" path="/org/cinnamon/desktop/media-handling/" gettext-domain="nemo">
+    <key name="automount" type="b">
+      <default>true</default>
+      <summary>Automount removable media</summary>
+    </key>
+    <key name="automount-open" type="b">
+      <default>true</default>
+      <summary>Open automounted media</summary>
+    </key>
+    <key name="autorun-never" type="b">
+      <default>false</default>
+      <summary>Never autorun</summary>
+    </key>
+  </schema>
+
+  <schema id="org.cinnamon.desktop.default-applications.terminal" path="/org/cinnamon/desktop/default-applications/terminal/" gettext-domain="nemo">
+    <key name="exec" type="s">
+      <default>'x-terminal-emulator'</default>
+      <summary>Terminal executable</summary>
+    </key>
+    <key name="exec-arg" type="s">
+      <default>'-e'</default>
+      <summary>Terminal exec argument</summary>
+    </key>
+  </schema>
+
+  <schema id="org.cinnamon.desktop.privacy" path="/org/cinnamon/desktop/privacy/" gettext-domain="nemo">
+    <key name="remember-recent-files" type="b">
+      <default>true</default>
+      <summary>Remember recently used files</summary>
+    </key>
+  </schema>
+
+  <schema id="org.cinnamon.desktop.interface" path="/org/cinnamon/desktop/interface/" gettext-domain="nemo">
+    <key name="clock-use-24h" type="b">
+      <default>true</default>
+      <summary>Use 24-hour clock</summary>
+    </key>
+  </schema>
+</schemalist>

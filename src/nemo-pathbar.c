@@ -831,18 +831,16 @@ nemo_path_bar_size_allocate (GtkWidget     *widget,
 static void
 nemo_path_bar_style_updated (GtkWidget *widget)
 {
-    GTK_WIDGET_CLASS (nemo_path_bar_parent_class)->style_updated (widget);
+    if (GTK_WIDGET_CLASS (nemo_path_bar_parent_class)->css_changed)
+        GTK_WIDGET_CLASS (nemo_path_bar_parent_class)->css_changed (widget, NULL);
 
     nemo_path_bar_check_icon_theme (NEMO_PATH_BAR (widget));
 }
 
 static void
-nemo_path_bar_screen_changed (GtkWidget *widget,
+    nemo_path_bar_screen_changed (GtkWidget *widget,
                       GdkScreen *previous_screen)
 {
-    if (GTK_WIDGET_CLASS (nemo_path_bar_parent_class)->screen_changed) {
-        GTK_WIDGET_CLASS (nemo_path_bar_parent_class)->screen_changed (widget, previous_screen);
-    }
         /* We might nave a new settings, so we remove the old one */
     if (previous_screen) {
         remove_settings_signal (NEMO_PATH_BAR (widget), previous_screen);
@@ -1116,18 +1114,18 @@ nemo_path_bar_class_init (NemoPathBarClass *path_bar_class)
     gobject_class->finalize = nemo_path_bar_finalize;
     gobject_class->dispose = nemo_path_bar_dispose;
 
-    widget_class->get_preferred_height = nemo_path_bar_get_preferred_height;
-    widget_class->get_preferred_width = nemo_path_bar_get_preferred_width;
-    widget_class->realize = nemo_path_bar_realize;
-    widget_class->unrealize = nemo_path_bar_unrealize;
+    verne_widget_class_set_get_preferred_height (widget_class, nemo_path_bar_get_preferred_height);
+    verne_widget_class_set_get_preferred_width (widget_class, nemo_path_bar_get_preferred_width);
+    verne_widget_class_set_realize (widget_class, nemo_path_bar_realize);
+    verne_widget_class_set_unrealize (widget_class, nemo_path_bar_unrealize);
     widget_class->unmap = nemo_path_bar_unmap;
     widget_class->map = nemo_path_bar_map;
-    widget_class->size_allocate = nemo_path_bar_size_allocate;
-    widget_class->style_updated = nemo_path_bar_style_updated;
-    widget_class->screen_changed = nemo_path_bar_screen_changed;
-    widget_class->grab_notify = nemo_path_bar_grab_notify;
-    widget_class->state_changed = nemo_path_bar_state_changed;
-    widget_class->scroll_event = nemo_path_bar_scroll;
+    verne_widget_class_set_size_allocate (widget_class, nemo_path_bar_size_allocate);
+    verne_widget_class_set_style_updated (widget_class, nemo_path_bar_style_updated);
+    verne_widget_class_set_screen_changed (widget_class, nemo_path_bar_screen_changed);
+    verne_widget_class_set_grab_notify (widget_class, nemo_path_bar_grab_notify);
+    verne_widget_class_set_state_changed (widget_class, nemo_path_bar_state_changed);
+    verne_widget_class_set_scroll_event (widget_class, nemo_path_bar_scroll);
 
     container_class->add = nemo_path_bar_add;
     container_class->forall = nemo_path_bar_forall;

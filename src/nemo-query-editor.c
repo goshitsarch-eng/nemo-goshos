@@ -124,7 +124,7 @@ nemo_query_editor_dispose (GObject *object)
 	G_OBJECT_CLASS (nemo_query_editor_parent_class)->dispose (object);
 }
 
-static void
+static gboolean
 nemo_query_editor_grab_focus (GtkWidget *widget)
 {
 	NemoQueryEditor *editor = NEMO_QUERY_EDITOR (widget);
@@ -136,6 +136,7 @@ nemo_query_editor_grab_focus (GtkWidget *widget)
             gtk_entry_grab_focus_without_selecting (GTK_ENTRY (editor->priv->file_entry));
         }
 	}
+	return TRUE;
 }
 
 static void

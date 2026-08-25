@@ -1543,7 +1543,7 @@ get_label_layout (PangoLayout **layout_cache,
 /* handle events */
 
 static int
-nemo_icon_canvas_item_event (EelCanvasItem *item, GdkEvent *event)
+nemo_icon_canvas_item_event (EelCanvasItem *item, VerneGdkEvent *event)
 {
 	NemoIconCanvasItem *icon_item;
 	GdkCursor *cursor;

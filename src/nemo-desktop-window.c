@@ -313,10 +313,10 @@ nemo_desktop_window_class_init (NemoDesktopWindowClass *klass)
     oclass->set_property = nemo_desktop_window_set_property;
     oclass->get_property = nemo_desktop_window_get_property;
 
-	wclass->realize = realize;
-	wclass->unrealize = unrealize;
+	verne_widget_class_set_realize (wclass, realize);
+	verne_widget_class_set_unrealize (wclass, unrealize);
 	wclass->map = map;
-	wclass->delete_event = nemo_desktop_window_delete_event;
+	verne_widget_class_set_delete_event (wclass, nemo_desktop_window_delete_event);
 
 	nclass->sync_title = real_sync_title;
 	nclass->get_icon = real_get_icon;

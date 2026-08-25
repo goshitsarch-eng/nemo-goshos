@@ -78,7 +78,7 @@ enum {
 typedef struct NemoWindowDetails NemoWindowDetails;
 
 typedef struct {
-        GtkApplicationWindowClass parent_spot;
+        AdwApplicationWindowClass parent_spot;
 
 	/* Function pointers for overriding, without corresponding signals */
 
@@ -96,7 +96,7 @@ typedef struct {
 } NemoWindowClass;
 
 struct NemoWindow {
-        GtkApplicationWindow parent_object;
+        AdwApplicationWindow parent_object;
         
         NemoWindowDetails *details;
 };

@@ -84,7 +84,7 @@
 
 #define NEMO_ACCEL_MAP_SAVE_DELAY 30
 
-G_DEFINE_TYPE (NemoApplication, nemo_application, GTK_TYPE_APPLICATION);
+G_DEFINE_TYPE (NemoApplication, nemo_application, ADW_TYPE_APPLICATION);
 
 struct _NemoApplicationPriv {
 	NemoProgressUIHandler *progress_handler;

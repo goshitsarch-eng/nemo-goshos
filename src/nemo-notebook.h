@@ -41,16 +41,11 @@ G_BEGIN_DECLS
 #define NEMO_NOTEBOOK_GET_CLASS(o)	(G_TYPE_INSTANCE_GET_CLASS ((o), NEMO_TYPE_NOTEBOOK, NemoNotebookClass))
 
 typedef struct _NemoNotebookClass	NemoNotebookClass;
-typedef struct _NemoNotebook		NemoNotebook;
-
-struct _NemoNotebook
-{
-	GtkNotebook parent;
-};
+typedef GtkNotebook NemoNotebook;
 
 struct _NemoNotebookClass
 {
-        GtkNotebookClass parent_class;
+        GtkWidgetClass parent_class;
 
 	/* Signals */
 	void	 (* tab_close_request)  (NemoNotebook *notebook,
@@ -58,6 +53,7 @@ struct _NemoNotebookClass
 };
 
 GType		nemo_notebook_get_type		(void);
+GtkWidget *	nemo_notebook_new		(void);
 
 int		nemo_notebook_add_tab	(NemoNotebook *nb,
 						 NemoWindowSlot *slot,

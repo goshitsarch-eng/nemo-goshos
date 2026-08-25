@@ -33,7 +33,7 @@ static void
 nemo_simple_button_class_init (NemoSimpleButtonClass *klass)
 {
   GtkWidgetClass *widget_class = (GtkWidgetClass*) klass;
-  widget_class->button_release_event = nemo_simple_button_button_release;
+  verne_widget_class_set_button_release_event (widget_class, nemo_simple_button_button_release);
 }
 
 static void
