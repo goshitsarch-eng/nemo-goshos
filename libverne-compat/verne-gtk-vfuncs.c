@@ -696,8 +696,9 @@ void
 verne_gtk_widget_show (GtkWidget *widget)
 {
 	g_return_if_fail (GTK_IS_WIDGET (widget));
-	/* Unparented popovers (GTK3 GtkMenu) cannot be mapped like GtkWindow. */
-	if (GTK_IS_POPOVER (widget) && gtk_widget_get_parent (widget) == NULL)
+	/* GTK3 gtk_widget_show() on a GtkMenu does not pop it up. Mapping a
+	 * GtkPopover here realizes a native without gtk_popover_popup() and crashes. */
+	if (GTK_IS_POPOVER (widget))
 		return;
 	gtk_widget_set_visible (widget, TRUE);
 	if (GTK_IS_WINDOW (widget))
@@ -711,6 +712,8 @@ verne_gtk_widget_realize (GtkWidget *widget)
 	g_return_if_fail (GTK_IS_WIDGET (widget));
 	/* GtkPopover is a GtkNative but still needs a parent surface. Realizing
 	 * an unrooted menu/popover creates a popup with a NULL parent and aborts. */
+	if (GTK_IS_POPOVER (widget))
+		return;
 	if (!GTK_IS_WINDOW (widget) && gtk_widget_get_root (widget) == NULL)
 		return;
 	(gtk_widget_realize) (widget);

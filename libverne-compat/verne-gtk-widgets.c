@@ -526,8 +526,15 @@ GtkWidget *gtk_menu_new (void) { return g_object_new (GTK_TYPE_MENU, NULL); }
 static GtkWidget *
 verne_widget_with_native (GtkWidget *widget)
 {
+	GtkRoot *root;
+
 	while (widget != NULL) {
-		if (gtk_widget_get_native (widget) != NULL)
+		if (!GTK_IS_WIDGET (widget))
+			return NULL;
+		root = gtk_widget_get_root (widget);
+		if (GTK_IS_WIDGET (root) && gtk_widget_get_mapped (GTK_WIDGET (root)))
+			return GTK_WIDGET (root);
+		if (gtk_widget_get_native (widget) != NULL && gtk_widget_get_mapped (widget))
 			return widget;
 		widget = gtk_widget_get_parent (widget);
 	}
@@ -610,10 +617,17 @@ verne_menu_popup_idle (gpointer data)
 	GtkWidget *w = GTK_WIDGET (p->menu);
 
 	if (GTK_IS_POPOVER (p->menu) && gtk_widget_get_parent (w) != NULL) {
+		GtkWidget *parent = gtk_widget_get_parent (w);
+		GtkNative *native = gtk_widget_get_native (parent);
+		if (native == NULL || gtk_native_get_surface (native) == NULL) {
+			g_object_unref (p->menu);
+			g_free (p);
+			return G_SOURCE_REMOVE;
+		}
 		if (p->has_rect)
 			gtk_popover_set_pointing_to (GTK_POPOVER (p->menu), &p->rect);
 		else
-			verne_popover_point_at_pointer (GTK_POPOVER (p->menu), gtk_widget_get_parent (w));
+			verne_popover_point_at_pointer (GTK_POPOVER (p->menu), parent);
 		gtk_popover_set_autohide (GTK_POPOVER (p->menu), FALSE);
 		gtk_popover_set_has_arrow (GTK_POPOVER (p->menu), FALSE);
 		gtk_popover_popup (GTK_POPOVER (p->menu));
