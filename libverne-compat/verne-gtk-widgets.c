@@ -729,15 +729,31 @@ GtkWidget *gtk_menu_item_new_with_label (const gchar *label) {
 	return w;
 }
 GtkWidget *gtk_menu_item_new_with_mnemonic (const gchar *label) { return gtk_menu_item_new_with_label (label); }
+static void
+verne_submenu_clicked (GtkButton *item, gpointer data)
+{
+	GtkWidget *submenu = data;
+	if (!GTK_IS_POPOVER (submenu))
+		return;
+	if (gtk_widget_get_parent (submenu) != GTK_WIDGET (item)) {
+		if (gtk_widget_get_parent (submenu) != NULL)
+			gtk_widget_unparent (submenu);
+		gtk_widget_set_parent (submenu, GTK_WIDGET (item));
+	}
+	gtk_popover_set_autohide (GTK_POPOVER (submenu), TRUE);
+	gtk_popover_popup (GTK_POPOVER (submenu));
+}
+
 void gtk_menu_item_set_submenu (GtkMenuItem *item, GtkWidget *submenu)
 {
 	item->submenu = submenu;
 	if (submenu == NULL)
 		return;
-	if (GTK_IS_POPOVER (submenu) && gtk_widget_get_parent (submenu) == NULL)
-		gtk_widget_set_parent (submenu, GTK_WIDGET (item));
+	/* Do not parent nested popovers here. Realizing them as children of an
+	 * unmapped GtkMenu (itself a GtkPopover/GtkNative) calls
+	 * gdk_surface_new_popup with a NULL parent surface. */
 	if (g_object_get_data (G_OBJECT (item), "verne-sub-hooked") == NULL) {
-		g_signal_connect_swapped (item, "clicked", G_CALLBACK (gtk_popover_popup), submenu);
+		g_signal_connect (item, "clicked", G_CALLBACK (verne_submenu_clicked), submenu);
 		g_object_set_data (G_OBJECT (item), "verne-sub-hooked", GINT_TO_POINTER (1));
 	}
 }
