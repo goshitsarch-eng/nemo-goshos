@@ -43,7 +43,7 @@ typedef struct _NemoApplicationPriv NemoApplicationPriv;
 typedef struct NemoApplicationClass NemoApplicationClass;
 
 typedef struct {
-	GtkApplication parent;
+	AdwApplication parent;
 
 	NemoUndoManager *undo_manager;
 
@@ -51,7 +51,7 @@ typedef struct {
 } NemoApplication;
 
 struct NemoApplicationClass {
-	GtkApplicationClass parent_class;
+	AdwApplicationClass parent_class;
 
     void         (* continue_startup) (NemoApplication *application);
     void         (* continue_quit) (NemoApplication *application);

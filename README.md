@@ -5,6 +5,11 @@ Nemo
 Nemo is a free and open-source software and official file manager of the Cinnamon desktop environment. 
 It is a fork of GNOME Files (formerly named Nautilus).
 
+This tree is **Verne**: a GTK4 + libadwaita (Adwaita) presentation of Nemo that keeps Nemo's
+internal APIs, DBus names, extensions, and feature set. The application is branded **Verne**
+in the UI (window titles, About dialog, desktop file) while remaining compatible with Nemo
+plugins, actions, and schemas.
+
 Nemo also manages the Cinnamon desktop.
 Since Cinnamon 6.0 (Mint 21.3), users can enhance their own Nemo with Spices named Actions.
 

@@ -72,6 +72,9 @@ main (int argc, char *argv[])
 	textdomain (GETTEXT_PACKAGE);
 
 	g_set_prgname ("nemo");
+	g_set_application_name (_("Verne"));
+	adw_init ();
+	verne_compat_init ();
 
 #ifdef HAVE_EXEMPI
 	xmp_init();

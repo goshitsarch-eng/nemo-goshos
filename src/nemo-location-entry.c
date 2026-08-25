@@ -357,8 +357,8 @@ nemo_location_entry_class_init (NemoLocationEntryClass *class)
 	GtkEntryClass *entry_class;
 
 	widget_class = GTK_WIDGET_CLASS (class);
-	widget_class->focus_in_event = nemo_location_entry_focus_in;
-	widget_class->destroy = destroy;
+	verne_widget_class_set_focus_in_event (widget_class, nemo_location_entry_focus_in);
+	verne_widget_class_set_destroy (widget_class, destroy);
 
 	gobject_class = G_OBJECT_CLASS (class);
 	gobject_class->finalize = finalize;

@@ -1,5 +1,16 @@
 /* Desktop text stuff */
 
+.verne-window,
+.nemo-window {
+	background-color: @window_bg_color;
+	color: @window_fg_color;
+}
+
+.verne-window toolbar,
+.nemo-window toolbar {
+	background-color: @headerbar_bg_color;
+}
+
 .nemo-window.nemo-desktop-window notebook,
 .nemo-window.nemo-desktop-window paned {
 	background-color: transparent;

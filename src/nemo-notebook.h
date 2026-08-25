@@ -43,14 +43,13 @@ G_BEGIN_DECLS
 typedef struct _NemoNotebookClass	NemoNotebookClass;
 typedef struct _NemoNotebook		NemoNotebook;
 
-struct _NemoNotebook
-{
-	GtkNotebook parent;
-};
+/* GTK4 GtkNotebook is final; Verne notebooks are GtkNotebooks with extra setup. */
+typedef GtkNotebook NemoNotebook;
+typedef struct _NemoNotebookClass NemoNotebookClass;
 
 struct _NemoNotebookClass
 {
-        GtkNotebookClass parent_class;
+        GtkWidgetClass parent_class;
 
 	/* Signals */
 	void	 (* tab_close_request)  (NemoNotebook *notebook,
@@ -58,6 +57,7 @@ struct _NemoNotebookClass
 };
 
 GType		nemo_notebook_get_type		(void);
+GtkWidget *	nemo_notebook_new		(void);
 
 int		nemo_notebook_add_tab	(NemoNotebook *nb,
 						 NemoWindowSlot *slot,

@@ -46,8 +46,8 @@ static int  nemo_notebook_insert_page	 (GtkNotebook *notebook,
 					  GtkWidget *tab_label,
 					  GtkWidget *menu_label,
 					  int position);
-static void nemo_notebook_remove	 (GtkContainer *container,
-					  GtkWidget *tab_widget);
+static gboolean control_key_checker_cb(NemoNotebook *notebook, GdkEventKey *event, gpointer user_data);
+static gboolean notebook_tab_shortcut_cb(NemoNotebook *notebook, GtkDirectionType direction, gpointer user_data);
 
 enum
 {
@@ -57,29 +57,68 @@ enum
 
 static guint signals[LAST_SIGNAL] = { 0 };
 
-G_DEFINE_TYPE (NemoNotebook, nemo_notebook, GTK_TYPE_NOTEBOOK);
+static void nemo_notebook_setup (GtkNotebook *notebook);
+
+GType
+nemo_notebook_get_type (void)
+{
+	static gsize registered = 0;
+
+	if (g_once_init_enter (&registered)) {
+		signals[TAB_CLOSE_REQUEST] =
+			g_signal_new ("tab-close-request",
+				      GTK_TYPE_NOTEBOOK,
+				      G_SIGNAL_RUN_LAST,
+				      0,
+				      NULL, NULL,
+				      g_cclosure_marshal_VOID__OBJECT,
+				      G_TYPE_NONE,
+				      1,
+				      NEMO_TYPE_WINDOW_SLOT);
+		g_once_init_leave (&registered, 1);
+	}
+	return GTK_TYPE_NOTEBOOK;
+}
 
 static void
-nemo_notebook_class_init (NemoNotebookClass *klass)
+on_notebook_page_removed (GtkNotebook *gnotebook,
+			  GtkWidget *child,
+			  guint page_num,
+			  gpointer data)
 {
-	GObjectClass *object_class = G_OBJECT_CLASS (klass);
-	GtkContainerClass *container_class = GTK_CONTAINER_CLASS (klass);
-	GtkNotebookClass *notebook_class = GTK_NOTEBOOK_CLASS (klass);
+	(void) child;
+	(void) page_num;
+	(void) data;
+	gtk_notebook_set_show_tabs (gnotebook,
+				    gtk_notebook_get_n_pages (gnotebook) > 1);
+}
 
-	container_class->remove = nemo_notebook_remove;
+static void
+nemo_notebook_setup (GtkNotebook *notebook)
+{
+	gtk_notebook_set_scrollable (notebook, TRUE);
+	gtk_notebook_set_show_border (notebook, FALSE);
+	gtk_notebook_set_show_tabs (notebook, FALSE);
 
-	notebook_class->insert_page = nemo_notebook_insert_page;
+	g_signal_connect (notebook, "focus",
+			  G_CALLBACK (notebook_tab_shortcut_cb), notebook);
+	g_signal_connect (notebook, "key-press-event",
+			  G_CALLBACK (control_key_checker_cb), GINT_TO_POINTER (TRUE));
+	g_signal_connect (notebook, "key-release-event",
+			  G_CALLBACK (control_key_checker_cb), GINT_TO_POINTER (FALSE));
+	g_signal_connect (notebook, "page-removed",
+			  G_CALLBACK (on_notebook_page_removed), NULL);
+}
 
-	signals[TAB_CLOSE_REQUEST] =
-		g_signal_new ("tab-close-request",
-			      G_OBJECT_CLASS_TYPE (object_class),
-			      G_SIGNAL_RUN_LAST,
-			      G_STRUCT_OFFSET (NemoNotebookClass, tab_close_request),
-			      NULL, NULL,
-			      g_cclosure_marshal_VOID__OBJECT,
-			      G_TYPE_NONE,
-			      1,
-			      NEMO_TYPE_WINDOW_SLOT);
+GtkWidget *
+nemo_notebook_new (void)
+{
+	GtkWidget *notebook;
+
+	(void) nemo_notebook_get_type ();
+	notebook = gtk_notebook_new ();
+	nemo_notebook_setup (GTK_NOTEBOOK (notebook));
+	return notebook;
 }
 
 
@@ -230,27 +269,6 @@ notebook_tab_shortcut_cb(NemoNotebook *notebook, GtkDirectionType direction, gpo
 	return TRUE;
 }
 
-static void
-nemo_notebook_init (NemoNotebook *notebook)
-{
-	gtk_notebook_set_scrollable (GTK_NOTEBOOK (notebook), TRUE);
-	gtk_notebook_set_show_border (GTK_NOTEBOOK (notebook), FALSE);
-	gtk_notebook_set_show_tabs (GTK_NOTEBOOK (notebook), FALSE);
-
-	/* Make it so that pressing ctrl+tab/ctrl+shift+tab switches the currently
-	 * focused tab.
-	 */
-	/* Gtk internally gobbles up tab/shift+tab keyboard events for widget
-	 * focus switching but we can override this with a little trickery.
-	 */
-	g_signal_connect (notebook, "focus",
-			  G_CALLBACK(notebook_tab_shortcut_cb), (gpointer)notebook);
-	g_signal_connect (notebook, "key-press-event",
-			  G_CALLBACK(control_key_checker_cb), GINT_TO_POINTER (TRUE));
-	g_signal_connect (notebook, "key-release-event",
-			  G_CALLBACK(control_key_checker_cb), GINT_TO_POINTER (FALSE));
-}
-
 void
 nemo_notebook_sync_loading (NemoNotebook *notebook,
 				NemoWindowSlot *slot)
@@ -395,12 +413,9 @@ nemo_notebook_insert_page (GtkNotebook *gnotebook,
 			       int position)
 {
 	g_assert (GTK_IS_WIDGET (tab_widget));
+	(void) menu_label;
 
-	position = GTK_NOTEBOOK_CLASS (nemo_notebook_parent_class)->insert_page (gnotebook,
-										     tab_widget,
-										     tab_label,
-										     menu_label,
-										     position);
+	position = gtk_notebook_insert_page (gnotebook, tab_widget, tab_label, position);
 
 	gtk_notebook_set_show_tabs (gnotebook,
 				    gtk_notebook_get_n_pages (gnotebook) > 1);
@@ -424,9 +439,10 @@ nemo_notebook_add_tab (NemoNotebook *notebook,
 
 	tab_label = build_tab_label (notebook, slot);
 
-	position = gtk_notebook_insert_page (GTK_NOTEBOOK (notebook),
+	position = nemo_notebook_insert_page (GTK_NOTEBOOK (notebook),
 					     GTK_WIDGET (slot),
 					     tab_label,
+					     NULL,
 					     position);
 
 	gtk_container_child_set (GTK_CONTAINER (notebook),
@@ -450,18 +466,6 @@ nemo_notebook_add_tab (NemoNotebook *notebook,
 	}
 
 	return position;
-}
-
-static void
-nemo_notebook_remove (GtkContainer *container,
-			  GtkWidget *tab_widget)
-{
-	GtkNotebook *gnotebook = GTK_NOTEBOOK (container);
-	GTK_CONTAINER_CLASS (nemo_notebook_parent_class)->remove (container, tab_widget);
-
-	gtk_notebook_set_show_tabs (gnotebook,
-				    gtk_notebook_get_n_pages (gnotebook) > 1);
-
 }
 
 void

@@ -980,7 +980,7 @@ nemo_window_pane_constructed (GObject *obj)
 				 G_CALLBACK (toolbar_focus_in_callback), pane, 0);
 
 	/* initialize the notebook */
-	pane->notebook = g_object_new (NEMO_TYPE_NOTEBOOK, NULL);
+	pane->notebook = nemo_notebook_new ();
 	gtk_box_pack_start (GTK_BOX (pane), pane->notebook,
 			    TRUE, TRUE, 0);
 	g_signal_connect (pane->notebook,

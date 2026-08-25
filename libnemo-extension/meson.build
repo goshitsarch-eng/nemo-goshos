@@ -40,7 +40,7 @@ nemo_extension_headers = [
 
 nemo_extension_incdir = include_directories('.')
 
-nemo_extension_deps = [ glib, gtk ]
+nemo_extension_deps = [ glib, gtk, adwaita, verne_compat ]
 
 nemo_extension_lib = shared_library('nemo-extension',
   nemo_extension_sources + nemo_i18n_header,
@@ -70,7 +70,7 @@ gnome.generate_gir(nemo_extension_lib,
   nsversion: '3.0',
   namespace: 'Nemo',
   export_packages: 'libnemo-extension',
-  includes: [ 'Gtk-3.0', 'Gio-2.0', 'GLib-2.0', ],
+  includes: [ 'Gtk-4.0', 'Gio-2.0', 'GLib-2.0', ],
   include_directories: [ rootInclude, ],
   install_dir_typelib: typelibdir,
   install: true,
@@ -80,7 +80,7 @@ pkgconfig.generate(filebase: 'libnemo-extension',
   name: 'libnemo-extension',
   description: 'A library to create Nemo view extensions',
   version: meson.project_version(),
-  requires: [ 'gio-2.0', 'glib-2.0', 'gtk+-3.0' ],
+  requires: [ 'gio-2.0', 'glib-2.0', 'gtk4', 'libadwaita-1' ],
   libraries: nemo_extension_lib,
   subdirs: 'nemo',
   variables: 'extensiondir=${libdir}/@0@/@1@'.format('nemo', 'extensions-3.0'),

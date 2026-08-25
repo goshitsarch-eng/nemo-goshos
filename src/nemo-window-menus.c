@@ -309,39 +309,37 @@ action_about_nemo_callback (GtkAction *action,
 				gpointer user_data)
 {
 	const gchar *license[] = {
-		N_("Nemo is free software; you can redistribute it and/or modify "
+		N_("Verne is free software; you can redistribute it and/or modify "
 		   "it under the terms of the GNU General Public License as published by "
 		   "the Free Software Foundation; either version 2 of the License, or "
 		   "(at your option) any later version."),
-		N_("Nemo is distributed in the hope that it will be useful, "
+		N_("Verne is distributed in the hope that it will be useful, "
 		   "but WITHOUT ANY WARRANTY; without even the implied warranty of "
 		   "MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the "
 		   "GNU General Public License for more details."),
 		N_("You should have received a copy of the GNU General Public License "
-		   "along with Nemo; if not, write to the Free Software Foundation, Inc., "
+		   "along with Verne; if not, write to the Free Software Foundation, Inc., "
 		   "51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA")
 	};
 	gchar *license_trans;
-	GDateTime *date;
+	GtkWindow *parent = GTK_WINDOW (user_data);
+	GtkWidget *about;
 
 	license_trans = g_strjoin ("\n\n", _(license[0]), _(license[1]),
 					     _(license[2]), NULL);
 
-	date = g_date_time_new_now_local ();
-
-	gtk_show_about_dialog (GTK_WINDOW (user_data),
-			       "program-name", _("Nemo"),
-			       "version", VERSION,
-			       "comments", _("Nemo lets you organize "
-					     "files and folders, both on "
-					     "your computer and online."),
-			       "license", license_trans,
-			       "wrap-license", TRUE,
-			      "logo-icon-name", "folder",
-			      NULL);
+	about = adw_about_window_new ();
+	adw_about_window_set_application_name (ADW_ABOUT_WINDOW (about), _("Verne"));
+	adw_about_window_set_version (ADW_ABOUT_WINDOW (about), VERSION);
+	adw_about_window_set_comments (ADW_ABOUT_WINDOW (about),
+				       _("Verne lets you organize files and folders, both on your computer and online."));
+	adw_about_window_set_license (ADW_ABOUT_WINDOW (about), license_trans);
+	adw_about_window_set_application_icon (ADW_ABOUT_WINDOW (about), "folder");
+	adw_about_window_set_developer_name (ADW_ABOUT_WINDOW (about), "Linux Mint / Cinnamon");
+	gtk_window_set_transient_for (GTK_WINDOW (about), parent);
+	gtk_window_present (GTK_WINDOW (about));
 
 	g_free (license_trans);
-	g_date_time_unref (date);
 }
 
 static void

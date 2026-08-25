@@ -376,10 +376,10 @@ nemo_entry_class_init (NemoEntryClass *class)
 	widget_class = GTK_WIDGET_CLASS (class);
 	gobject_class = G_OBJECT_CLASS (class);
 		
-	widget_class->button_press_event = nemo_entry_button_press;
-	widget_class->button_release_event = nemo_entry_button_release;
-	widget_class->key_press_event = nemo_entry_key_press;
-	widget_class->motion_notify_event = nemo_entry_motion_notify;
+	verne_widget_class_set_button_press_event (widget_class, nemo_entry_button_press);
+	verne_widget_class_set_button_release_event (widget_class, nemo_entry_button_release);
+	verne_widget_class_set_key_press_event (widget_class, nemo_entry_key_press);
+	verne_widget_class_set_motion_notify_event (widget_class, nemo_entry_motion_notify);
 	widget_class->selection_clear_event = nemo_entry_selection_clear;
 	
 	gobject_class->finalize = nemo_entry_finalize;

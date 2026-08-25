@@ -2975,7 +2975,8 @@ style_updated (GtkWidget *widget)
 	 * because that resets the background of the window.
 	 */
 	if (!nemo_icon_container_get_is_desktop (container)) {
-		GTK_WIDGET_CLASS (nemo_icon_container_parent_class)->style_updated (widget);
+		if (GTK_WIDGET_CLASS (nemo_icon_container_parent_class)->css_changed)
+			GTK_WIDGET_CLASS (nemo_icon_container_parent_class)->css_changed (widget, NULL);
 	}
 
 	if (gtk_widget_get_realized (widget)) {
@@ -4869,21 +4870,21 @@ nemo_icon_container_class_init (NemoIconContainerClass *class)
 	/* GtkWidget class.  */
 
 	widget_class = GTK_WIDGET_CLASS (class);
-	widget_class->destroy = destroy;
-	widget_class->size_allocate = size_allocate;
+	verne_widget_class_set_destroy (widget_class, destroy);
+	verne_widget_class_set_size_allocate (widget_class, size_allocate);
 	widget_class->get_request_mode = get_request_mode;
-	widget_class->get_preferred_width = get_prefered_width;
-	widget_class->get_preferred_height = get_prefered_height;
-	widget_class->realize = realize;
-	widget_class->unrealize = unrealize;
-	widget_class->button_press_event = button_press_event;
-	widget_class->button_release_event = button_release_event;
-	widget_class->motion_notify_event = motion_notify_event;
-	widget_class->key_press_event = key_press_event;
-	widget_class->popup_menu = popup_menu;
-	widget_class->get_accessible = get_accessible;
-	widget_class->style_updated = style_updated;
-	widget_class->grab_notify = grab_notify_cb;
+	verne_widget_class_set_get_preferred_width (widget_class, get_prefered_width);
+	verne_widget_class_set_get_preferred_height (widget_class, get_prefered_height);
+	verne_widget_class_set_realize (widget_class, realize);
+	verne_widget_class_set_unrealize (widget_class, unrealize);
+	verne_widget_class_set_button_press_event (widget_class, button_press_event);
+	verne_widget_class_set_button_release_event (widget_class, button_release_event);
+	verne_widget_class_set_motion_notify_event (widget_class, motion_notify_event);
+	verne_widget_class_set_key_press_event (widget_class, key_press_event);
+	verne_widget_class_set_popup_menu (widget_class, popup_menu);
+	verne_widget_class_set_get_accessible (widget_class, get_accessible);
+	verne_widget_class_set_style_updated (widget_class, style_updated);
+	verne_widget_class_set_grab_notify (widget_class, grab_notify_cb);
 
 	canvas_class = EEL_CANVAS_CLASS (class);
 	canvas_class->draw_background = draw_canvas_background;

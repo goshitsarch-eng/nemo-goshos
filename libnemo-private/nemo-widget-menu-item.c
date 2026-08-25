@@ -83,12 +83,12 @@ nemo_widget_menu_item_class_init (NemoWidgetMenuItemClass *klass)
 
   menu_item_class->activate = nemo_widget_menu_item_activate;
 
-  widget_class->realize = nemo_widget_menu_item_realize;
-  widget_class->unrealize = nemo_widget_menu_item_unrealize;
+  verne_widget_class_set_realize (widget_class, nemo_widget_menu_item_realize);
+  verne_widget_class_set_unrealize (widget_class, nemo_widget_menu_item_unrealize);
   widget_class->map = nemo_widget_menu_item_map;
   widget_class->unmap = nemo_widget_menu_item_unmap;
-  widget_class->size_allocate = nemo_widget_menu_item_size_allocate;
-  widget_class->draw = nemo_widget_menu_item_draw;
+  verne_widget_class_set_size_allocate (widget_class, nemo_widget_menu_item_size_allocate);
+  verne_widget_class_set_draw (widget_class, nemo_widget_menu_item_draw);
 
   /**
    * NemoWidgetMenuItem:widget:

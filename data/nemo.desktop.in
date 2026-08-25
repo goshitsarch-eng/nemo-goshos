@@ -1,5 +1,5 @@
 [Desktop Entry]
-Name=Files
+Name=Verne
 Name[am]=ፋይሎች
 Name[ar]=الملفات
 Name[be]=Файлы
@@ -22,7 +22,7 @@ Name[fr]=Fichiers
 Name[fr_CA]=Fichiers
 Name[he]=קבצים
 Name[hi]=फाइलें
-Name[hr]=Nemo
+Name[hr]=Verne
 Name[hu]=Fájlok
 Name[id]=Berkas
 Name[is]=Skrár
@@ -54,7 +54,7 @@ Name[vi]=Tệp tin
 Name[zh_CN]=文件
 Name[zh_HK]=檔案
 Name[zh_TW]=檔案
-Comment=Access and organize files
+Comment=Access and organize files with Verne
 Comment[am]=ፋይሎች ጋር መድረሻ እና ማደራጃ
 Comment[ar]=الوصول إلى الملفات وتنظيمها
 Comment[be]=Доступ і кіраванне файламі

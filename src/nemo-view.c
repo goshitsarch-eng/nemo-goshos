@@ -11464,8 +11464,8 @@ nemo_view_class_init (NemoViewClass *klass)
 	oclass->finalize = nemo_view_finalize;
 	oclass->set_property = nemo_view_set_property;
 
-	widget_class->destroy = nemo_view_destroy;
-	widget_class->scroll_event = nemo_view_scroll_event;
+	verne_widget_class_set_destroy (widget_class, nemo_view_destroy);
+	verne_widget_class_set_scroll_event (widget_class, nemo_view_scroll_event);
 	widget_class->parent_set = nemo_view_parent_set;
 
 	g_type_class_add_private (klass, sizeof (NemoViewDetails));

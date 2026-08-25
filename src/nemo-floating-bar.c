@@ -268,8 +268,8 @@ nemo_floating_bar_class_init (NemoFloatingBarClass *klass)
 	oclass->get_property = nemo_floating_bar_get_property;
 	oclass->finalize = nemo_floating_bar_finalize;
 
-	wclass->draw = nemo_floating_bar_draw;
-	wclass->show = nemo_floating_bar_show;
+	verne_widget_class_set_draw (wclass, nemo_floating_bar_draw);
+	verne_widget_class_set_show (wclass, nemo_floating_bar_show);
 	wclass->hide = nemo_floating_bar_hide;
 	wclass->parent_set = nemo_floating_bar_parent_set;
 

@@ -174,7 +174,7 @@ struct _EelCanvasItemClass {
 	/* Signal: an event occurred for an item of this type.  The (x, y)
 	 * coordinates are in the canvas world coordinate system.
 	 */
-	gboolean (* event)                (EelCanvasItem *item, GdkEvent *event);
+	gboolean (* event)                (EelCanvasItem *item, VerneGdkEvent *event);
 
 	/* Reserved for future expansion */
 	gpointer spare_vmethods [4];
@@ -370,7 +370,7 @@ struct _EelCanvas {
 	EelCanvasItem *focused_item;
 
 	/* Event on which selection of current item is based */
-	GdkEvent pick_event;
+	VerneGdkEvent pick_event;
 
 	/* Scrolling region */
 	double scroll_x1, scroll_y1;
@@ -520,13 +520,13 @@ GType eel_canvas_accessible_get_type(void);
 typedef struct _EelCanvasAccessible EelCanvasAccessible;
 struct _EelCanvasAccessible
 {
-	GtkAccessible parent;
+	AtkGObjectAccessible parent;
 };
 
 typedef struct _EelCanvasAccessibleClass EelCanvasAccessibleClass;
 struct _EelCanvasAccessibleClass
 {
-	GtkAccessibleClass parent_class;
+	AtkGObjectAccessibleClass parent_class;
 };
 
 G_END_DECLS

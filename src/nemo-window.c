@@ -128,7 +128,7 @@ enum {
 static guint signals[LAST_SIGNAL] = { 0 };
 static GParamSpec *properties[NUM_PROPERTIES] = { NULL, };
 
-G_DEFINE_TYPE (NemoWindow, nemo_window, GTK_TYPE_APPLICATION_WINDOW);
+G_DEFINE_TYPE (NemoWindow, nemo_window, ADW_TYPE_APPLICATION_WINDOW);
 
 static const struct {
 	unsigned int keyval;
@@ -606,7 +606,6 @@ static void
 nemo_window_constructed (GObject *self)
 {
 	NemoWindow *window;
-	GtkWidget *grid;
 	GtkWidget *menu;
 	GtkWidget *hpaned;
 	GtkWidget *vbox;
@@ -630,9 +629,6 @@ nemo_window_constructed (GObject *self)
 	grid = gtk_grid_new ();
 	gtk_orientable_set_orientation (GTK_ORIENTABLE (grid), GTK_ORIENTATION_VERTICAL);
 	gtk_widget_show (grid);
-	gtk_container_add (GTK_CONTAINER (window), grid);
-
-	/* Statusbar is packed in the subclasses */
 
 	nemo_window_initialize_menus (window);
 	nemo_window_initialize_actions (window);
@@ -669,11 +665,8 @@ nemo_window_constructed (GObject *self)
                       nemo_window_disable_chrome_mapping, NULL,
                       window, NULL);
 
-	gtk_container_add (GTK_CONTAINER (grid), menu);
-
 	/* Set up the toolbar place holder */
 	toolbar_holder = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
-	gtk_container_add (GTK_CONTAINER (grid), toolbar_holder);
 	gtk_widget_show (toolbar_holder);
 
     g_signal_connect_object (toolbar_holder, "button-press-event",
@@ -689,7 +682,6 @@ nemo_window_constructed (GObject *self)
 	gtk_widget_set_hexpand (window->details->content_paned, TRUE);
 	gtk_widget_set_vexpand (window->details->content_paned, TRUE);
 
-	gtk_container_add (GTK_CONTAINER (grid), window->details->content_paned);
 	gtk_widget_show (window->details->content_paned);
 
 	vbox = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
@@ -712,15 +704,32 @@ nemo_window_constructed (GObject *self)
     window->details->nemo_status_bar = nemo_statusbar;
 
     GtkWidget *sep = gtk_separator_new (GTK_ORIENTATION_HORIZONTAL);
-    gtk_container_add (GTK_CONTAINER (grid), sep);
     gtk_widget_show (sep);
 
     GtkWidget *eb;
 
     eb = gtk_event_box_new ();
     gtk_container_add (GTK_CONTAINER (eb), nemo_statusbar);
-    gtk_container_add (GTK_CONTAINER (grid), eb);
     gtk_widget_show (eb);
+
+    /* Adwaita chrome: header + menubar + toolbar / content / status */
+    {
+        GtkWidget *header = adw_header_bar_new ();
+        GtkWidget *toolbar_view = adw_toolbar_view_new ();
+        GtkWidget *toasts = adw_toast_overlay_new ();
+        GtkWidget *bottom = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
+
+        adw_header_bar_set_show_end_title_buttons (ADW_HEADER_BAR (header), TRUE);
+        adw_toolbar_view_add_top_bar (ADW_TOOLBAR_VIEW (toolbar_view), header);
+        adw_toolbar_view_add_top_bar (ADW_TOOLBAR_VIEW (toolbar_view), menu);
+        adw_toolbar_view_add_top_bar (ADW_TOOLBAR_VIEW (toolbar_view), toolbar_holder);
+        adw_toolbar_view_set_content (ADW_TOOLBAR_VIEW (toolbar_view), window->details->content_paned);
+        gtk_box_append (GTK_BOX (bottom), sep);
+        gtk_box_append (GTK_BOX (bottom), eb);
+        adw_toolbar_view_add_bottom_bar (ADW_TOOLBAR_VIEW (toolbar_view), bottom);
+        adw_toast_overlay_set_child (ADW_TOAST_OVERLAY (toasts), toolbar_view);
+        adw_application_window_set_content (ADW_APPLICATION_WINDOW (window), toasts);
+    }
 
     window->details->statusbar = nemo_status_bar_get_real_statusbar (NEMO_STATUS_BAR (nemo_statusbar));
     window->details->help_message_cid = gtk_statusbar_get_context_id (GTK_STATUSBAR (window->details->statusbar),
@@ -1997,14 +2006,15 @@ nemo_window_init (NemoWindow *window)
 	/* This makes it possible for GTK+ themes to apply styling that is specific to Nemo
 	 * without affecting other GTK+ applications.
 	 */
-	gtk_style_context_add_class (gtk_widget_get_style_context (GTK_WIDGET (window)), "nemo-window");
+	gtk_widget_add_css_class (GTK_WIDGET (window), "nemo-window");
+	gtk_widget_add_css_class (GTK_WIDGET (window), "verne-window");
 
 	window_group = gtk_window_group_new ();
 	gtk_window_group_add_window (window_group, GTK_WINDOW (window));
 	g_object_unref (window_group);
 
 	/* Set initial window title */
-	gtk_window_set_title (GTK_WINDOW (window), _("Nemo"));
+	gtk_window_set_title (GTK_WINDOW (window), _("Verne"));
 
     g_signal_connect_swapped (nemo_preferences,
 				  "changed::" NEMO_PREFERENCES_SHOW_IMAGE_FILE_THUMBNAILS,
@@ -2346,14 +2356,14 @@ nemo_window_class_init (NemoWindowClass *class)
 	oclass->get_property = nemo_window_get_property;
 	oclass->set_property = nemo_window_set_property;
 
-	wclass->destroy = nemo_window_destroy;
-	wclass->show = nemo_window_show;
-	wclass->realize = nemo_window_realize;
-	wclass->key_press_event = nemo_window_key_press_event;
-    wclass->key_release_event = nemo_window_key_release_event;
+	verne_widget_class_set_destroy (wclass, nemo_window_destroy);
+	verne_widget_class_set_show (wclass, nemo_window_show);
+	verne_widget_class_set_realize (wclass, nemo_window_realize);
+	verne_widget_class_set_key_press_event (wclass, nemo_window_key_press_event);
+    verne_widget_class_set_key_release_event (wclass, nemo_window_key_release_event);
 	wclass->window_state_event = nemo_window_state_event;
-	wclass->button_press_event = nemo_window_button_press_event;
-	wclass->delete_event = nemo_window_delete_event;
+	verne_widget_class_set_button_press_event (wclass, nemo_window_button_press_event);
+	verne_widget_class_set_delete_event (wclass, nemo_window_delete_event);
 
 	class->get_icon = real_get_icon;
 	class->close = real_window_close;

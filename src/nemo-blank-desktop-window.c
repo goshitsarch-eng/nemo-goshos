@@ -490,11 +490,11 @@ nemo_blank_desktop_window_class_init (NemoBlankDesktopWindowClass *klass)
     oclass->set_property = nemo_blank_desktop_window_set_property;
     oclass->get_property = nemo_blank_desktop_window_get_property;
 
-	wclass->realize = realize;
-	wclass->unrealize = unrealize;
+	verne_widget_class_set_realize (wclass, realize);
+	verne_widget_class_set_unrealize (wclass, unrealize);
 	wclass->map = map;
-    wclass->show = show;
-	wclass->delete_event = nemo_blank_desktop_window_delete_event;
+    verne_widget_class_set_show (wclass, show);
+	verne_widget_class_set_delete_event (wclass, nemo_blank_desktop_window_delete_event);
 
     properties[PROP_MONITOR] =
         g_param_spec_int ("monitor",
