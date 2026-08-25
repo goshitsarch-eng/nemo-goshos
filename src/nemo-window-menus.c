@@ -2010,10 +2010,14 @@ nemo_window_initialize_menus (NemoWindow *window)
 	/* add the UI */
 	gtk_ui_manager_add_ui_from_resource (ui_manager, "/org/nemo/nemo-shell-ui.xml", NULL);
 
-    GtkWidget *menuitem, *submenu;
+    GtkWidget *menuitem, *submenu = NULL;
     menuitem = gtk_ui_manager_get_widget (nemo_window_get_ui_manager (window), NEMO_VIEW_MENUBAR_FILE_PATH);
-    submenu = gtk_menu_item_get_submenu (GTK_MENU_ITEM (menuitem));
-    g_signal_connect (submenu, "show", G_CALLBACK (on_file_menu_show), window);
+    if (GTK_IS_MENU_BUTTON (menuitem))
+	    submenu = gtk_menu_button_get_popover (GTK_MENU_BUTTON (menuitem));
+    else if (GTK_IS_MENU_ITEM (menuitem))
+	    submenu = gtk_menu_item_get_submenu (GTK_MENU_ITEM (menuitem));
+    if (submenu != NULL)
+	    g_signal_connect (submenu, "show", G_CALLBACK (on_file_menu_show), window);
 
 	nemo_window_initialize_trash_icon_monitor (window);
 }

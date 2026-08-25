@@ -683,7 +683,7 @@ gtk_button_get_image (GtkButton *button)
 GtkWidget *
 gtk_button_new_from_stock (const gchar *stock_id)
 {
-	return (gtk_button_new_from_icon_name) (stock_id);
+	return (gtk_button_new_from_icon_name) (verne_map_icon_name (stock_id));
 }
 
 /* accel group stub */
@@ -713,7 +713,7 @@ gtk_icon_theme_load_icon (GtkIconTheme *theme, const gchar *name, gint size, Gtk
 	GtkIconPaintable *p;
 	GdkPixbuf *pixbuf;
 	(void) flags;
-	p = gtk_icon_theme_lookup_icon (theme, name, NULL, size, 1, GTK_TEXT_DIR_NONE,
+	p = gtk_icon_theme_lookup_icon (theme, verne_map_icon_name (name), NULL, size, 1, GTK_TEXT_DIR_NONE,
 					GTK_ICON_LOOKUP_FORCE_REGULAR);
 	pixbuf = gtk_icon_info_load_icon (p, error);
 	if (p)

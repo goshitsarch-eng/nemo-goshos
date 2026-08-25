@@ -1081,15 +1081,52 @@ gpointer
 gtk_icon_theme_lookup_icon_for_scale (GtkIconTheme *theme, const gchar *name, gint size, gint scale, GtkIconLookupFlags flags)
 {
 	(void) flags;
-	return gtk_icon_theme_lookup_icon (theme, name, NULL, size, scale, GTK_TEXT_DIR_NONE,
+	return gtk_icon_theme_lookup_icon (theme, verne_map_icon_name (name), NULL, size, scale, GTK_TEXT_DIR_NONE,
 					   GTK_ICON_LOOKUP_FORCE_REGULAR);
 }
+
+static GIcon *
+verne_map_gicon (GIcon *icon)
+{
+	const gchar *const *names;
+	gchar **mapped;
+	gboolean changed = FALSE;
+	int i, n;
+	GIcon *result;
+
+	if (!G_IS_THEMED_ICON (icon))
+		return g_object_ref (icon);
+	names = g_themed_icon_get_names (G_THEMED_ICON (icon));
+	if (names == NULL)
+		return g_object_ref (icon);
+	n = (int) g_strv_length ((gchar **) names);
+	mapped = g_new0 (gchar *, n + 1);
+	for (i = 0; i < n; i++) {
+		const gchar *m = verne_map_icon_name (names[i]);
+		if (m != names[i])
+			changed = TRUE;
+		mapped[i] = g_strdup (m);
+	}
+	if (!changed) {
+		g_strfreev (mapped);
+		return g_object_ref (icon);
+	}
+	result = g_themed_icon_new_from_names (mapped, -1);
+	g_strfreev (mapped);
+	return result;
+}
+
 gpointer
 gtk_icon_theme_lookup_by_gicon_for_scale (GtkIconTheme *theme, GIcon *icon, gint size, gint scale, GtkIconLookupFlags flags)
 {
+	GIcon *mapped;
+	gpointer paintable;
 	(void) flags;
-	return gtk_icon_theme_lookup_by_gicon (theme, icon, size, scale, GTK_TEXT_DIR_NONE,
-					       GTK_ICON_LOOKUP_FORCE_REGULAR);
+	mapped = icon ? verne_map_gicon (icon) : NULL;
+	paintable = gtk_icon_theme_lookup_by_gicon (theme, mapped ? mapped : icon, size, scale, GTK_TEXT_DIR_NONE,
+						    GTK_ICON_LOOKUP_FORCE_REGULAR);
+	g_clear_object (&mapped);
+	return paintable;
 }
 
 static GQuark

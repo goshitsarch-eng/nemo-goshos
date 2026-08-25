@@ -330,11 +330,20 @@ verne_gtk_scrolled_window_new (void *ha, void *va)
 
 void gtk_scrolled_window_add_with_viewport (GtkScrolledWindow *sw, GtkWidget *child);
 
+/* Mint xsi-* names map onto freedesktop / Adwaita names. */
+static inline const char *
+verne_map_icon_name (const char *name)
+{
+	if (name != NULL && g_str_has_prefix (name, "xsi-"))
+		return name + 4;
+	return name;
+}
+
 /* image helpers: GTK4 dropped icon-size argument */
 static inline GtkWidget *
 verne_gtk_image_new_from_icon_name (const char *name, int size)
 {
-	GtkWidget *image = (gtk_image_new_from_icon_name) (name);
+	GtkWidget *image = (gtk_image_new_from_icon_name) (verne_map_icon_name (name));
 	if (size >= 48)
 		gtk_image_set_icon_size (GTK_IMAGE (image), GTK_ICON_SIZE_LARGE);
 	else if (size > 0)
@@ -347,7 +356,7 @@ static inline void
 verne_gtk_image_set_from_icon_name (GtkImage *image, const char *name, int size)
 {
 	(void) size;
-	(gtk_image_set_from_icon_name) (image, name);
+	(gtk_image_set_from_icon_name) (image, verne_map_icon_name (name));
 }
 #define gtk_image_set_from_icon_name(image, name, ...) verne_gtk_image_set_from_icon_name (image, name, 0)
 
