@@ -6784,6 +6784,9 @@ create_popup_menu (NemoView *view, const char *popup_path)
 
 	menu = gtk_ui_manager_get_widget (nemo_window_get_ui_manager (view->details->window),
 					  popup_path);
+	if (menu == NULL)
+		return NULL;
+	gtk_menu_attach_to_widget (GTK_MENU (menu), GTK_WIDGET (view), NULL);
 	gtk_menu_set_screen (GTK_MENU (menu),
 			     gtk_widget_get_screen (GTK_WIDGET (view)));
 	gtk_widget_show (GTK_WIDGET (menu));

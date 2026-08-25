@@ -307,6 +307,9 @@ eel_pop_up_menu_at_pointer (GtkMenu        *menu,
     g_return_if_fail (GTK_IS_MENU (menu));
     g_return_if_fail (GTK_IS_WIDGET (widget));
 
+    if (gtk_menu_get_attach_widget (menu) == NULL)
+        gtk_menu_attach_to_widget (menu, widget, NULL);
+
     /* Anchor at the pointer only for a real button press in an X11 session.
      *
      * Keyboard-triggered popups (Menu key, ctrl-F10) have no usable event, and

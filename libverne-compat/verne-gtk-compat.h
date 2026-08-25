@@ -1014,7 +1014,7 @@ gboolean verne_widget_chain_focus_in (gpointer parent_class, GtkWidget *widget, 
 void verne_compat_init (void);
 
 /* color selection leftover */
-#define gtk_widget_override_background_color(w,s,c) ((void)0)
+void gtk_widget_override_background_color (GtkWidget *widget, GtkStateFlags state, const GdkRGBA *color);
 #define gtk_widget_override_color(w,s,c) ((void)0)
 #define gtk_widget_override_font(w,f) ((void)0)
 
@@ -1154,6 +1154,8 @@ typedef enum {
 
 void gtk_window_set_type_hint (GtkWindow *window, GdkWindowTypeHint hint);
 GdkWindowTypeHint gtk_window_get_type_hint (GtkWindow *window);
+void gtk_window_set_skip_taskbar_hint (GtkWindow *window, gboolean setting);
+void gtk_window_set_skip_pager_hint (GtkWindow *window, gboolean setting);
 void gtk_grab_add (GtkWidget *widget);
 void gtk_grab_remove (GtkWidget *widget);
 gboolean gtk_widget_hide_on_delete (GtkWidget *widget);
@@ -1448,7 +1450,6 @@ typedef guint GtkJunctionSides;
 #define gtk_scrolled_window_set_shadow_type(sw, s) ((void)0)
 #define gtk_window_set_position(w, p) ((void)0)
 #define gtk_window_set_screen(w, s) ((void)0)
-#define gtk_window_set_skip_taskbar_hint(w, b) ((void)0)
 #define gtk_menu_set_screen(m, s) ((void)0)
 #define gtk_style_context_invalidate(c) ((void)0)
 #define gtk_style_context_set_junction_sides(c, s) ((void)0)
@@ -1516,6 +1517,11 @@ void gtk_tool_item_set_expand (gpointer item, gboolean expand);
 void gtk_activatable_set_related_action (gpointer activatable, GtkAction *action);
 GtkAction *gtk_activatable_get_related_action (gpointer activatable);
 void verne_cell_renderer_set_pixbuf (GtkCellRenderer *cell, GdkPixbuf *pixbuf);
+void verne_tree_view_column_set_attributes (GtkTreeViewColumn *tree_column,
+					    GtkCellRenderer *cell,
+					    ...) G_GNUC_NULL_TERMINATED;
+#undef gtk_tree_view_column_set_attributes
+#define gtk_tree_view_column_set_attributes verne_tree_view_column_set_attributes
 void gtk_activatable_set_use_action_appearance (gpointer activatable, gboolean use);
 gboolean gtk_activatable_get_use_action_appearance (gpointer activatable);
 gboolean gtk_bindings_activate_event (GObject *object, GdkEventKey *event);

@@ -520,24 +520,39 @@ static void gtk_menu_init (GtkMenu *menu) {
 	gtk_popover_set_autohide (GTK_POPOVER (menu), TRUE);
 }
 GtkWidget *gtk_menu_new (void) { return g_object_new (GTK_TYPE_MENU, NULL); }
+static void
+verne_ensure_menu_parent (GtkMenu *menu, GtkWidget *fallback)
+{
+	GtkWidget *parent = gtk_widget_get_parent (GTK_WIDGET (menu));
+	GtkWidget *attach = menu->attach ? menu->attach : fallback;
+	if (parent == NULL && attach != NULL)
+		gtk_widget_set_parent (GTK_WIDGET (menu), attach);
+}
+
 void gtk_menu_popup_at_pointer (GtkMenu *menu, const GdkEvent *trigger) {
 	(void) trigger;
-	gtk_popover_popup (GTK_POPOVER (menu));
+	verne_ensure_menu_parent (menu, NULL);
+	if (gtk_widget_get_parent (GTK_WIDGET (menu)) != NULL)
+		gtk_popover_popup (GTK_POPOVER (menu));
 }
 void gtk_menu_popup_at_rect (GtkMenu *menu, GdkSurface *rect_window, const GdkRectangle *rect,
 			     GdkGravity rect_anchor, GdkGravity menu_anchor, const GdkEvent *trigger) {
 	(void) rect_window; (void) rect; (void) rect_anchor; (void) menu_anchor; (void) trigger;
-	gtk_popover_popup (GTK_POPOVER (menu));
+	verne_ensure_menu_parent (menu, NULL);
+	if (gtk_widget_get_parent (GTK_WIDGET (menu)) != NULL)
+		gtk_popover_popup (GTK_POPOVER (menu));
 }
 void gtk_menu_popup_at_widget (GtkMenu *menu, GtkWidget *widget, GdkGravity widget_anchor, GdkGravity menu_anchor, const GdkEvent *trigger) {
 	(void) widget_anchor; (void) menu_anchor; (void) trigger;
-	if (gtk_widget_get_parent (GTK_WIDGET (menu)) == NULL)
-		gtk_widget_set_parent (GTK_WIDGET (menu), widget);
-	gtk_popover_popup (GTK_POPOVER (menu));
+	verne_ensure_menu_parent (menu, widget);
+	if (gtk_widget_get_parent (GTK_WIDGET (menu)) != NULL)
+		gtk_popover_popup (GTK_POPOVER (menu));
 }
 void gtk_menu_popup (GtkMenu *menu, GtkWidget *parent_menu_shell, GtkWidget *parent_menu_item, gpointer func, gpointer data, guint button, guint32 activate_time) {
 	(void) parent_menu_shell; (void) parent_menu_item; (void) func; (void) data; (void) button; (void) activate_time;
-	gtk_popover_popup (GTK_POPOVER (menu));
+	verne_ensure_menu_parent (menu, parent_menu_item ? parent_menu_item : parent_menu_shell);
+	if (gtk_widget_get_parent (GTK_WIDGET (menu)) != NULL)
+		gtk_popover_popup (GTK_POPOVER (menu));
 }
 void gtk_menu_popdown (GtkMenu *menu) { gtk_popover_popdown (GTK_POPOVER (menu)); }
 void gtk_menu_attach_to_widget (GtkMenu *menu, GtkWidget *attach, gpointer detacher) {
@@ -594,10 +609,22 @@ GtkWidget *gtk_menu_item_new_with_label (const gchar *label) {
 	return w;
 }
 GtkWidget *gtk_menu_item_new_with_mnemonic (const gchar *label) { return gtk_menu_item_new_with_label (label); }
-void gtk_menu_item_set_submenu (GtkMenuItem *item, GtkWidget *submenu) { item->submenu = submenu; }
+void gtk_menu_item_set_submenu (GtkMenuItem *item, GtkWidget *submenu)
+{
+	item->submenu = submenu;
+	if (submenu == NULL)
+		return;
+	if (GTK_IS_POPOVER (submenu) && gtk_widget_get_parent (submenu) == NULL)
+		gtk_widget_set_parent (submenu, GTK_WIDGET (item));
+	if (g_object_get_data (G_OBJECT (item), "verne-sub-hooked") == NULL) {
+		g_signal_connect_swapped (item, "clicked", G_CALLBACK (gtk_popover_popup), submenu);
+		g_object_set_data (G_OBJECT (item), "verne-sub-hooked", GINT_TO_POINTER (1));
+	}
+}
 GtkWidget *gtk_menu_item_get_submenu (GtkMenuItem *item) { return item->submenu; }
 void gtk_menu_item_set_label (GtkMenuItem *item, const gchar *label) {
 	g_free (item->label); item->label = g_strdup (label);
+	gtk_button_set_use_underline (GTK_BUTTON (item), TRUE);
 	gtk_button_set_label (GTK_BUTTON (item), label);
 }
 const gchar *gtk_menu_item_get_label (GtkMenuItem *item) { return item->label; }
@@ -620,6 +647,7 @@ static void gtk_check_menu_item_class_init (GtkCheckMenuItemClass *c) { (void) c
 static void gtk_check_menu_item_init (GtkCheckMenuItem *i) { (void) i; }
 GtkWidget *gtk_check_menu_item_new_with_mnemonic (const gchar *label) {
 	GtkWidget *w = g_object_new (GTK_TYPE_CHECK_MENU_ITEM, NULL);
+	gtk_check_button_set_use_underline (GTK_CHECK_BUTTON (w), TRUE);
 	gtk_check_button_set_label (GTK_CHECK_BUTTON (w), label);
 	return w;
 }

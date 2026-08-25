@@ -151,7 +151,38 @@ build_menu (GtkUIManager *self, UiNode *node, gboolean menubar)
 		UiNode *c = l->data;
 		GtkWidget *child;
 
-		if (c->type == GTK_UI_MANAGER_MENU || (c->children && c->type != GTK_UI_MANAGER_SEPARATOR)) {
+		if (c->type == GTK_UI_MANAGER_PLACEHOLDER) {
+			GtkWidget *sub = build_menu (self, c, menubar);
+			/* flatten placeholder children */
+			g_object_ref_sink (sub);
+			if (menubar) {
+				GtkWidget *ch = gtk_widget_get_first_child (sub);
+				while (ch) {
+					GtkWidget *next = gtk_widget_get_next_sibling (ch);
+					g_object_ref (ch);
+					gtk_container_remove (sub, ch);
+					gtk_box_append (GTK_BOX (shell), ch);
+					g_object_unref (ch);
+					ch = next;
+				}
+			} else if (GTK_IS_MENU (sub)) {
+				/* append items from submenu box */
+				GtkMenu *sm = GTK_MENU (sub);
+				GtkWidget *box = gtk_menu_get_box (sm);
+				GtkWidget *ch = gtk_widget_get_first_child (box);
+				while (ch) {
+					GtkWidget *next = gtk_widget_get_next_sibling (ch);
+					g_object_ref (ch);
+					gtk_box_remove (GTK_BOX (box), ch);
+					gtk_box_append (GTK_BOX (gtk_menu_get_box (GTK_MENU (shell))), ch);
+					g_object_unref (ch);
+					ch = next;
+				}
+			}
+			c->widget = shell;
+			g_object_unref (sub);
+			continue;
+		} else if (c->type == GTK_UI_MANAGER_MENU || (c->children && c->type != GTK_UI_MANAGER_SEPARATOR)) {
 			GtkWidget *submenu = build_menu (self, c, FALSE);
 			GtkAction *action = lookup_action (self, c->action ? c->action : c->name);
 			const gchar *label = action ? gtk_action_get_label (action) : c->name;
@@ -168,35 +199,6 @@ build_menu (GtkUIManager *self, UiNode *node, gboolean menubar)
 				child = gtk_menu_item_new_with_mnemonic (label ? label : "");
 				gtk_menu_item_set_submenu (GTK_MENU_ITEM (child), submenu);
 			}
-		} else if (c->type == GTK_UI_MANAGER_PLACEHOLDER) {
-			GtkWidget *sub = build_menu (self, c, menubar);
-			/* flatten placeholder children */
-			if (menubar) {
-				GtkWidget *ch = gtk_widget_get_first_child (sub);
-				while (ch) {
-					GtkWidget *next = gtk_widget_get_next_sibling (ch);
-					g_object_ref (ch);
-					gtk_container_remove (sub, ch);
-					gtk_box_append (GTK_BOX (shell), ch);
-					g_object_unref (ch);
-					ch = next;
-				}
-			} else {
-				/* append items from submenu box */
-				GtkMenu *sm = GTK_MENU (sub);
-				GtkWidget *box = gtk_menu_get_box (sm);
-				GtkWidget *ch = gtk_widget_get_first_child (box);
-				while (ch) {
-					GtkWidget *next = gtk_widget_get_next_sibling (ch);
-					g_object_ref (ch);
-					gtk_box_remove (GTK_BOX (box), ch);
-					gtk_box_append (GTK_BOX (gtk_menu_get_box (GTK_MENU (shell))), ch);
-					g_object_unref (ch);
-					ch = next;
-				}
-			}
-			c->widget = sub;
-			continue;
 		} else {
 			child = build_menu_item_for_action (self, c);
 		}

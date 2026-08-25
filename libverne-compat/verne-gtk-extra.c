@@ -191,14 +191,29 @@ gtk_grab_remove (GtkWidget *widget)
 }
 
 static void verne_window_ensure_realize_hook (GtkWindow *window);
+static void verne_window_apply_x11 (GtkWindow *window);
 
 void
 gtk_window_set_type_hint (GtkWindow *window, GdkWindowTypeHint hint)
 {
 	g_object_set_data (G_OBJECT (window), "verne-type-hint", GINT_TO_POINTER ((int) hint));
 	if (hint == GDK_WINDOW_TYPE_HINT_DESKTOP) {
+		static GtkCssProvider *desktop_css;
 		gtk_window_set_decorated (window, FALSE);
 		gtk_window_set_deletable (window, FALSE);
+		gtk_window_set_skip_taskbar_hint (window, TRUE);
+		gtk_window_set_skip_pager_hint (window, TRUE);
+		gtk_widget_add_css_class (GTK_WIDGET (window), "verne-desktop");
+		if (desktop_css == NULL) {
+			desktop_css = gtk_css_provider_new ();
+			gtk_css_provider_load_from_string (desktop_css,
+				"window.verne-desktop, window.nemo-desktop-window {"
+				"  background-color: transparent;"
+				"}");
+			gtk_style_context_add_provider_for_display (gdk_display_get_default (),
+								    GTK_STYLE_PROVIDER (desktop_css),
+								    GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+		}
 	}
 	verne_window_ensure_realize_hook (window);
 }
@@ -207,6 +222,38 @@ GdkWindowTypeHint
 gtk_window_get_type_hint (GtkWindow *window)
 {
 	return (GdkWindowTypeHint) GPOINTER_TO_INT (g_object_get_data (G_OBJECT (window), "verne-type-hint"));
+}
+
+void
+gtk_window_set_skip_taskbar_hint (GtkWindow *window, gboolean setting)
+{
+	g_object_set_data (G_OBJECT (window), "verne-skip-taskbar", GINT_TO_POINTER (setting ? 1 : 2));
+	verne_window_ensure_realize_hook (window);
+	if (gtk_widget_get_realized (GTK_WIDGET (window)))
+		verne_window_apply_x11 (window);
+}
+
+void
+gtk_window_set_skip_pager_hint (GtkWindow *window, gboolean setting)
+{
+	g_object_set_data (G_OBJECT (window), "verne-skip-pager", GINT_TO_POINTER (setting ? 1 : 2));
+	verne_window_ensure_realize_hook (window);
+	if (gtk_widget_get_realized (GTK_WIDGET (window)))
+		verne_window_apply_x11 (window);
+}
+
+static void
+verne_x11_add_net_wm_state (Display *dpy, Window xid, Atom *atoms, int *n_atoms, Atom atom)
+{
+	int i;
+	for (i = 0; i < *n_atoms; i++) {
+		if (atoms[i] == atom)
+			return;
+	}
+	if (*n_atoms < 8)
+		atoms[(*n_atoms)++] = atom;
+	(void) dpy;
+	(void) xid;
 }
 
 static void
@@ -219,6 +266,9 @@ verne_window_apply_x11 (GtkWindow *window)
 	Window xid;
 	GdkWindowTypeHint hint;
 	gpointer xptr, yptr;
+	Atom state_atoms[8];
+	int n_state = 0;
+	gboolean skip_taskbar, skip_pager;
 
 	native = gtk_widget_get_native (GTK_WIDGET (window));
 	surface = native ? gtk_native_get_surface (native) : NULL;
@@ -241,6 +291,28 @@ verne_window_apply_x11 (GtkWindow *window)
 				 (unsigned char *) &value, 1);
 		if (hint == GDK_WINDOW_TYPE_HINT_DESKTOP)
 			XLowerWindow (dpy, xid);
+	}
+
+	skip_taskbar = GPOINTER_TO_INT (g_object_get_data (G_OBJECT (window), "verne-skip-taskbar")) == 1
+		|| hint == GDK_WINDOW_TYPE_HINT_DESKTOP;
+	skip_pager = GPOINTER_TO_INT (g_object_get_data (G_OBJECT (window), "verne-skip-pager")) == 1
+		|| hint == GDK_WINDOW_TYPE_HINT_DESKTOP;
+	if (skip_taskbar)
+		verne_x11_add_net_wm_state (dpy, xid, state_atoms, &n_state,
+					    XInternAtom (dpy, "_NET_WM_STATE_SKIP_TASKBAR", False));
+	if (skip_pager)
+		verne_x11_add_net_wm_state (dpy, xid, state_atoms, &n_state,
+					    XInternAtom (dpy, "_NET_WM_STATE_SKIP_PAGER", False));
+	if (hint == GDK_WINDOW_TYPE_HINT_DESKTOP) {
+		verne_x11_add_net_wm_state (dpy, xid, state_atoms, &n_state,
+					    XInternAtom (dpy, "_NET_WM_STATE_STICKY", False));
+		verne_x11_add_net_wm_state (dpy, xid, state_atoms, &n_state,
+					    XInternAtom (dpy, "_NET_WM_STATE_BELOW", False));
+	}
+	if (n_state > 0) {
+		Atom state = XInternAtom (dpy, "_NET_WM_STATE", False);
+		XChangeProperty (dpy, xid, state, XA_ATOM, 32, PropModeReplace,
+				 (unsigned char *) state_atoms, n_state);
 	}
 
 	xptr = g_object_get_data (G_OBJECT (window), "verne-win-x");
@@ -507,8 +579,26 @@ void gdk_window_get_position (GdkSurface *window, gint *x, gint *y)
 }
 void gdk_window_move (GdkSurface *window, gint x, gint y) { (void) window; (void) x; (void) y; }
 void gdk_window_resize (GdkSurface *window, gint width, gint height) { (void) window; (void) width; (void) height; }
-void gdk_window_raise (GdkSurface *window) { (void) window; }
-void gdk_window_lower (GdkSurface *window) { (void) window; }
+void gdk_window_raise (GdkSurface *window)
+{
+#ifdef GDK_WINDOWING_X11
+	if (window && GDK_IS_X11_SURFACE (window))
+		XRaiseWindow (gdk_x11_display_get_xdisplay (gdk_surface_get_display (window)),
+			      gdk_x11_surface_get_xid (window));
+#else
+	(void) window;
+#endif
+}
+void gdk_window_lower (GdkSurface *window)
+{
+#ifdef GDK_WINDOWING_X11
+	if (window && GDK_IS_X11_SURFACE (window))
+		XLowerWindow (gdk_x11_display_get_xdisplay (gdk_surface_get_display (window)),
+			      gdk_x11_surface_get_xid (window));
+#else
+	(void) window;
+#endif
+}
 void gdk_window_focus (GdkSurface *window, guint32 timestamp) { (void) window; (void) timestamp; }
 void gdk_window_set_cursor (GdkSurface *window, GdkCursor *cursor) { (void) window; (void) cursor; }
 
@@ -890,6 +980,72 @@ verne_cell_renderer_set_pixbuf (GtkCellRenderer *cell, GdkPixbuf *pixbuf)
 		      NULL);
 	g_clear_object (&texture);
 }
+
+static GdkTexture *
+verne_texture_from_surface (cairo_surface_t *surface)
+{
+	GdkPixbuf *pixbuf;
+	GdkTexture *texture;
+	int w, h;
+
+	if (surface == NULL || cairo_surface_status (surface) != CAIRO_STATUS_SUCCESS)
+		return NULL;
+	if (cairo_surface_get_type (surface) != CAIRO_SURFACE_TYPE_IMAGE)
+		return NULL;
+	w = cairo_image_surface_get_width (surface);
+	h = cairo_image_surface_get_height (surface);
+	if (w <= 0 || h <= 0)
+		return NULL;
+	pixbuf = gdk_pixbuf_get_from_surface (surface, 0, 0, w, h);
+	if (pixbuf == NULL)
+		return NULL;
+	texture = gdk_texture_new_for_pixbuf (pixbuf);
+	g_object_unref (pixbuf);
+	return texture;
+}
+
+static void
+verne_cell_surface_data_func (GtkTreeViewColumn *column,
+			      GtkCellRenderer *cell,
+			      GtkTreeModel *model,
+			      GtkTreeIter *iter,
+			      gpointer data)
+{
+	cairo_surface_t *surface = NULL;
+	GdkTexture *texture;
+	(void) column;
+	gtk_tree_model_get (model, iter, GPOINTER_TO_INT (data), &surface, -1);
+	texture = verne_texture_from_surface (surface);
+	g_object_set (cell, "gicon", NULL, "icon-name", NULL, "pixbuf", NULL, "texture", texture, NULL);
+	g_clear_object (&texture);
+	if (surface)
+		cairo_surface_destroy (surface);
+}
+
+void
+verne_tree_view_column_set_attributes (GtkTreeViewColumn *tree_column,
+				       GtkCellRenderer *cell,
+				       ...)
+{
+	va_list args;
+	const gchar *attr;
+
+	g_return_if_fail (GTK_IS_TREE_VIEW_COLUMN (tree_column));
+	g_return_if_fail (GTK_IS_CELL_RENDERER (cell));
+
+	gtk_cell_layout_clear_attributes (GTK_CELL_LAYOUT (tree_column), cell);
+	va_start (args, cell);
+	while ((attr = va_arg (args, const gchar *)) != NULL) {
+		int col = va_arg (args, int);
+		if (g_strcmp0 (attr, "surface") == 0)
+			gtk_cell_layout_set_cell_data_func (GTK_CELL_LAYOUT (tree_column), cell,
+							    verne_cell_surface_data_func,
+							    GINT_TO_POINTER (col), NULL);
+		else
+			gtk_cell_layout_add_attribute (GTK_CELL_LAYOUT (tree_column), cell, attr, col);
+	}
+	va_end (args);
+}
 void gtk_activatable_set_use_action_appearance (gpointer activatable, gboolean use) { (void) activatable; (void) use; }
 gboolean gtk_activatable_get_use_action_appearance (gpointer activatable) { (void) activatable; return TRUE; }
 
@@ -899,10 +1055,20 @@ void gtk_propagate_event (GtkWidget *widget, GdkEvent *event) { (void) widget; (
 GtkWidget *
 gtk_image_new_from_surface (cairo_surface_t *surface)
 {
-	(void) surface;
-	return gtk_image_new ();
+	GtkWidget *image = gtk_image_new ();
+	gtk_image_set_from_surface (GTK_IMAGE (image), surface);
+	return image;
 }
-void gtk_image_set_from_surface (GtkImage *image, cairo_surface_t *surface) { (void) image; (void) surface; }
+void
+gtk_image_set_from_surface (GtkImage *image, cairo_surface_t *surface)
+{
+	GdkTexture *texture;
+	if (image == NULL)
+		return;
+	texture = verne_texture_from_surface (surface);
+	gtk_image_set_from_paintable (image, GDK_PAINTABLE (texture));
+	g_clear_object (&texture);
+}
 void gtk_render_icon_surface (GtkStyleContext *context, cairo_t *cr, cairo_surface_t *surface, gdouble x, gdouble y) {
 	(void) context;
 	if (surface) {
@@ -1065,6 +1231,27 @@ gdk_device_get_window_at_position (GdkDevice *device, gint *x, gint *y)
 	return s;
 }
 
+void
+gtk_widget_override_background_color (GtkWidget *widget, GtkStateFlags state, const GdkRGBA *color)
+{
+	GtkCssProvider *provider;
+	gchar *css;
+	(void) state;
+	if (widget == NULL || color == NULL)
+		return;
+	css = g_strdup_printf ("* { background-color: rgba(%d,%d,%d,%g); }",
+			       (int) (color->red * 255.0),
+			       (int) (color->green * 255.0),
+			       (int) (color->blue * 255.0),
+			       color->alpha);
+	provider = gtk_css_provider_new ();
+	gtk_css_provider_load_from_string (provider, css);
+	gtk_style_context_add_provider (gtk_widget_get_style_context (widget),
+					GTK_STYLE_PROVIDER (provider),
+					GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+	g_object_unref (provider);
+	g_free (css);
+}
 void gdk_window_set_background_rgba (GdkSurface *window, const GdkRGBA *rgba) { (void) window; (void) rgba; }
 void gdk_window_set_transient_for (GdkSurface *window, GdkSurface *parent) { (void) window; (void) parent; }
 GdkWindowTypeHint gdk_window_get_type_hint (GdkSurface *window) { (void) window; return GDK_WINDOW_TYPE_HINT_NORMAL; }
