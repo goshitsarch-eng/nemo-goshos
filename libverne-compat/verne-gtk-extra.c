@@ -1005,7 +1005,7 @@ verne_texture_from_surface (cairo_surface_t *surface)
 }
 
 static void
-verne_cell_surface_data_func (GtkTreeViewColumn *column,
+verne_cell_surface_data_func (GtkCellLayout *layout,
 			      GtkCellRenderer *cell,
 			      GtkTreeModel *model,
 			      GtkTreeIter *iter,
@@ -1013,7 +1013,7 @@ verne_cell_surface_data_func (GtkTreeViewColumn *column,
 {
 	cairo_surface_t *surface = NULL;
 	GdkTexture *texture;
-	(void) column;
+	(void) layout;
 	gtk_tree_model_get (model, iter, GPOINTER_TO_INT (data), &surface, -1);
 	texture = verne_texture_from_surface (surface);
 	g_object_set (cell, "gicon", NULL, "icon-name", NULL, "pixbuf", NULL, "texture", texture, NULL);
