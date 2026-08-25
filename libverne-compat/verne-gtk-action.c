@@ -367,14 +367,16 @@ gtk_radio_action_set_current_value (GtkRadioAction *action, gint value)
 	GSList *l;
 	GtkRadioAction *current = NULL;
 	GtkRadioAction *emit_on;
+	static gboolean in_set_current;
 
-	if (!action)
+	if (!action || in_set_current)
 		return;
 	for (l = action->group; l; l = l->next) {
 		GtkRadioAction *r = l->data;
 		if (r->value == value && gtk_toggle_action_get_active (GTK_TOGGLE_ACTION (r)))
 			return;
 	}
+	in_set_current = TRUE;
 	for (l = action->group; l; l = l->next) {
 		GtkRadioAction *r = l->data;
 		gboolean match = (r->value == value);
@@ -382,11 +384,14 @@ gtk_radio_action_set_current_value (GtkRadioAction *action, gint value)
 		if (match)
 			current = r;
 	}
-	if (current == NULL)
+	if (current == NULL) {
+		in_set_current = FALSE;
 		return;
+	}
 	/* Nemo connects "changed" to the first action in the group. */
 	emit_on = action->group ? action->group->data : action;
 	g_signal_emit (emit_on, radio_signals[RADIO_CHANGED], 0, current);
+	in_set_current = FALSE;
 }
 
 gint
