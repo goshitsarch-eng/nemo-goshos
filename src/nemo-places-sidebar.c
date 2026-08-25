@@ -46,6 +46,7 @@
 #include <libnemo-private/nemo-action-manager.h>
 #include <libnemo-private/nemo-action.h>
 #include <libnemo-private/nemo-ui-utilities.h>
+#include <libnemo-private/nemo-icon-info.h>
 
 #include <eel/eel-debug.h>
 #include <eel/eel-gtk-extensions.h>
@@ -4025,9 +4026,12 @@ icon_cell_renderer_func (GtkTreeViewColumn *column,
 			 gpointer user_data)
 {
 	PlaceType type;
+	GIcon *gicon = NULL;
+	GdkPixbuf *pixbuf = NULL;
 
 	gtk_tree_model_get (model, iter,
 			    PLACES_SIDEBAR_COLUMN_ROW_TYPE, &type,
+			    PLACES_SIDEBAR_COLUMN_GICON, &gicon,
 			    -1);
 
 	if (type == PLACES_HEADING) {
@@ -4035,12 +4039,21 @@ icon_cell_renderer_func (GtkTreeViewColumn *column,
 			      "visible", FALSE,
 			      NULL);
 	} else {
+		if (gicon) {
+			NemoIconInfo *info = nemo_icon_info_lookup (gicon, 16, 1);
+			pixbuf = nemo_icon_info_get_pixbuf_nodefault (info);
+			nemo_icon_info_unref (info);
+		}
 		g_object_set (cell,
 			      "visible", TRUE,
-                  "xpad", 3,
-                  "ypad", 2,
+			      "xpad", 3,
+			      "ypad", 2,
+			      "pixbuf", pixbuf,
+			      "gicon", NULL,
 			      NULL);
+		g_clear_object (&pixbuf);
 	}
+	g_clear_object (&gicon);
 }
 
 static void

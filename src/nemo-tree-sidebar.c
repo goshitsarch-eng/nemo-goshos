@@ -46,6 +46,7 @@
 #include <libnemo-private/nemo-file-utilities.h>
 #include <libnemo-private/nemo-global-preferences.h>
 #include <libnemo-private/nemo-icon-names.h>
+#include <libnemo-private/nemo-icon-info.h>
 #include <libnemo-private/nemo-program-choosing.h>
 #include <libnemo-private/nemo-tree-view-drag-dest.h>
 #include <libnemo-private/nemo-module.h>
@@ -1439,9 +1440,19 @@ icon_data_func (GtkTreeViewColumn *tree_column,
                         &icon,
                         -1);
 
-    g_object_set (cell,
-                  "gicon", icon,
-                  NULL);
+    if (icon) {
+        NemoIconInfo *info = nemo_icon_info_lookup (icon, 16, 1);
+        GdkPixbuf *pixbuf = nemo_icon_info_get_pixbuf_nodefault (info);
+        g_object_set (cell,
+                      "pixbuf", pixbuf,
+                      "gicon", NULL,
+                      NULL);
+        g_clear_object (&pixbuf);
+        nemo_icon_info_unref (info);
+        g_object_unref (icon);
+    } else {
+        g_object_set (cell, "gicon", NULL, "pixbuf", NULL, NULL);
+    }
 }
 
 static void
