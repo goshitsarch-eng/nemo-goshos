@@ -4048,9 +4048,8 @@ icon_cell_renderer_func (GtkTreeViewColumn *column,
 			      "visible", TRUE,
 			      "xpad", 3,
 			      "ypad", 2,
-			      "pixbuf", pixbuf,
-			      "gicon", NULL,
 			      NULL);
+		verne_cell_renderer_set_pixbuf (cell, pixbuf);
 		g_clear_object (&pixbuf);
 	}
 	g_clear_object (&gicon);
@@ -4225,9 +4224,6 @@ nemo_places_sidebar_init (NemoPlacesSidebar *sidebar)
                   "icon-size", GTK_ICON_SIZE_NORMAL,
                   NULL);
 	gtk_tree_view_column_pack_start (primary_column, cell, FALSE);
-	gtk_tree_view_column_set_attributes (primary_column, cell,
-					     "gicon", PLACES_SIDEBAR_COLUMN_GICON,
-					     NULL);
 	gtk_tree_view_column_set_cell_data_func (primary_column, cell,
 						 icon_cell_renderer_func,
 						 sidebar, NULL);

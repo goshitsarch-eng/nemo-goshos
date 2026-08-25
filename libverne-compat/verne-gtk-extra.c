@@ -872,6 +872,24 @@ gtk_activatable_set_related_action (gpointer activatable, GtkAction *action)
 GtkAction *gtk_activatable_get_related_action (gpointer activatable) {
 	return g_object_get_data (G_OBJECT (activatable), "verne-action");
 }
+
+void
+verne_cell_renderer_set_pixbuf (GtkCellRenderer *cell, GdkPixbuf *pixbuf)
+{
+	GdkTexture *texture = NULL;
+
+	if (cell == NULL)
+		return;
+	if (pixbuf)
+		texture = gdk_texture_new_for_pixbuf (pixbuf);
+	g_object_set (cell,
+		      "gicon", NULL,
+		      "icon-name", NULL,
+		      "pixbuf", pixbuf,
+		      "texture", texture,
+		      NULL);
+	g_clear_object (&texture);
+}
 void gtk_activatable_set_use_action_appearance (gpointer activatable, gboolean use) { (void) activatable; (void) use; }
 gboolean gtk_activatable_get_use_action_appearance (gpointer activatable) { (void) activatable; return TRUE; }
 

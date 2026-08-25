@@ -1443,15 +1443,12 @@ icon_data_func (GtkTreeViewColumn *tree_column,
     if (icon) {
         NemoIconInfo *info = nemo_icon_info_lookup (icon, 16, 1);
         GdkPixbuf *pixbuf = nemo_icon_info_get_pixbuf_nodefault (info);
-        g_object_set (cell,
-                      "pixbuf", pixbuf,
-                      "gicon", NULL,
-                      NULL);
+        verne_cell_renderer_set_pixbuf (cell, pixbuf);
         g_clear_object (&pixbuf);
         nemo_icon_info_unref (info);
         g_object_unref (icon);
     } else {
-        g_object_set (cell, "gicon", NULL, "pixbuf", NULL, NULL);
+        verne_cell_renderer_set_pixbuf (cell, NULL);
     }
 }
 

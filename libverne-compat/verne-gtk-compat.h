@@ -1515,6 +1515,7 @@ void gtk_tool_item_set_expand (gpointer item, gboolean expand);
 #define GTK_IS_ACTIVATABLE(w) FALSE
 void gtk_activatable_set_related_action (gpointer activatable, GtkAction *action);
 GtkAction *gtk_activatable_get_related_action (gpointer activatable);
+void verne_cell_renderer_set_pixbuf (GtkCellRenderer *cell, GdkPixbuf *pixbuf);
 void gtk_activatable_set_use_action_appearance (gpointer activatable, gboolean use);
 gboolean gtk_activatable_get_use_action_appearance (gpointer activatable);
 gboolean gtk_bindings_activate_event (GObject *object, GdkEventKey *event);
