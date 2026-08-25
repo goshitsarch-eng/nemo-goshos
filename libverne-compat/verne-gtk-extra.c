@@ -1235,7 +1235,7 @@ gtk_icon_info_get_filename (gpointer info)
 		g_object_set_qdata_full (G_OBJECT (info), verne_icon_filename_quark (), path, g_free);
 	return path;
 }
-GtkIconSize gtk_icon_size_from_name (const gchar *name) { (void) name; return GTK_ICON_SIZE_INHERIT; }
+GtkIconSize gtk_icon_size_from_name (const gchar *name) { (void) name; return GTK_ICON_SIZE_NORMAL; }
 
 GtkWidget *gtk_menu_shell_get_selected_item (gpointer menu_shell) { (void) menu_shell; return NULL; }
 

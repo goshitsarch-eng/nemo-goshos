@@ -335,7 +335,9 @@ static inline const char *
 verne_map_icon_name (const char *name)
 {
 	if (name != NULL && g_str_has_prefix (name, "xsi-"))
-		return name + 4;
+		name = name + 4;
+	if (g_strcmp0 (name, "view-compact-symbolic") == 0)
+		return "view-continuous-symbolic";
 	return name;
 }
 

@@ -27,6 +27,7 @@
  */
 
 #include <config.h>
+#include <unistd.h>
 
 #include "nemo-application.h"
 
@@ -309,6 +310,24 @@ init_icons_and_styles (void)
     /* initialize search path for custom icons */
     gtk_icon_theme_append_search_path (gtk_icon_theme_get_default (),
                        NEMO_DATADIR G_DIR_SEPARATOR_S "icons");
+    {
+        char exe[4096];
+        ssize_t n = readlink ("/proc/self/exe", exe, sizeof exe - 1);
+        if (n > 0) {
+            gchar *bindir, *builddir, *root, *icons;
+            exe[n] = '\0';
+            bindir = g_path_get_dirname (exe);
+            builddir = g_path_get_dirname (bindir);
+            root = g_path_get_dirname (builddir);
+            icons = g_build_filename (root, "data", "icons", NULL);
+            if (g_file_test (icons, G_FILE_TEST_IS_DIR))
+                gtk_icon_theme_append_search_path (gtk_icon_theme_get_default (), icons);
+            g_free (bindir);
+            g_free (builddir);
+            g_free (root);
+            g_free (icons);
+        }
+    }
 
     gtk_icon_size_register (NEMO_STATUSBAR_ICON_SIZE_NAME,
                             NEMO_STATUSBAR_ICON_SIZE,
