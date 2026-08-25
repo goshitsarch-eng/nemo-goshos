@@ -1399,16 +1399,12 @@ rebuild_menu (FMTreeView *view)
         GtkWidget *menu = gtk_ui_manager_get_widget (view->details->ui_manager, "/selection");
         gtk_menu_set_screen (GTK_MENU (menu), gtk_widget_get_screen (GTK_WIDGET (view->details->window)));
         view->details->popup_menu = menu;
+        gtk_menu_attach_to_widget (GTK_MENU (menu), GTK_WIDGET (view), NULL);
         g_signal_connect (view->details->popup_menu, "deactivate",
                           G_CALLBACK (popup_menu_deactivated),
                           view);
 
-#if GTK_CHECK_VERSION (3, 24, 8)
-        g_signal_connect (view->details->popup_menu, "realize",
-                          G_CALLBACK (popup_menu_realized),
-                          view->details);
-        gtk_widget_realize (view->details->popup_menu);
-#endif
+        gtk_widget_show (menu);
 
         gtk_widget_show (menu);
     }

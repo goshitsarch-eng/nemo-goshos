@@ -979,7 +979,29 @@ gtk_style_context_get_border_color (GtkStyleContext *context, GtkStateFlags stat
 void
 gtk_style_context_get_style (GtkStyleContext *context, ...)
 {
-	(void) context;
+	va_list args;
+	const gchar *name;
+	GtkWidget *widget = gtk_style_context_get_widget_or_null (context);
+
+	va_start (args, context);
+	while ((name = va_arg (args, const gchar *)) != NULL) {
+		gpointer dest = va_arg (args, gpointer);
+		GParamSpec *pspec = NULL;
+
+		if (dest == NULL)
+			continue;
+		if (widget)
+			pspec = lookup_style_pspec (widget, name);
+		if (g_str_has_suffix (name, "color") || (pspec && G_IS_PARAM_SPEC_BOXED (pspec)))
+			*(gpointer *) dest = NULL;
+		else if (pspec && G_IS_PARAM_SPEC_BOOLEAN (pspec))
+			*(gboolean *) dest = G_PARAM_SPEC_BOOLEAN (pspec)->default_value;
+		else if (pspec && G_IS_PARAM_SPEC_INT (pspec))
+			*(gint *) dest = G_PARAM_SPEC_INT (pspec)->default_value;
+		else
+			*(gint *) dest = 0;
+	}
+	va_end (args);
 }
 
 unsigned long

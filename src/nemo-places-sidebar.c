@@ -3566,14 +3566,7 @@ rebuild_menu (NemoPlacesSidebar *sidebar)
         GtkWidget *menu = gtk_ui_manager_get_widget (sidebar->ui_manager, "/selection");
         gtk_menu_set_screen (GTK_MENU (menu), gtk_widget_get_screen (GTK_WIDGET (sidebar->window)));
         sidebar->popup_menu = menu;
-
-#if GTK_CHECK_VERSION (3, 24, 8)
-        g_signal_connect (sidebar->popup_menu, "realize",
-                          G_CALLBACK (popup_menu_realized),
-                          sidebar);
-        gtk_widget_realize (sidebar->popup_menu);
-#endif
-
+        gtk_menu_attach_to_widget (GTK_MENU (menu), GTK_WIDGET (sidebar), NULL);
         gtk_widget_show (menu);
     }
 

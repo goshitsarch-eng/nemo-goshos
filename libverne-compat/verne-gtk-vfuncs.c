@@ -3,7 +3,12 @@
 #include "verne-gtk-compat.h"
 
 #include <string.h>
+#include <stdlib.h>
+#include <stdio.h>
 #include <graphene.h>
+#include <execinfo.h>
+#include <signal.h>
+#include <unistd.h>
 
 typedef struct {
 	VerneButtonEvent button_press;
@@ -571,10 +576,25 @@ wrapped_size_allocate (GtkWidget *widget, int width, int height, int baseline)
 		return;
 
 	v->in_size_allocate = TRUE;
+	/* GTK4 must record the allocation; gtk_widget_set_allocation is a no-op
+	 * in the compat layer, so GTK3 size_allocate alone leaves children
+	 * unallocated and snapshot/malloc-corrupts. */
+	if (v->orig_size_allocate)
+		v->orig_size_allocate (widget, width, height, baseline);
 	if (v->size_allocate)
 		v->size_allocate (widget, &alloc);
-	else if (v->orig_size_allocate)
-		v->orig_size_allocate (widget, width, height, baseline);
+	{
+		GtkWidget *child;
+		for (child = gtk_widget_get_first_child (widget); child; child = gtk_widget_get_next_sibling (child)) {
+			int cw = gtk_widget_get_width (child);
+			int ch = gtk_widget_get_height (child);
+			if (!gtk_widget_get_visible (child) || !gtk_widget_get_child_visible (child))
+				continue;
+			if (cw > 0 && ch > 0)
+				continue;
+			gtk_widget_allocate (child, 1, 1, -1, NULL);
+		}
+	}
 	v->in_size_allocate = FALSE;
 }
 
@@ -643,9 +663,24 @@ void
 verne_gtk_widget_show (GtkWidget *widget)
 {
 	g_return_if_fail (GTK_IS_WIDGET (widget));
+	/* Unparented popovers (GTK3 GtkMenu) cannot be mapped like GtkWindow. */
+	if (GTK_IS_POPOVER (widget) && gtk_widget_get_parent (widget) == NULL)
+		return;
 	gtk_widget_set_visible (widget, TRUE);
 	if (GTK_IS_WINDOW (widget))
 		verne_window_present_safe (GTK_WINDOW (widget));
+}
+
+#undef gtk_widget_realize
+void
+verne_gtk_widget_realize (GtkWidget *widget)
+{
+	g_return_if_fail (GTK_IS_WIDGET (widget));
+	/* GtkPopover is a GtkNative but still needs a parent surface. Realizing
+	 * an unrooted menu/popover creates a popup with a NULL parent and aborts. */
+	if (!GTK_IS_WINDOW (widget) && gtk_widget_get_root (widget) == NULL)
+		return;
+	(gtk_widget_realize) (widget);
 }
 
 static void
@@ -1015,6 +1050,49 @@ verne_schema_dir_ctor (void)
 }
 #endif
 
+static void
+verne_crash_handler (int sig)
+{
+	void *frames[64];
+	int n, i;
+	char buf[80];
+	int len;
+
+	len = snprintf (buf, sizeof buf, "\n*** Verne crash signal %d ***\n", sig);
+	if (len > 0)
+		write (STDERR_FILENO, buf, (size_t) len);
+	/* backtrace_symbols_fd allocates; skip it on allocator abort. */
+	if (sig != SIGABRT) {
+		n = backtrace (frames, 64);
+		for (i = 0; i < n; i++) {
+			len = snprintf (buf, sizeof buf, "  %p\n", frames[i]);
+			if (len > 0)
+				write (STDERR_FILENO, buf, (size_t) len);
+		}
+	}
+	_exit (128 + sig);
+}
+
+static void
+verne_install_crash_handler (void)
+{
+	static stack_t ss;
+	struct sigaction sa;
+
+	ss.ss_sp = malloc (SIGSTKSZ * 4);
+	ss.ss_size = ss.ss_sp ? SIGSTKSZ * 4 : 0;
+	ss.ss_flags = 0;
+	if (ss.ss_sp)
+		sigaltstack (&ss, NULL);
+
+	memset (&sa, 0, sizeof sa);
+	sa.sa_handler = verne_crash_handler;
+	sa.sa_flags = SA_ONSTACK;
+	sigaction (SIGSEGV, &sa, NULL);
+	sigaction (SIGABRT, &sa, NULL);
+	sigaction (SIGBUS, &sa, NULL);
+}
+
 void
 verne_compat_init (void)
 {
@@ -1024,6 +1102,7 @@ verne_compat_init (void)
 	if (inited)
 		return;
 	inited = TRUE;
+	verne_install_crash_handler ();
 	verne_controllers_quark = g_quark_from_static_string ("verne-controllers");
 	if (vfunc_table == NULL)
 		vfunc_table = g_hash_table_new (g_direct_hash, g_direct_equal);

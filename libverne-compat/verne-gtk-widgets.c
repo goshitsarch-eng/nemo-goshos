@@ -10,8 +10,36 @@ static void
 gtk_container_snapshot (GtkWidget *widget, GtkSnapshot *snapshot)
 {
 	GtkWidget *child;
-	for (child = gtk_widget_get_first_child (widget); child; child = gtk_widget_get_next_sibling (child))
+	for (child = gtk_widget_get_first_child (widget); child; child = gtk_widget_get_next_sibling (child)) {
+		if (gtk_widget_get_width (child) <= 0 || gtk_widget_get_height (child) <= 0)
+			continue;
 		gtk_widget_snapshot_child (widget, child, snapshot);
+	}
+}
+
+static void
+gtk_container_size_allocate (GtkWidget *widget, int width, int height, int baseline)
+{
+	GtkWidget *child;
+	(void) width;
+	(void) height;
+	(void) baseline;
+	for (child = gtk_widget_get_first_child (widget); child; child = gtk_widget_get_next_sibling (child)) {
+		int cw, ch;
+		if (!gtk_widget_should_layout (child))
+			continue;
+		cw = gtk_widget_get_width (child);
+		ch = gtk_widget_get_height (child);
+		if (cw > 0 && ch > 0)
+			continue;
+		gtk_widget_measure (child, GTK_ORIENTATION_HORIZONTAL, -1, NULL, &cw, NULL, NULL);
+		gtk_widget_measure (child, GTK_ORIENTATION_VERTICAL, -1, NULL, &ch, NULL, NULL);
+		if (cw < 1)
+			cw = 1;
+		if (ch < 1)
+			ch = 1;
+		gtk_widget_allocate (child, cw, ch, -1, NULL);
+	}
 }
 
 static void
@@ -44,6 +72,7 @@ static void
 gtk_container_class_init (GtkContainerClass *klass)
 {
 	GTK_WIDGET_CLASS (klass)->snapshot = gtk_container_snapshot;
+	GTK_WIDGET_CLASS (klass)->size_allocate = gtk_container_size_allocate;
 	klass->add = gtk_container_real_add;
 	klass->remove = gtk_container_real_remove;
 	klass->forall = gtk_container_real_forall;
