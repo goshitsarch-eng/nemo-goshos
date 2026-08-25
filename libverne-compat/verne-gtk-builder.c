@@ -59,24 +59,30 @@ remove_property (GString *s, const char *name)
 }
 
 static void
-strip_packing_blocks (GString *s)
+strip_xml_block (GString *s, const char *open_tag, const char *close_tag)
 {
 	for (;;) {
-		const char *found = strstr (s->str, "<packing>");
+		const char *found = strstr (s->str, open_tag);
 		const char *end;
 		gsize pos, n;
 		if (found == NULL)
 			break;
-		end = strstr (found, "</packing>");
+		end = strstr (found, close_tag);
 		if (end == NULL)
 			break;
-		end += strlen ("</packing>");
+		end += strlen (close_tag);
 		while (*end == '\n' || *end == '\r')
 			end++;
 		pos = (gsize) (found - s->str);
 		n = (gsize) (end - found);
 		g_string_erase (s, pos, (gssize) n);
 	}
+}
+
+static void
+strip_packing_blocks (GString *s)
+{
+	strip_xml_block (s, "<packing>", "</packing>");
 }
 
 static void
@@ -253,6 +259,8 @@ verne_transform_gtk3_ui (const gchar *xml, gssize len)
 
 	rewrite_stock_labels (s);
 	strip_packing_blocks (s);
+	strip_xml_block (s, "<action-widgets>", "</action-widgets>");
+	strip_xml_block (s, "<accel-groups>", "</accel-groups>");
 	strip_placeholders (s);
 
 	remove_property (s, "window-position");
