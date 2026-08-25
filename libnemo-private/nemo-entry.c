@@ -136,7 +136,7 @@ nemo_entry_key_press (GtkWidget *widget, GdkEventKey *event)
 	
 	old_has = gtk_editable_get_selection_bounds (editable, NULL, NULL);
 
-	result = GTK_WIDGET_CLASS (nemo_entry_parent_class)->key_press_event (widget, event);
+	result = verne_widget_chain_key_press (nemo_entry_parent_class, widget, event);
 
 	/* Pressing a key usually changes the selection if there is a selection.
 	 * If there is not selection, we can save work by not emitting a signal.
@@ -164,7 +164,7 @@ nemo_entry_motion_notify (GtkWidget *widget, GdkEventMotion *event)
 
 	old_had = gtk_editable_get_selection_bounds (editable, &old_start, &old_end);
 
-	result = GTK_WIDGET_CLASS (nemo_entry_parent_class)->motion_notify_event (widget, event);
+	result = verne_widget_chain_motion (nemo_entry_parent_class, widget, event);
 
 	/* Send a signal if dragging the mouse caused the selection to change. */
 	if (result) {
@@ -272,7 +272,7 @@ nemo_entry_button_press (GtkWidget *widget,
 {
 	gboolean result;
 
-	result = GTK_WIDGET_CLASS (nemo_entry_parent_class)->button_press_event (widget, event);
+	result = verne_widget_chain_button_press (nemo_entry_parent_class, widget, event);
 
 	if (result) {
 		g_signal_emit (widget, signals[SELECTION_CHANGED], 0);
@@ -287,7 +287,7 @@ nemo_entry_button_release (GtkWidget *widget,
 {
 	gboolean result;
 
-	result = GTK_WIDGET_CLASS (nemo_entry_parent_class)->button_release_event (widget, event);
+	result = verne_widget_chain_button_release (nemo_entry_parent_class, widget, event);
 
 	if (result) {
 		g_signal_emit (widget, signals[SELECTION_CHANGED], 0);
@@ -349,7 +349,7 @@ nemo_entry_selection_clear (GtkWidget *widget,
 		return FALSE;
 	}
 	
-	return GTK_WIDGET_CLASS (nemo_entry_parent_class)->selection_clear_event (widget, event);
+	return FALSE;
 }
 
 static void
@@ -363,8 +363,7 @@ nemo_entry_editable_init (GtkEditableInterface *iface)
 
 	/* Otherwise we might need some memcpy loving */
 	g_assert (iface->do_insert_text != NULL);
-	g_assert (iface->get_position != NULL);
-	g_assert (iface->get_chars != NULL);
+	g_assert (iface->get_text != NULL);
 }
 
 static void
@@ -380,7 +379,6 @@ nemo_entry_class_init (NemoEntryClass *class)
 	verne_widget_class_set_button_release_event (widget_class, nemo_entry_button_release);
 	verne_widget_class_set_key_press_event (widget_class, nemo_entry_key_press);
 	verne_widget_class_set_motion_notify_event (widget_class, nemo_entry_motion_notify);
-	widget_class->selection_clear_event = nemo_entry_selection_clear;
 	
 	gobject_class->finalize = nemo_entry_finalize;
 

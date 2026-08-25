@@ -228,7 +228,7 @@ nemo_icon_view_destroy (GtkWidget *object)
 		icon_view->details->icons_not_positioned = NULL;
 	}
 
-	GTK_WIDGET_CLASS (nemo_icon_view_parent_class)->destroy (object);
+	verne_widget_chain_destroy (nemo_icon_view_parent_class, GTK_WIDGET (object));
 }
 
 static void
@@ -1877,14 +1877,14 @@ nemo_icon_view_scroll_event (GtkWidget *widget,
 				scroll_event_copy->direction = GDK_SCROLL_RIGHT;
 			}
 
-			ret = GTK_WIDGET_CLASS (nemo_icon_view_parent_class)->scroll_event (widget, scroll_event_copy);
+			ret = verne_widget_chain_scroll (nemo_icon_view_parent_class, widget, scroll_event_copy);
 			gdk_event_free (event_copy);
 		}
 
 		return ret;
 	}
 
-	return GTK_WIDGET_CLASS (nemo_icon_view_parent_class)->scroll_event (widget, scroll_event);
+	return verne_widget_chain_scroll (nemo_icon_view_parent_class, widget, scroll_event);
 }
 
 static void
@@ -2756,9 +2756,9 @@ nemo_icon_view_class_init (NemoIconViewClass *klass)
 	oclass->finalize = nemo_icon_view_finalize;
     oclass->constructed = nemo_icon_view_constructed;
 
-	GTK_WIDGET_CLASS (klass)->destroy = nemo_icon_view_destroy;
-	GTK_WIDGET_CLASS (klass)->screen_changed = nemo_icon_view_screen_changed;
-	GTK_WIDGET_CLASS (klass)->scroll_event = nemo_icon_view_scroll_event;
+	verne_widget_class_set_destroy (GTK_WIDGET_CLASS (klass), nemo_icon_view_destroy);
+	verne_widget_class_set_screen_changed (GTK_WIDGET_CLASS (klass), nemo_icon_view_screen_changed);
+	verne_widget_class_set_scroll_event (GTK_WIDGET_CLASS (klass), nemo_icon_view_scroll_event);
 
 	nemo_view_class->add_file = nemo_icon_view_add_file;
 	nemo_view_class->begin_loading = nemo_icon_view_begin_loading;

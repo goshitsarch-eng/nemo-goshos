@@ -403,6 +403,12 @@ struct _GtkAction {
 struct _GtkActionClass {
 	GObjectClass parent_class;
 	void (* activate) (GtkAction *action);
+	GtkWidget *(* create_menu_item) (GtkAction *action);
+	GtkWidget *(* create_tool_item) (GtkAction *action);
+	void (* connect_proxy) (GtkAction *action, GtkWidget *proxy);
+	void (* disconnect_proxy) (GtkAction *action, GtkWidget *proxy);
+	GType menu_item_type;
+	GType toolbar_item_type;
 };
 
 GType gtk_action_get_type (void);
@@ -893,6 +899,7 @@ gboolean verne_widget_chain_button_release (gpointer parent_class, GtkWidget *wi
 gboolean verne_widget_chain_motion (gpointer parent_class, GtkWidget *widget, GdkEventMotion *event);
 gboolean verne_widget_chain_key_press (gpointer parent_class, GtkWidget *widget, GdkEventKey *event);
 gboolean verne_widget_chain_key_release (gpointer parent_class, GtkWidget *widget, GdkEventKey *event);
+gboolean verne_widget_chain_scroll (gpointer parent_class, GtkWidget *widget, GdkEventScroll *event);
 gboolean verne_widget_chain_draw (gpointer parent_class, GtkWidget *widget, cairo_t *cr);
 void verne_widget_chain_size_allocate (gpointer parent_class, GtkWidget *widget, GtkAllocation *allocation);
 void verne_widget_chain_destroy (gpointer parent_class, GtkWidget *widget);
@@ -1289,7 +1296,17 @@ struct _GtkMenuItem {
 	GtkWidget *image;
 	gchar *label;
 };
-typedef struct _GtkMenuItemClass { GtkButtonClass parent_class; } GtkMenuItemClass;
+typedef struct _GtkMenuItemClass {
+	GtkButtonClass parent_class;
+	void (* activate) (GtkMenuItem *item);
+	void (* activate_item) (GtkMenuItem *item);
+	void (* toggle_size_request) (GtkMenuItem *item, gint *requisition);
+	void (* toggle_size_allocate) (GtkMenuItem *item, gint allocation);
+	void (* set_label) (GtkMenuItem *item, const gchar *label);
+	const gchar *(* get_label) (GtkMenuItem *item);
+	void (* select) (GtkMenuItem *item);
+	void (* deselect) (GtkMenuItem *item);
+} GtkMenuItemClass;
 
 #ifndef GTK_SHADOW_NONE
 typedef enum {
@@ -1333,7 +1350,7 @@ typedef guint GtkJunctionSides;
 #define gtk_image_menu_item_new_with_mnemonic(l) gtk_menu_item_new_with_mnemonic (l)
 #define gtk_check_menu_item_new_with_label(l) gtk_check_menu_item_new_with_mnemonic (l)
 #define gtk_icon_theme_append_search_path(t, p) gtk_icon_theme_add_search_path (t, p)
-#define gtk_widget_new(type, first, ...) g_object_new (type, first, __VA_ARGS__)
+#define gtk_widget_new(type, ...) g_object_new (type, __VA_ARGS__)
 #define gtk_get_option_group(open) NULL
 #define gtk_css_provider_get_named(name, variant) gtk_css_provider_new ()
 #define gtk_message_dialog_set_image(d, i) ((void)0)
@@ -1428,7 +1445,7 @@ gboolean gdk_display_supports_selection_notification (GdkDisplay *display);
 gboolean gdk_screen_get_setting (GdkScreen *screen, const gchar *name, GValue *value);
 GList *gdk_screen_get_window_stack (GdkScreen *screen);
 unsigned long gdk_x11_get_xatom_by_name (const gchar *name);
-void gnome_desktop_get_session_user_pwent (void);
+struct passwd *gnome_desktop_get_session_user_pwent (void);
 void gtk_builder_add_callback_symbols (GtkBuilder *builder, const char *first, ...) G_GNUC_NULL_TERMINATED;
 void gtk_style_context_get_border_color (GtkStyleContext *context, GtkStateFlags state, GdkRGBA *color);
 void gtk_style_context_get_style (GtkStyleContext *context, ...) G_GNUC_NULL_TERMINATED;
@@ -1440,17 +1457,51 @@ typedef enum {
 } GdkFilterReturn;
 typedef void GdkXEvent;
 typedef struct { GdkEventType type; } GdkEventOwnerChange;
-typedef struct { GdkEventType type; } GdkEventSelection;
+typedef struct { GdkEventType type; GdkAtom selection; } GdkEventSelection;
 typedef struct { gint dummy; } GtkStyle;
 typedef struct { gint dummy; } GtkIconInfo;
 typedef struct { gint dummy; } GtkActivatable;
-typedef struct { gint dummy; } GtkActivatableIface;
+typedef struct {
+	GTypeInterface g_iface;
+	void (* update) (gpointer activatable, GtkAction *action, const gchar *property_name);
+	void (* sync_action_properties) (gpointer activatable, GtkAction *action);
+} GtkActivatableIface;
 typedef struct { gint dummy; } GdkVisual;
 typedef GtkCheckButton GtkRadioButton;
 typedef GtkWidget GtkToolItem;
 typedef GtkWidget GtkMenuShell;
 
-G_DEFINE_AUTOPTR_CLEANUP_FUNC (GtkBin, g_object_unref)
+#define gtk_widget_path_unref(p) ((void)0)
+#define gtk_drag_source_set_target_list(w, l) ((void)0)
+#define gtk_container_class_handle_border_width(c) ((void)0)
+#define gtk_menu_reposition(m) ((void)0)
+#define gtk_menu_item_get_reserve_indicator(i) FALSE
+#define gdk_monitor_is_primary(m) TRUE
+#define gdk_error_trap_push() ((void)0)
+#define gdk_error_trap_pop_ignored() ((void)0)
+#define GTK_STYLE_CLASS_BUTTON "button"
+#define GTK_STYLE_CLASS_RUBBERBAND "rubberband"
+#define GTK_STYLE_CLASS_DND "dnd"
+#define gtk_true() GINT_TO_POINTER (TRUE)
+#define gtk_false() GINT_TO_POINTER (FALSE)
+#define GDK_TOP_LEFT_CORNER 1
+#define GDK_BOTTOM_LEFT_CORNER 2
+#define GDK_TOP_RIGHT_CORNER 3
+#define GDK_BOTTOM_RIGHT_CORNER 4
+#define GTK_TYPE_SEPARATOR_TOOL_ITEM (gtk_separator_get_type ())
+#define GTK_TYPE_ACTIVATABLE (gtk_activatable_get_type ())
+#define GTK_PACK_DIRECTION_RTL 1
+#define GTK_PACK_DIRECTION_BTT 2
+GType gtk_activatable_get_type (void);
+
+static inline void
+verne_gtk_init (int *argc, char ***argv)
+{
+	(void) argc; (void) argv;
+	adw_init ();
+	(gtk_init) ();
+}
+#define gtk_init(argc, argv) verne_gtk_init (argc, argv)
 
 #define gtk_container_add_with_properties(c, child, ...) gtk_container_add (c, child)
 #define gtk_toggle_button_get_inconsistent(b) FALSE

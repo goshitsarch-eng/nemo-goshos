@@ -555,6 +555,15 @@ verne_widget_chain_key_release (gpointer parent_class, GtkWidget *widget, GdkEve
 }
 
 gboolean
+verne_widget_chain_scroll (gpointer parent_class, GtkWidget *widget, GdkEventScroll *event)
+{
+	VerneVfuncs *v = lookup_vfuncs_type (G_TYPE_FROM_CLASS (parent_class));
+	if (v && v->scroll)
+		return v->scroll (widget, event);
+	return FALSE;
+}
+
+gboolean
 verne_widget_chain_draw (gpointer parent_class, GtkWidget *widget, cairo_t *cr)
 {
 	VerneVfuncs *v = lookup_vfuncs_type (G_TYPE_FROM_CLASS (parent_class));

@@ -270,7 +270,7 @@ destroy (GtkWidget *object)
 	g_free (entry->details->current_directory);
 	entry->details->current_directory = NULL;
 	
-	GTK_WIDGET_CLASS (nemo_location_entry_parent_class)->destroy (object);
+	verne_widget_chain_destroy (nemo_location_entry_parent_class, GTK_WIDGET (object));
 }
 
 static void

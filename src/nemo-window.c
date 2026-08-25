@@ -858,7 +858,7 @@ nemo_window_destroy (GtkWidget *object)
 	g_assert (window->details->panes == NULL);
 	g_assert (window->details->active_pane == NULL);
 
-	GTK_WIDGET_CLASS (nemo_window_parent_class)->destroy (object);
+	verne_widget_chain_destroy (nemo_window_parent_class, GTK_WIDGET (object));
 }
 
 static void
@@ -1286,7 +1286,7 @@ nemo_window_key_press_event (GtkWidget *widget,
         window->details->menu_show_queued = FALSE;
     }
 
-	return GTK_WIDGET_CLASS (nemo_window_parent_class)->key_press_event (widget, event);
+	return verne_widget_chain_key_press (nemo_window_parent_class, widget, event);
 }
 
 static gboolean
@@ -1309,7 +1309,7 @@ nemo_window_key_release_event (GtkWidget *widget,
     window->details->menu_skip_release = FALSE;
     window->details->menu_show_queued = FALSE;
 
-    return GTK_WIDGET_CLASS (nemo_window_parent_class)->key_release_event (widget, event);
+    return verne_widget_chain_key_release (nemo_window_parent_class, widget, event);
 }
 
 /*
@@ -1928,10 +1928,8 @@ nemo_window_button_press_event (GtkWidget *widget,
 	} else if (mouse_extra_buttons && (event->button == mouse_forward_button)) {
 		nemo_window_back_or_forward (window, FALSE, 0, 0);
 		handled = TRUE;
-	} else if (GTK_WIDGET_CLASS (nemo_window_parent_class)->button_press_event) {
-		handled = GTK_WIDGET_CLASS (nemo_window_parent_class)->button_press_event (widget, event);
 	} else {
-		handled = FALSE;
+		handled = verne_widget_chain_button_press (nemo_window_parent_class, widget, event);
 	}
 	return handled;
 }

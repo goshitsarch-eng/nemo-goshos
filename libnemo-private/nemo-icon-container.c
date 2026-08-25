@@ -2746,7 +2746,7 @@ destroy (GtkWidget *object)
 
 	remove_search_entry_timeout (container);
 
-	GTK_WIDGET_CLASS (nemo_icon_container_parent_class)->destroy (object);
+	verne_widget_chain_destroy (nemo_icon_container_parent_class, GTK_WIDGET (object));
 }
 
 static void
@@ -3014,7 +3014,7 @@ button_press_event (GtkWidget *widget,
 	}
 
 	/* Invoke the canvas event handler and see if an item picks up the event. */
-	clicked_on_item = GTK_WIDGET_CLASS (nemo_icon_container_parent_class)->button_press_event (widget, event);
+	clicked_on_item = verne_widget_chain_button_press (nemo_icon_container_parent_class, widget, event);
 
 	/* Move focus to icon container, unless we're still renaming (to avoid exiting
 	 * renaming mode)
@@ -3489,7 +3489,7 @@ button_release_event (GtkWidget *widget,
 
 	if (event->button == RUBBERBAND_BUTTON && details->rubberband_info.active) {
 		stop_rubberbanding (container, event->time);
-        return GTK_WIDGET_CLASS (nemo_icon_container_parent_class)->button_release_event (widget, event);
+        return verne_widget_chain_button_release (nemo_icon_container_parent_class, widget, event);
 	}
 
 	if (event->button == details->drag_button) {
@@ -3518,7 +3518,7 @@ button_release_event (GtkWidget *widget,
 		return TRUE;
 	}
 
-	return GTK_WIDGET_CLASS (nemo_icon_container_parent_class)->button_release_event (widget, event);
+	return verne_widget_chain_button_release (nemo_icon_container_parent_class, widget, event);
 }
 
 static int
@@ -3588,7 +3588,7 @@ motion_notify_event (GtkWidget *widget,
 		}
 	}
 
-	return GTK_WIDGET_CLASS (nemo_icon_container_parent_class)->motion_notify_event (widget, event);
+	return verne_widget_chain_motion (nemo_icon_container_parent_class, widget, event);
 }
 
 static void
@@ -4306,7 +4306,7 @@ key_press_event (GtkWidget *widget,
 	}
 
 	if (!handled) {
-		handled = GTK_WIDGET_CLASS (nemo_icon_container_parent_class)->key_press_event (widget, event);
+		handled = verne_widget_chain_key_press (nemo_icon_container_parent_class, widget, event);
 	}
 
 	/* For non-desktop containers, forward keypresses to the filter bar.

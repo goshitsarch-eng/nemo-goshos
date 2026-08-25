@@ -5329,7 +5329,7 @@ real_destroy (GtkWidget *object)
 
     window->details->icon_chooser = NULL;
 
-	GTK_WIDGET_CLASS (nemo_properties_window_parent_class)->destroy (object);
+	verne_widget_chain_destroy (nemo_properties_window_parent_class, GTK_WIDGET (object));
 }
 
 static void
@@ -5575,7 +5575,7 @@ nemo_properties_window_class_init (NemoPropertiesWindowClass *class)
 	GtkBindingSet *binding_set;
 
 	G_OBJECT_CLASS (class)->finalize = real_finalize;
-	GTK_WIDGET_CLASS (class)->destroy = real_destroy;
+	verne_widget_class_set_destroy (GTK_WIDGET_CLASS (class), real_destroy);
 	GTK_DIALOG_CLASS (class)->response = real_response;
 
 	binding_set = gtk_binding_set_by_class (class);

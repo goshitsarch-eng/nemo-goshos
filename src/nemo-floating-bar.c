@@ -211,7 +211,7 @@ nemo_floating_bar_draw (GtkWidget *widget,
 
 	gtk_style_context_restore (context);
 
-	return GTK_WIDGET_CLASS (nemo_floating_bar_parent_class)->draw (widget, cr);;
+	return verne_widget_chain_draw (nemo_floating_bar_parent_class, widget, cr);
 }
 
 static void
@@ -270,8 +270,7 @@ nemo_floating_bar_class_init (NemoFloatingBarClass *klass)
 
 	verne_widget_class_set_draw (wclass, nemo_floating_bar_draw);
 	verne_widget_class_set_show (wclass, nemo_floating_bar_show);
-	wclass->hide = nemo_floating_bar_hide;
-	wclass->parent_set = nemo_floating_bar_parent_set;
+	/* parent_set is handled via notify::parent in constructed if needed */
 
 	properties[PROP_LABEL] =
 		g_param_spec_string ("label",

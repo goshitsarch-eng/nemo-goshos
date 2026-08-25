@@ -3,6 +3,8 @@
 #include <atk/atk.h>
 #include <stdarg.h>
 #include <string.h>
+#include <pwd.h>
+#include <unistd.h>
 
 /* ---------- GdkColor boxed type (removed in GTK4) ---------- */
 static GdkColor *
@@ -754,7 +756,25 @@ gboolean gdk_display_supports_selection_notification (GdkDisplay *display) { (vo
 gboolean gdk_screen_get_setting (GdkScreen *screen, const gchar *name, GValue *value) { (void) screen; (void) name; (void) value; return FALSE; }
 GList *gdk_screen_get_window_stack (GdkScreen *screen) { (void) screen; return NULL; }
 unsigned long gdk_x11_get_xatom_by_name (const gchar *name) { (void) name; return 0; }
-void gnome_desktop_get_session_user_pwent (void) { }
+struct passwd *
+gnome_desktop_get_session_user_pwent (void)
+{
+	return getpwuid (getuid ());
+}
+
+GType
+gtk_activatable_get_type (void)
+{
+	static gsize init = 0;
+	static GType type;
+	if (g_once_init_enter (&init)) {
+		type = g_type_register_static_simple (G_TYPE_INTERFACE, "GtkActivatable",
+						      sizeof (GtkActivatableIface), NULL,
+						      0, NULL, 0);
+		g_once_init_leave (&init, 1);
+	}
+	return type;
+}
 
 void
 gtk_builder_add_callback_symbols (GtkBuilder *builder, const char *first, ...)
