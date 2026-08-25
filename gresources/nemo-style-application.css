@@ -7,8 +7,19 @@
 }
 
 .verne-window toolbar,
-.nemo-window toolbar {
+.nemo-window toolbar,
+.verne-window menubar,
+.nemo-window menubar,
+.verne-window .toolbar,
+.nemo-window .toolbar {
 	background-color: @headerbar_bg_color;
+}
+
+.verne-window searchbar,
+.nemo-window searchbar,
+.verne-window .search-bar,
+.nemo-window .search-bar {
+	background-color: @window_bg_color;
 }
 
 .nemo-window.nemo-desktop-window notebook,

@@ -527,19 +527,29 @@ verne_menu_ensure_css (void)
 		return;
 	provider = gtk_css_provider_new ();
 	gtk_css_provider_load_from_string (provider,
-		"window.popup.menu {\n"
+		"window.popup.menu, window.popup.menu box.menu {\n"
 		"  background-color: #ffffff;\n"
 		"  background-image: none;\n"
 		"  color: #1e1e1e;\n"
 		"  opacity: 1;\n"
+		"}\n"
+		"window.popup.menu {\n"
 		"  border-radius: 12px;\n"
 		"  border: 1px solid #c0c0c0;\n"
 		"  padding: 6px;\n"
 		"}\n"
-		"window.popup.menu button {\n"
+		"window.popup.menu button, window.popup.menu checkbutton {\n"
 		"  padding: 6px 12px;\n"
 		"  border-radius: 6px;\n"
 		"  color: #1e1e1e;\n"
+		"  background-color: transparent;\n"
+		"}\n"
+		"window.popup.menu button:hover, window.popup.menu checkbutton:hover {\n"
+		"  background-color: #e6e6e6;\n"
+		"}\n"
+		".menubar {\n"
+		"  background-color: @headerbar_bg_color;\n"
+		"  min-height: 28px;\n"
 		"}\n"
 		".menubar > button {\n"
 		"  padding: 4px 10px;\n"
@@ -933,20 +943,29 @@ verne_submenu_clicked (GtkButton *item, gpointer data)
 		g_object_set_data (G_OBJECT (parent_menu), "verne-menu-hold", GINT_TO_POINTER (1));
 	gtk_menu_attach_to_widget (GTK_MENU (submenu), GTK_WIDGET (item), NULL);
 	verne_widget_root_xy (GTK_WIDGET (item), &x, &y);
-	x += gtk_widget_get_width (GTK_WIDGET (item));
-	y -= gtk_widget_get_height (GTK_WIDGET (item));
+	/* Menubar items drop down; nested items open to the right. */
+	if (gtk_widget_get_ancestor (GTK_WIDGET (item), GTK_TYPE_MENU_BAR) && parent_menu == NULL) {
+		/* verne_widget_root_xy already returns the item's bottom-left. */
+	} else {
+		x += gtk_widget_get_width (GTK_WIDGET (item));
+		y -= gtk_widget_get_height (GTK_WIDGET (item));
+	}
 	verne_menu_popup_now (GTK_MENU (submenu), x, y, TRUE);
 }
 
 void gtk_menu_item_set_submenu (GtkMenuItem *item, GtkWidget *submenu)
 {
+	if (item->submenu == submenu)
+		return;
+	if (item->submenu && g_object_get_data (G_OBJECT (item), "verne-sub-hooked")) {
+		g_signal_handlers_disconnect_by_func (item, G_CALLBACK (verne_submenu_clicked), item->submenu);
+		g_object_set_data (G_OBJECT (item), "verne-sub-hooked", NULL);
+	}
 	item->submenu = submenu;
 	if (submenu == NULL)
 		return;
-	if (g_object_get_data (G_OBJECT (item), "verne-sub-hooked") == NULL) {
-		g_signal_connect (item, "clicked", G_CALLBACK (verne_submenu_clicked), submenu);
-		g_object_set_data (G_OBJECT (item), "verne-sub-hooked", GINT_TO_POINTER (1));
-	}
+	g_signal_connect (item, "clicked", G_CALLBACK (verne_submenu_clicked), submenu);
+	g_object_set_data (G_OBJECT (item), "verne-sub-hooked", GINT_TO_POINTER (1));
 }
 GtkWidget *gtk_menu_item_get_submenu (GtkMenuItem *item) { return item->submenu; }
 void gtk_menu_item_set_label (GtkMenuItem *item, const gchar *label) {

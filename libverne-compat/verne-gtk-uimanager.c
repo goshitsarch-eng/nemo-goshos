@@ -136,27 +136,83 @@ build_menu_item_for_action (GtkUIManager *self, UiNode *node)
 	return item;
 }
 
-static void build_menu_add_node (GtkUIManager *self, UiNode *c, GtkWidget *shell, gboolean menubar);
+static void build_menu_add_node (GtkUIManager *self, UiNode *c, GtkWidget *shell, gboolean menubar, const gchar *path);
+
+static void
+clear_shell_children (GtkWidget *shell)
+{
+	GtkWidget *box = shell;
+	GtkWidget *child;
+
+	if (GTK_IS_MENU (shell))
+		box = gtk_menu_get_box (GTK_MENU (shell));
+	if (!GTK_IS_BOX (box))
+		return;
+	while ((child = gtk_widget_get_first_child (box)) != NULL)
+		gtk_box_remove (GTK_BOX (box), child);
+}
+
+static void
+harvest_submenus (UiNode *node)
+{
+	GList *l;
+
+	if (GTK_IS_MENU_ITEM (node->widget)) {
+		GtkWidget *sub = gtk_menu_item_get_submenu (GTK_MENU_ITEM (node->widget));
+		if (GTK_IS_MENU (sub)) {
+			gtk_menu_item_set_submenu (GTK_MENU_ITEM (node->widget), NULL);
+			gtk_widget_set_visible (sub, FALSE);
+			node->widget = sub;
+		}
+	} else if (GTK_IS_MENU (node->widget)) {
+		gtk_widget_set_visible (node->widget, FALSE);
+	}
+
+	for (l = node->children; l; l = l->next)
+		harvest_submenus (l->data);
+}
+
+static void
+register_widget (GtkUIManager *self, const gchar *path, GtkWidget *w)
+{
+	if (self->widgets && path && w)
+		g_hash_table_insert (self->widgets, g_strdup (path), w);
+}
 
 static GtkWidget *
-build_menu (GtkUIManager *self, UiNode *node, gboolean menubar)
+build_menu (GtkUIManager *self, UiNode *node, gboolean menubar, const gchar *path)
 {
 	GtkWidget *shell;
 	GList *l;
 
-	if (menubar)
-		shell = gtk_menu_bar_new ();
-	else
-		shell = gtk_menu_new ();
+	if (menubar) {
+		if (GTK_IS_MENU_BAR (node->widget))
+			shell = node->widget;
+		else
+			shell = gtk_menu_bar_new ();
+		clear_shell_children (shell);
+	} else {
+		if (GTK_IS_MENU (node->widget))
+			shell = node->widget;
+		else
+			shell = gtk_menu_new ();
+		gtk_widget_set_visible (shell, FALSE);
+		clear_shell_children (shell);
+	}
 
-	for (l = node->children; l; l = l->next)
-		build_menu_add_node (self, l->data, shell, menubar);
+	register_widget (self, path, shell);
+	for (l = node->children; l; l = l->next) {
+		UiNode *c = l->data;
+		gchar *child_path = g_strdup_printf ("%s/%s", path, c->name ? c->name : "item");
+		build_menu_add_node (self, c, shell, menubar, child_path);
+		g_free (child_path);
+	}
 	node->widget = shell;
 	return shell;
 }
 
 static void
-build_menu_add_node (GtkUIManager *self, UiNode *c, GtkWidget *shell, gboolean menubar)
+build_menu_add_node (GtkUIManager *self, UiNode *c, GtkWidget *shell, gboolean menubar, const gchar *path)
 {
 	GtkWidget *child;
 
@@ -164,16 +220,21 @@ build_menu_add_node (GtkUIManager *self, UiNode *c, GtkWidget *shell, gboolean m
 		return;
 	if (c->type == GTK_UI_MANAGER_PLACEHOLDER) {
 		GList *pl;
-		for (pl = c->children; pl; pl = pl->next)
-			build_menu_add_node (self, pl->data, shell, menubar);
+		for (pl = c->children; pl; pl = pl->next) {
+			UiNode *n = pl->data;
+			gchar *child_path = g_strdup_printf ("%s/%s", path, n->name ? n->name : "item");
+			build_menu_add_node (self, n, shell, menubar, child_path);
+			g_free (child_path);
+		}
 		c->widget = shell;
+		register_widget (self, path, shell);
 		return;
 	}
 
 	if (c->type == GTK_UI_MANAGER_MENU ||
 	    (c->children && c->type != GTK_UI_MANAGER_SEPARATOR &&
 	     c->type != GTK_UI_MANAGER_MENUITEM && c->type != GTK_UI_MANAGER_TOOLITEM)) {
-		GtkWidget *submenu = build_menu (self, c, FALSE);
+		GtkWidget *submenu = build_menu (self, c, FALSE, path);
 		GtkAction *action = lookup_action (self, c->action ? c->action : c->name);
 		const gchar *label = action ? gtk_action_get_label (action) : c->name;
 		child = gtk_menu_item_new_with_mnemonic (label ? label : "");
@@ -185,24 +246,19 @@ build_menu_add_node (GtkUIManager *self, UiNode *c, GtkWidget *shell, gboolean m
 	}
 	gtk_menu_shell_append (shell, child);
 	c->widget = child;
+	register_widget (self, path, child);
 }
 
 static void
 rebuild (GtkUIManager *self)
 {
 	GList *l;
-	if (self->widgets) {
-		GHashTableIter iter;
-		gpointer key, value;
-		g_hash_table_iter_init (&iter, self->widgets);
-		while (g_hash_table_iter_next (&iter, &key, &value)) {
-			if (GTK_IS_MENU (value))
-				gtk_widget_set_visible (GTK_WIDGET (value), FALSE);
-		}
-		g_hash_table_remove_all (self->widgets);
-	}
-	else
+
+	if (self->widgets == NULL)
 		self->widgets = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
+
+	harvest_submenus (self->root);
+	g_hash_table_remove_all (self->widgets);
 
 	for (l = self->root->children; l; l = l->next) {
 		UiNode *n = l->data;
@@ -211,14 +267,15 @@ rebuild (GtkUIManager *self)
 		if (n->type == GTK_UI_MANAGER_ACCELERATOR ||
 		    n->type == GTK_UI_MANAGER_TOOLBAR)
 			continue;
-		if (n->type == GTK_UI_MANAGER_MENUBAR || g_strcmp0 (n->name, "MenuBar") == 0)
-			w = build_menu (self, n, TRUE);
-		else
-			w = build_menu (self, n, FALSE);
 		path = g_strdup_printf ("/%s", n->name ? n->name : "ui");
-		g_hash_table_insert (self->widgets, path, w);
+		if (n->type == GTK_UI_MANAGER_MENUBAR || g_strcmp0 (n->name, "MenuBar") == 0)
+			w = build_menu (self, n, TRUE, path);
+		else
+			w = build_menu (self, n, FALSE, path);
+		g_free (path);
 		n->widget = w;
 	}
+	g_signal_emit_by_name (self, "actions-changed");
 }
 
 static void
