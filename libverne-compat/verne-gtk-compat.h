@@ -1355,6 +1355,20 @@ typedef struct _GdkKeymap GdkKeymap;
 #define gtk_menu_shell_select_first(shell, search) ((void)0)
 #define gtk_get_current_event_time() ((guint32) (g_get_monotonic_time () / 1000))
 #define gtk_get_current_event() ((GdkEvent *) NULL)
+
+/* Synthesized GTK3 GdkEvent* structs store type at offset 0. GTK4's
+ * gdk_event_get_event_type() expects a GdkEvent GObject and SIGSEGVs. */
+static inline GdkEventType
+verne_gdk_event_get_event_type (const GdkEvent *event)
+{
+	if (event == NULL)
+		return (GdkEventType) 0;
+	return ((const GdkEventAny *) event)->type;
+}
+#if defined(gdk_event_get_event_type)
+#undef gdk_event_get_event_type
+#endif
+#define gdk_event_get_event_type(e) verne_gdk_event_get_event_type ((const GdkEvent *) (e))
 #define gtk_get_current_event_state(s) FALSE
 
 static inline void
