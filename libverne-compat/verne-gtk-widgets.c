@@ -26,6 +26,21 @@ verne_snapshot_css_background (GtkWidget *widget, GtkSnapshot *snapshot)
 }
 
 static void
+verne_chrome_snapshot (GtkWidget *widget, GtkSnapshot *snapshot, GtkWidgetClass *parent_class)
+{
+	int width;
+	int height;
+	const GdkRGBA bg = { 0.922f, 0.922f, 0.922f, 1.0f };
+
+	width = gtk_widget_get_width (widget);
+	height = gtk_widget_get_height (widget);
+	if (width > 0 && height > 0)
+		gtk_snapshot_append_color (snapshot, &bg, &GRAPHENE_RECT_INIT (0, 0, (float) width, (float) height));
+	if (parent_class != NULL && parent_class->snapshot != NULL)
+		parent_class->snapshot (widget, snapshot);
+}
+
+static void
 gtk_container_snapshot (GtkWidget *widget, GtkSnapshot *snapshot)
 {
 	GtkWidget *child;
@@ -140,33 +155,16 @@ static void
 gtk_bin_snapshot (GtkWidget *widget, GtkSnapshot *snapshot)
 {
 	GtkBin *bin = GTK_BIN (widget);
+	const GdkRGBA bg = { 0.922f, 0.922f, 0.922f, 1.0f };
+	int width;
+	int height;
 
-	verne_snapshot_css_background (widget, snapshot);
+	width = gtk_widget_get_width (widget);
+	height = gtk_widget_get_height (widget);
+	if (width > 0 && height > 0)
+		gtk_snapshot_append_color (snapshot, &bg, &GRAPHENE_RECT_INIT (0, 0, (float) width, (float) height));
 	if (bin->child)
 		gtk_widget_snapshot_child (widget, bin->child, snapshot);
-}
-
-static void
-gtk_bin_size_allocate (GtkWidget *widget, int width, int height, int baseline)
-{
-	GtkBin *bin = GTK_BIN (widget);
-	(void) baseline;
-	if (bin->child)
-		gtk_widget_allocate (bin->child, width, height, -1, NULL);
-}
-
-static void
-gtk_bin_measure (GtkWidget *widget, GtkOrientation orientation, int for_size,
-		 int *minimum, int *natural, int *minimum_baseline, int *natural_baseline)
-{
-	GtkBin *bin = GTK_BIN (widget);
-	if (bin->child)
-		gtk_widget_measure (bin->child, orientation, for_size, minimum, natural, minimum_baseline, natural_baseline);
-	else {
-		*minimum = *natural = 0;
-		if (minimum_baseline) *minimum_baseline = -1;
-		if (natural_baseline) *natural_baseline = -1;
-	}
 }
 
 static void
@@ -344,7 +342,9 @@ gtk_layout_snapshot (GtkWidget *widget, GtkSnapshot *snapshot)
 {
 	GtkWidget *child;
 
-	verne_snapshot_css_background (widget, snapshot);
+	/* Do not paint CSS here: EelCanvas/NemoIconContainer draw icons in a
+	 * GTK3 draw() that wrapped_snapshot runs first; a later background
+	 * would cover those icons. */
 	for (child = gtk_widget_get_first_child (widget); child; child = gtk_widget_get_next_sibling (child)) {
 		if (gtk_widget_get_width (child) <= 0 || gtk_widget_get_height (child) <= 0)
 			continue;
@@ -478,9 +478,15 @@ typedef struct _GtkStatusbarClass { GtkBoxClass parent_class; } GtkStatusbarClas
 struct _GtkStatusbar { GtkBox parent; GtkLabel *label; guint next_id; GHashTable *stacks; };
 G_DEFINE_TYPE (GtkStatusbar, gtk_statusbar, GTK_TYPE_BOX)
 static void
+gtk_statusbar_snapshot (GtkWidget *widget, GtkSnapshot *snapshot)
+{
+	verne_chrome_snapshot (widget, snapshot, GTK_WIDGET_CLASS (gtk_statusbar_parent_class));
+}
+static void
 gtk_statusbar_class_init (GtkStatusbarClass *c)
 {
 	gtk_widget_class_set_css_name (GTK_WIDGET_CLASS (c), "statusbar");
+	GTK_WIDGET_CLASS (c)->snapshot = gtk_statusbar_snapshot;
 }
 static void gtk_statusbar_init (GtkStatusbar *bar) {
 	bar->label = GTK_LABEL (gtk_label_new (NULL));
@@ -532,9 +538,15 @@ typedef struct _GtkToolbarClass { GtkBoxClass parent_class; } GtkToolbarClass;
 struct _GtkToolbar { GtkBox parent; };
 G_DEFINE_TYPE (GtkToolbar, gtk_toolbar, GTK_TYPE_BOX)
 static void
+gtk_toolbar_snapshot (GtkWidget *widget, GtkSnapshot *snapshot)
+{
+	verne_chrome_snapshot (widget, snapshot, GTK_WIDGET_CLASS (gtk_toolbar_parent_class));
+}
+static void
 gtk_toolbar_class_init (GtkToolbarClass *c)
 {
 	gtk_widget_class_set_css_name (GTK_WIDGET_CLASS (c), "toolbar");
+	GTK_WIDGET_CLASS (c)->snapshot = gtk_toolbar_snapshot;
 }
 static void gtk_toolbar_init (GtkToolbar *t) {
 	gtk_orientable_set_orientation (GTK_ORIENTABLE (t), GTK_ORIENTATION_HORIZONTAL);
@@ -944,9 +956,15 @@ typedef struct _GtkMenuBarClass { GtkBoxClass parent_class; } GtkMenuBarClass;
 struct _GtkMenuBar { GtkBox parent; };
 G_DEFINE_TYPE (GtkMenuBar, gtk_menu_bar, GTK_TYPE_BOX)
 static void
+gtk_menu_bar_snapshot (GtkWidget *widget, GtkSnapshot *snapshot)
+{
+	verne_chrome_snapshot (widget, snapshot, GTK_WIDGET_CLASS (gtk_menu_bar_parent_class));
+}
+static void
 gtk_menu_bar_class_init (GtkMenuBarClass *c)
 {
 	gtk_widget_class_set_css_name (GTK_WIDGET_CLASS (c), "menubar");
+	GTK_WIDGET_CLASS (c)->snapshot = gtk_menu_bar_snapshot;
 }
 static void gtk_menu_bar_init (GtkMenuBar *bar) {
 	gtk_orientable_set_orientation (GTK_ORIENTABLE (bar), GTK_ORIENTATION_HORIZONTAL);

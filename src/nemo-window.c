@@ -716,18 +716,25 @@ nemo_window_constructed (GObject *self)
     gtk_container_add (GTK_CONTAINER (eb), nemo_statusbar);
     gtk_widget_show (eb);
 
-    /* Adwaita chrome: header + menubar + toolbar / content / status */
+    /* Adwaita chrome: header / menubar+toolbar+view / status */
     {
         GtkWidget *header = adw_header_bar_new ();
         GtkWidget *toolbar_view = adw_toolbar_view_new ();
         GtkWidget *toasts = adw_toast_overlay_new ();
         GtkWidget *bottom = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
+        GtkWidget *chrome = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
 
         adw_header_bar_set_show_end_title_buttons (ADW_HEADER_BAR (header), TRUE);
+        adw_toolbar_view_set_top_bar_style (ADW_TOOLBAR_VIEW (toolbar_view), ADW_TOOLBAR_RAISED);
+        adw_toolbar_view_set_bottom_bar_style (ADW_TOOLBAR_VIEW (toolbar_view), ADW_TOOLBAR_RAISED);
+        gtk_widget_add_css_class (chrome, "verne-chrome");
+        gtk_widget_add_css_class (chrome, "toolbar");
+        gtk_box_append (GTK_BOX (chrome), menu);
+        gtk_box_append (GTK_BOX (chrome), toolbar_holder);
+        gtk_widget_set_vexpand (window->details->content_paned, TRUE);
+        gtk_box_append (GTK_BOX (chrome), window->details->content_paned);
         adw_toolbar_view_add_top_bar (ADW_TOOLBAR_VIEW (toolbar_view), header);
-        adw_toolbar_view_add_top_bar (ADW_TOOLBAR_VIEW (toolbar_view), menu);
-        adw_toolbar_view_add_top_bar (ADW_TOOLBAR_VIEW (toolbar_view), toolbar_holder);
-        adw_toolbar_view_set_content (ADW_TOOLBAR_VIEW (toolbar_view), window->details->content_paned);
+        adw_toolbar_view_set_content (ADW_TOOLBAR_VIEW (toolbar_view), chrome);
         gtk_box_append (GTK_BOX (bottom), sep);
         gtk_box_append (GTK_BOX (bottom), eb);
         adw_toolbar_view_add_bottom_bar (ADW_TOOLBAR_VIEW (toolbar_view), bottom);

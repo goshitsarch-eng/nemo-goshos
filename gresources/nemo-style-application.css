@@ -21,9 +21,11 @@
 .verne-window searchbar,
 .nemo-window searchbar,
 .verne-window .search-bar,
-.nemo-window .search-bar {
+.nemo-window .search-bar,
+.verne-window .verne-chrome,
+.nemo-window .verne-chrome {
 	background-color: #ebebeb;
-	color: #2e3436;
+	background-image: none;
 }
 
 .verne-window notebook,
