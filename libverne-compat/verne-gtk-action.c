@@ -319,8 +319,18 @@ static guint radio_signals[RADIO_LAST];
 
 G_DEFINE_TYPE (GtkRadioAction, gtk_radio_action, GTK_TYPE_TOGGLE_ACTION)
 
+void gtk_radio_action_set_current_value (GtkRadioAction *action, gint value);
+
+static void
+gtk_radio_action_real_activate (GtkAction *action)
+{
+	GtkRadioAction *radio = GTK_RADIO_ACTION (action);
+	gtk_radio_action_set_current_value (radio, radio->value);
+}
+
 static void gtk_radio_action_class_init (GtkRadioActionClass *klass)
 {
+	GTK_ACTION_CLASS (klass)->activate = gtk_radio_action_real_activate;
 	radio_signals[RADIO_CHANGED] =
 		g_signal_new ("changed", G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_FIRST,
 			      G_STRUCT_OFFSET (GtkRadioActionClass, changed), NULL, NULL, NULL,
