@@ -308,6 +308,18 @@ void
 gtk_widget_show_all (GtkWidget *widget)
 {
 	GtkWidget *child;
+
+	if (widget == NULL)
+		return;
+	/* Mapping a GtkPopover via show_all realizes a popup native without a
+	 * parent surface. GTK3 only showed menu items; the menu itself pops up later. */
+	if (GTK_IS_POPOVER (widget)) {
+		GtkWidget *box = GTK_IS_MENU (widget) ? gtk_menu_get_box (GTK_MENU (widget))
+						      : gtk_popover_get_child (GTK_POPOVER (widget));
+		if (box)
+			gtk_widget_show_all (box);
+		return;
+	}
 	gtk_widget_set_visible (widget, TRUE);
 	for (child = gtk_widget_get_first_child (widget); child; child = gtk_widget_get_next_sibling (child))
 		gtk_widget_show_all (child);

@@ -613,8 +613,9 @@ notebook_button_press_cb (GtkWidget *widget,
 		}
 	} else {
 		if (event->button == 3) {
-			notebook_popup_menu_show (pane, event, tab_clicked);
-		} else {
+			if (tab_clicked >= 0)
+				notebook_popup_menu_show (pane, event, tab_clicked);
+		} else if (tab_clicked >= 0) {
 			gtk_notebook_set_current_page (GTK_NOTEBOOK (notebook),
 						       tab_clicked);
 		}
