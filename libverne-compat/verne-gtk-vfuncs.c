@@ -38,8 +38,16 @@ typedef struct {
 	void (*orig_measure) (GtkWidget *, GtkOrientation, int, int *, int *, int *, int *);
 	void (*orig_constructed) (GObject *);
 	void (*orig_dispose) (GObject *);
+	void (*orig_show) (GtkWidget *);
+	void (*orig_hide) (GtkWidget *);
+	void (*orig_css_changed) (GtkWidget *, GtkCssStyleChange *);
+	VerneWindowStateEvent window_state;
+	VerneShowFunc hide;
 	gboolean wrapped;
 } VerneVfuncs;
+
+static void (*orig_gtk_widget_realize) (GtkWidget *);
+static gboolean event_signals_registered;
 
 static GHashTable *vfunc_table;
 static GQuark verne_controllers_quark;
@@ -102,17 +110,27 @@ fill_button_event (GdkEventButton *ev, GtkGestureClick *click, gint n_press, gdo
 	ev->time = ge ? gdk_event_get_time (ge) : GDK_CURRENT_TIME;
 }
 
+static gboolean
+emit_widget_event (GtkWidget *widget, const char *signal, gpointer event)
+{
+	gboolean handled = FALSE;
+	g_signal_emit_by_name (widget, signal, event, &handled);
+	return handled;
+}
+
 static void
 on_pressed (GtkGestureClick *click, gint n_press, gdouble x, gdouble y, gpointer data)
 {
 	GtkWidget *widget = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (click));
 	VerneVfuncs *v = lookup_vfuncs_type (G_OBJECT_TYPE (widget));
 	GdkEventButton ev;
+	gboolean handled = FALSE;
 
-	if (v == NULL || v->button_press == NULL)
-		return;
 	fill_button_event (&ev, click, n_press, x, y);
-	if (v->button_press (widget, &ev))
+	handled = emit_widget_event (widget, "button-press-event", &ev);
+	if (!handled && v && v->button_press)
+		handled = v->button_press (widget, &ev);
+	if (handled)
 		gtk_gesture_set_state (GTK_GESTURE (click), GTK_EVENT_SEQUENCE_CLAIMED);
 }
 
@@ -123,11 +141,10 @@ on_released (GtkGestureClick *click, gint n_press, gdouble x, gdouble y, gpointe
 	VerneVfuncs *v = lookup_vfuncs_type (G_OBJECT_TYPE (widget));
 	GdkEventButton ev;
 
-	if (v == NULL || v->button_release == NULL)
-		return;
 	fill_button_event (&ev, click, n_press, x, y);
 	ev.type = GDK_BUTTON_RELEASE;
-	v->button_release (widget, &ev);
+	if (!emit_widget_event (widget, "button-release-event", &ev) && v && v->button_release)
+		v->button_release (widget, &ev);
 }
 
 static void
@@ -138,8 +155,6 @@ on_motion (GtkEventControllerMotion *motion, gdouble x, gdouble y, gpointer data
 	GdkEventMotion ev;
 	GdkEvent *ge;
 
-	if (v == NULL || v->motion == NULL)
-		return;
 	memset (&ev, 0, sizeof (ev));
 	ge = gtk_event_controller_get_current_event (GTK_EVENT_CONTROLLER (motion));
 	ev.type = GDK_MOTION_NOTIFY;
@@ -150,7 +165,8 @@ on_motion (GtkEventControllerMotion *motion, gdouble x, gdouble y, gpointer data
 	ev.y_root = y;
 	ev.state = ge ? gdk_event_get_modifier_state (ge) : 0;
 	ev.time = ge ? gdk_event_get_time (ge) : GDK_CURRENT_TIME;
-	v->motion (widget, &ev);
+	if (!emit_widget_event (widget, "motion-notify-event", &ev) && v && v->motion)
+		v->motion (widget, &ev);
 }
 
 static void
@@ -160,14 +176,13 @@ on_enter (GtkEventControllerMotion *motion, gdouble x, gdouble y, gpointer data)
 	VerneVfuncs *v = lookup_vfuncs_type (G_OBJECT_TYPE (widget));
 	GdkEventCrossing ev;
 
-	if (v == NULL || v->enter == NULL)
-		return;
 	memset (&ev, 0, sizeof (ev));
 	ev.type = GDK_ENTER_NOTIFY;
 	ev.x = x;
 	ev.y = y;
 	ev.mode = GDK_CROSSING_NORMAL;
-	v->enter (widget, &ev);
+	if (!emit_widget_event (widget, "enter-notify-event", &ev) && v && v->enter)
+		v->enter (widget, &ev);
 }
 
 static void
@@ -177,12 +192,11 @@ on_leave (GtkEventControllerMotion *motion, gpointer data)
 	VerneVfuncs *v = lookup_vfuncs_type (G_OBJECT_TYPE (widget));
 	GdkEventCrossing ev;
 
-	if (v == NULL || v->leave == NULL)
-		return;
 	memset (&ev, 0, sizeof (ev));
 	ev.type = GDK_LEAVE_NOTIFY;
 	ev.mode = GDK_CROSSING_NORMAL;
-	v->leave (widget, &ev);
+	if (!emit_widget_event (widget, "leave-notify-event", &ev) && v && v->leave)
+		v->leave (widget, &ev);
 }
 
 static gboolean
@@ -193,18 +207,23 @@ on_key (GtkEventControllerKey *self, guint keyval, guint keycode, GdkModifierTyp
 	GdkEventKey ev;
 	gboolean press = GPOINTER_TO_INT (data);
 
-	if (v == NULL)
-		return FALSE;
 	memset (&ev, 0, sizeof (ev));
 	ev.type = press ? GDK_KEY_PRESS : GDK_KEY_RELEASE;
 	ev.keyval = keyval;
 	ev.hardware_keycode = keycode;
 	ev.state = state;
 	ev.window = gtk_widget_get_window (widget);
-	if (press && v->key_press)
-		return v->key_press (widget, &ev);
-	if (!press && v->key_release)
-		return v->key_release (widget, &ev);
+	if (press) {
+		if (emit_widget_event (widget, "key-press-event", &ev))
+			return TRUE;
+		if (v && v->key_press)
+			return v->key_press (widget, &ev);
+	} else {
+		if (emit_widget_event (widget, "key-release-event", &ev))
+			return TRUE;
+		if (v && v->key_release)
+			return v->key_release (widget, &ev);
+	}
 	return FALSE;
 }
 
@@ -215,8 +234,6 @@ on_scroll (GtkEventControllerScroll *self, gdouble dx, gdouble dy, gpointer data
 	VerneVfuncs *v = lookup_vfuncs_type (G_OBJECT_TYPE (widget));
 	GdkEventScroll ev;
 
-	if (v == NULL || v->scroll == NULL)
-		return FALSE;
 	memset (&ev, 0, sizeof (ev));
 	ev.type = GDK_SCROLL;
 	ev.delta_x = dx;
@@ -230,7 +247,11 @@ on_scroll (GtkEventControllerScroll *self, gdouble dx, gdouble dy, gpointer data
 	else
 		ev.direction = GDK_SCROLL_LEFT;
 	ev.window = gtk_widget_get_window (widget);
-	return v->scroll (widget, &ev);
+	if (emit_widget_event (widget, "scroll-event", &ev))
+		return TRUE;
+	if (v && v->scroll)
+		return v->scroll (widget, &ev);
+	return FALSE;
 }
 
 static void
@@ -240,12 +261,11 @@ on_focus_enter (GtkEventControllerFocus *self, gpointer data)
 	VerneVfuncs *v = lookup_vfuncs_type (G_OBJECT_TYPE (widget));
 	GdkEventFocus ev;
 
-	if (v == NULL || v->focus_in == NULL)
-		return;
 	memset (&ev, 0, sizeof (ev));
 	ev.type = GDK_FOCUS_CHANGE;
 	ev.in = TRUE;
-	v->focus_in (widget, &ev);
+	if (!emit_widget_event (widget, "focus-in-event", &ev) && v && v->focus_in)
+		v->focus_in (widget, &ev);
 }
 
 static void
@@ -255,12 +275,11 @@ on_focus_leave (GtkEventControllerFocus *self, gpointer data)
 	VerneVfuncs *v = lookup_vfuncs_type (G_OBJECT_TYPE (widget));
 	GdkEventFocus ev;
 
-	if (v == NULL || v->focus_out == NULL)
-		return;
 	memset (&ev, 0, sizeof (ev));
 	ev.type = GDK_FOCUS_CHANGE;
 	ev.in = FALSE;
-	v->focus_out (widget, &ev);
+	if (!emit_widget_event (widget, "focus-out-event", &ev) && v && v->focus_out)
+		v->focus_out (widget, &ev);
 }
 
 static gboolean
@@ -268,12 +287,35 @@ on_close_request (GtkWindow *window, gpointer data)
 {
 	VerneVfuncs *v = lookup_vfuncs_type (G_OBJECT_TYPE (window));
 	GdkEventAny ev;
+	gboolean handled = FALSE;
 
-	if (v == NULL || v->delete_event == NULL)
-		return FALSE;
 	memset (&ev, 0, sizeof (ev));
 	ev.type = GDK_DELETE;
-	return v->delete_event (GTK_WIDGET (window), &ev);
+	handled = emit_widget_event (GTK_WIDGET (window), "delete-event", &ev);
+	if (!handled && v && v->delete_event)
+		handled = v->delete_event (GTK_WIDGET (window), &ev);
+	return handled;
+}
+
+static void
+on_window_state_notify (GtkWindow *window, GParamSpec *pspec, gpointer data)
+{
+	VerneVfuncs *v = lookup_vfuncs_type (G_OBJECT_TYPE (window));
+	GdkEventWindowState ev;
+
+	memset (&ev, 0, sizeof (ev));
+	ev.type = GDK_WINDOW_STATE;
+	ev.window = gtk_widget_get_window (GTK_WIDGET (window));
+	if (gtk_window_is_maximized (window))
+		ev.new_window_state |= GDK_WINDOW_STATE_MAXIMIZED;
+	if (gtk_window_is_fullscreen (window))
+		ev.new_window_state |= GDK_WINDOW_STATE_FULLSCREEN;
+	ev.changed_mask = GDK_WINDOW_STATE_MAXIMIZED | GDK_WINDOW_STATE_FULLSCREEN;
+	emit_widget_event (GTK_WIDGET (window), "window-state-event", &ev);
+	if (v && v->window_state)
+		v->window_state (GTK_WIDGET (window), &ev);
+	(void) pspec;
+	(void) data;
 }
 
 static void
@@ -283,55 +325,43 @@ ensure_controllers (GtkWidget *widget)
 	GtkGesture *click;
 	GtkEventController *motion, *key, *scroll, *focus;
 
-	if (v == NULL)
-		return;
 	if (g_object_get_qdata (G_OBJECT (widget), verne_controllers_quark))
 		return;
 	g_object_set_qdata (G_OBJECT (widget), verne_controllers_quark, GINT_TO_POINTER (1));
 
-	if (v->button_press || v->button_release) {
-		click = gtk_gesture_click_new ();
-		gtk_gesture_single_set_button (GTK_GESTURE_SINGLE (click), 0);
-		gtk_event_controller_set_propagation_phase (GTK_EVENT_CONTROLLER (click), GTK_PHASE_CAPTURE);
-		if (v->button_press)
-			g_signal_connect (click, "pressed", G_CALLBACK (on_pressed), NULL);
-		if (v->button_release)
-			g_signal_connect (click, "released", G_CALLBACK (on_released), NULL);
-		gtk_widget_add_controller (widget, GTK_EVENT_CONTROLLER (click));
-	}
-	if (v->motion || v->enter || v->leave) {
-		motion = gtk_event_controller_motion_new ();
-		if (v->motion)
-			g_signal_connect (motion, "motion", G_CALLBACK (on_motion), NULL);
-		if (v->enter)
-			g_signal_connect (motion, "enter", G_CALLBACK (on_enter), NULL);
-		if (v->leave)
-			g_signal_connect (motion, "leave", G_CALLBACK (on_leave), NULL);
-		gtk_widget_add_controller (widget, motion);
-	}
-	if (v->key_press || v->key_release) {
-		key = gtk_event_controller_key_new ();
-		if (v->key_press)
-			g_signal_connect (key, "key-pressed", G_CALLBACK (on_key), GINT_TO_POINTER (TRUE));
-		if (v->key_release)
-			g_signal_connect (key, "key-released", G_CALLBACK (on_key), GINT_TO_POINTER (FALSE));
-		gtk_widget_add_controller (widget, key);
-	}
-	if (v->scroll) {
-		scroll = gtk_event_controller_scroll_new (GTK_EVENT_CONTROLLER_SCROLL_BOTH_AXES);
-		g_signal_connect (scroll, "scroll", G_CALLBACK (on_scroll), NULL);
-		gtk_widget_add_controller (widget, scroll);
-	}
-	if (v->focus_in || v->focus_out) {
-		focus = gtk_event_controller_focus_new ();
-		if (v->focus_in)
-			g_signal_connect (focus, "enter", G_CALLBACK (on_focus_enter), NULL);
-		if (v->focus_out)
-			g_signal_connect (focus, "leave", G_CALLBACK (on_focus_leave), NULL);
-		gtk_widget_add_controller (widget, focus);
-	}
-	if (v->delete_event && GTK_IS_WINDOW (widget))
+	click = gtk_gesture_click_new ();
+	gtk_gesture_single_set_button (GTK_GESTURE_SINGLE (click), 0);
+	gtk_event_controller_set_propagation_phase (GTK_EVENT_CONTROLLER (click), GTK_PHASE_CAPTURE);
+	g_signal_connect (click, "pressed", G_CALLBACK (on_pressed), NULL);
+	g_signal_connect (click, "released", G_CALLBACK (on_released), NULL);
+	gtk_widget_add_controller (widget, GTK_EVENT_CONTROLLER (click));
+
+	motion = gtk_event_controller_motion_new ();
+	g_signal_connect (motion, "motion", G_CALLBACK (on_motion), NULL);
+	g_signal_connect (motion, "enter", G_CALLBACK (on_enter), NULL);
+	g_signal_connect (motion, "leave", G_CALLBACK (on_leave), NULL);
+	gtk_widget_add_controller (widget, motion);
+
+	key = gtk_event_controller_key_new ();
+	g_signal_connect (key, "key-pressed", G_CALLBACK (on_key), GINT_TO_POINTER (TRUE));
+	g_signal_connect (key, "key-released", G_CALLBACK (on_key), GINT_TO_POINTER (FALSE));
+	gtk_widget_add_controller (widget, key);
+
+	scroll = gtk_event_controller_scroll_new (GTK_EVENT_CONTROLLER_SCROLL_BOTH_AXES);
+	g_signal_connect (scroll, "scroll", G_CALLBACK (on_scroll), NULL);
+	gtk_widget_add_controller (widget, scroll);
+
+	focus = gtk_event_controller_focus_new ();
+	g_signal_connect (focus, "enter", G_CALLBACK (on_focus_enter), NULL);
+	g_signal_connect (focus, "leave", G_CALLBACK (on_focus_leave), NULL);
+	gtk_widget_add_controller (widget, focus);
+
+	if (GTK_IS_WINDOW (widget)) {
 		g_signal_connect (widget, "close-request", G_CALLBACK (on_close_request), NULL);
+		g_signal_connect (widget, "notify::maximized", G_CALLBACK (on_window_state_notify), NULL);
+		g_signal_connect (widget, "notify::fullscreened", G_CALLBACK (on_window_state_notify), NULL);
+	}
+	(void) v;
 }
 
 static void
@@ -444,27 +474,66 @@ wrapped_dispose (GObject *object)
 }
 
 static void
+wrapped_show (GtkWidget *widget)
+{
+	VerneVfuncs *v = lookup_vfuncs_type (G_OBJECT_TYPE (widget));
+
+	if (v && v->show)
+		v->show (widget);
+	else if (v && v->orig_show)
+		v->orig_show (widget);
+	else
+		gtk_widget_set_visible (widget, TRUE);
+}
+
+static void
+wrapped_hide (GtkWidget *widget)
+{
+	VerneVfuncs *v = lookup_vfuncs_type (G_OBJECT_TYPE (widget));
+
+	if (v && v->hide)
+		v->hide (widget);
+	else if (v && v->orig_hide)
+		v->orig_hide (widget);
+	else
+		gtk_widget_set_visible (widget, FALSE);
+}
+
+static void
+wrapped_css_changed (GtkWidget *widget, GtkCssStyleChange *change)
+{
+	VerneVfuncs *v = lookup_vfuncs_type (G_OBJECT_TYPE (widget));
+
+	if (v && v->orig_css_changed)
+		v->orig_css_changed (widget, change);
+	if (v && v->style_updated)
+		v->style_updated (widget);
+}
+
+static void
 wrap_class (VerneVfuncs *v)
 {
 	GObjectClass *oclass;
 	GtkWidgetClass *wclass;
 
-	if (v->wrapped)
-		return;
-	v->wrapped = TRUE;
 	wclass = v->klass;
 	oclass = G_OBJECT_CLASS (wclass);
 
-	v->orig_snapshot = wclass->snapshot;
-	v->orig_realize = wclass->realize;
-	v->orig_unrealize = wclass->unrealize;
-	v->orig_size_allocate = wclass->size_allocate;
-	v->orig_measure = wclass->measure;
-	v->orig_dispose = oclass->dispose;
-	v->orig_state_flags_changed = wclass->state_flags_changed;
-
-	wclass->realize = wrapped_realize;
-	wclass->unrealize = wrapped_unrealize;
+	if (!v->wrapped) {
+		v->wrapped = TRUE;
+		v->orig_snapshot = wclass->snapshot;
+		v->orig_realize = wclass->realize;
+		v->orig_unrealize = wclass->unrealize;
+		v->orig_size_allocate = wclass->size_allocate;
+		v->orig_measure = wclass->measure;
+		v->orig_dispose = oclass->dispose;
+		v->orig_state_flags_changed = wclass->state_flags_changed;
+		v->orig_show = wclass->show;
+		v->orig_hide = wclass->hide;
+		v->orig_css_changed = wclass->css_changed;
+		wclass->realize = wrapped_realize;
+		wclass->unrealize = wrapped_unrealize;
+	}
 	if (v->state_changed)
 		wclass->state_flags_changed = wrapped_state_flags_changed;
 	if (v->draw)
@@ -475,6 +544,12 @@ wrap_class (VerneVfuncs *v)
 		wclass->measure = wrapped_measure;
 	if (v->destroy)
 		oclass->dispose = wrapped_dispose;
+	if (v->show)
+		wclass->show = wrapped_show;
+	if (v->hide)
+		wclass->hide = wrapped_hide;
+	if (v->style_updated)
+		wclass->css_changed = wrapped_css_changed;
 }
 
 #define SETTER(field) \
@@ -508,6 +583,8 @@ void verne_widget_class_set_realize (GtkWidgetClass *klass, void (*handler) (Gtk
 void verne_widget_class_set_unrealize (GtkWidgetClass *klass, void (*handler) (GtkWidget *)) { SETTER (unrealize); }
 void verne_widget_class_set_state_changed (GtkWidgetClass *klass, void (*handler) (GtkWidget *, GtkStateType)) { SETTER (state_changed); }
 void verne_widget_class_set_screen_changed (GtkWidgetClass *klass, gpointer handler) { (void) klass; (void) handler; }
+void verne_widget_class_set_window_state_event (GtkWidgetClass *klass, VerneWindowStateEvent handler) { SETTER (window_state); }
+void verne_widget_class_set_hide (GtkWidgetClass *klass, VerneShowFunc handler) { SETTER (hide); }
 
 gboolean
 verne_widget_chain_button_press (gpointer parent_class, GtkWidget *widget, GdkEventButton *event)
@@ -592,18 +669,139 @@ void
 verne_widget_chain_show (gpointer parent_class, GtkWidget *widget)
 {
 	VerneVfuncs *v = lookup_vfuncs_type (G_TYPE_FROM_CLASS (parent_class));
-	if (v && v->show)
-		v->show (widget);
+	if (v && v->orig_show)
+		v->orig_show (widget);
 	else
 		gtk_widget_set_visible (widget, TRUE);
+}
+
+gboolean
+verne_widget_chain_focus_in (gpointer parent_class, GtkWidget *widget, GdkEventFocus *event)
+{
+	VerneVfuncs *v = lookup_vfuncs_type (G_TYPE_FROM_CLASS (parent_class));
+	if (v && v->focus_in)
+		return v->focus_in (widget, event);
+	return FALSE;
+}
+
+gboolean
+gtk_widget_event (GtkWidget *widget, GdkEvent *event)
+{
+	const char *name = NULL;
+
+	g_return_val_if_fail (GTK_IS_WIDGET (widget), FALSE);
+	g_return_val_if_fail (event != NULL, FALSE);
+
+	switch (event->type) {
+	case GDK_BUTTON_PRESS:
+		name = "button-press-event";
+		break;
+	case GDK_BUTTON_RELEASE:
+		name = "button-release-event";
+		break;
+	case GDK_MOTION_NOTIFY:
+		name = "motion-notify-event";
+		break;
+	case GDK_KEY_PRESS:
+		name = "key-press-event";
+		break;
+	case GDK_KEY_RELEASE:
+		name = "key-release-event";
+		break;
+	case GDK_SCROLL:
+		name = "scroll-event";
+		break;
+	case GDK_ENTER_NOTIFY:
+		name = "enter-notify-event";
+		break;
+	case GDK_LEAVE_NOTIFY:
+		name = "leave-notify-event";
+		break;
+	case GDK_FOCUS_CHANGE:
+		name = event->focus_change.in ? "focus-in-event" : "focus-out-event";
+		break;
+	case GDK_DELETE:
+		name = "delete-event";
+		break;
+	default:
+		if (event->type == GDK_2BUTTON_PRESS || event->type == GDK_3BUTTON_PRESS)
+			name = "button-press-event";
+		else if (event->type == GDK_WINDOW_STATE)
+			name = "window-state-event";
+		break;
+	}
+	if (name == NULL)
+		return FALSE;
+	return emit_widget_event (widget, name, event);
+}
+
+static void
+global_widget_realize (GtkWidget *widget)
+{
+	ensure_controllers (widget);
+	if (orig_gtk_widget_realize)
+		orig_gtk_widget_realize (widget);
+}
+
+static void
+register_event_signals (void)
+{
+	GtkWidgetClass *wclass;
+	const struct {
+		const char *name;
+		guint n_params;
+	} signals[] = {
+		{ "button-press-event", 1 },
+		{ "button-release-event", 1 },
+		{ "motion-notify-event", 1 },
+		{ "key-press-event", 1 },
+		{ "key-release-event", 1 },
+		{ "scroll-event", 1 },
+		{ "enter-notify-event", 1 },
+		{ "leave-notify-event", 1 },
+		{ "focus-in-event", 1 },
+		{ "focus-out-event", 1 },
+		{ "delete-event", 1 },
+		{ "window-state-event", 1 },
+		{ "popup-menu", 0 },
+	};
+	guint i;
+
+	if (event_signals_registered)
+		return;
+	event_signals_registered = TRUE;
+	wclass = g_type_class_ref (GTK_TYPE_WIDGET);
+	for (i = 0; i < G_N_ELEMENTS (signals); i++) {
+		if (g_signal_lookup (signals[i].name, GTK_TYPE_WIDGET) != 0)
+			continue;
+		if (signals[i].n_params == 0) {
+			g_signal_new (signals[i].name, GTK_TYPE_WIDGET,
+				      G_SIGNAL_RUN_LAST, 0,
+				      g_signal_accumulator_true_handled, NULL,
+				      NULL, G_TYPE_BOOLEAN, 0);
+		} else {
+			g_signal_new (signals[i].name, GTK_TYPE_WIDGET,
+				      G_SIGNAL_RUN_LAST, 0,
+				      g_signal_accumulator_true_handled, NULL,
+				      NULL, G_TYPE_BOOLEAN, 1, G_TYPE_POINTER);
+		}
+	}
+	orig_gtk_widget_realize = wclass->realize;
+	wclass->realize = global_widget_realize;
 }
 
 void
 verne_compat_init (void)
 {
+	static gboolean inited;
+
+	if (inited)
+		return;
+	inited = TRUE;
 	verne_controllers_quark = g_quark_from_static_string ("verne-controllers");
 	if (vfunc_table == NULL)
 		vfunc_table = g_hash_table_new (g_direct_hash, g_direct_equal);
+	register_event_signals ();
 }
 
 GdkSurface *

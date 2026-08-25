@@ -1437,7 +1437,7 @@ static const GtkActionEntry main_entries[] = {
                                  G_CALLBACK (action_nemo_manual_callback) }, **/
   /* name, stock id */         { "About Nemo", "xsi-help-about-symbolic",
   /* label, accelerator */       N_("_About"), NULL,
-  /* tooltip */                  N_("Display credits for the creators of Nemo"),
+  /* tooltip */                  N_("Display credits for the creators of Verne"),
                                  G_CALLBACK (action_about_nemo_callback) },
   /* name, stock id */         { "Zoom In", "xsi-zoom-in-symbolic",
   /* label, accelerator */       N_("Zoom _In"), "<control>plus",

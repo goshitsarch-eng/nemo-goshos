@@ -2857,7 +2857,7 @@ size_allocate (GtkWidget *widget,
         }
     }
 
-	GTK_WIDGET_CLASS (nemo_icon_container_parent_class)->size_allocate (widget, allocation);
+	verne_widget_chain_size_allocate (nemo_icon_container_parent_class, widget, allocation);
 
 	container->details->has_been_allocated = TRUE;
 

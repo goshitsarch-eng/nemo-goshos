@@ -5,6 +5,11 @@
 #include <string.h>
 #include <pwd.h>
 #include <unistd.h>
+#include <graphene.h>
+#ifdef GDK_WINDOWING_X11
+#include <gdk/x11/gdkx.h>
+#include <X11/Xlib.h>
+#endif
 
 /* ---------- GdkColor boxed type (removed in GTK4) ---------- */
 static GdkColor *
@@ -355,8 +360,39 @@ gdk_window_new (GdkSurface *parent, GdkWindowAttr *attributes, gint attributes_m
 void gdk_window_destroy (GdkSurface *window) { (void) window; }
 void gdk_window_show (GdkSurface *window) { (void) window; }
 void gdk_window_hide (GdkSurface *window) { (void) window; }
-void gdk_window_set_user_data (GdkSurface *window, gpointer user_data) { (void) window; (void) user_data; }
-gpointer gdk_window_get_user_data (GdkSurface *window) { (void) window; return NULL; }
+static GQuark
+verne_surface_user_data_quark (void)
+{
+	static GQuark q;
+	if (!q)
+		q = g_quark_from_static_string ("verne-surface-user-data");
+	return q;
+}
+
+void
+gdk_window_set_user_data (GdkSurface *window, gpointer user_data)
+{
+	if (window)
+		g_object_set_qdata (G_OBJECT (window), verne_surface_user_data_quark (), user_data);
+}
+
+void
+gdk_window_get_user_data (GdkSurface *window, gpointer *data)
+{
+	gpointer found = NULL;
+
+	if (data == NULL)
+		return;
+	if (window != NULL) {
+		found = g_object_get_qdata (G_OBJECT (window), verne_surface_user_data_quark ());
+		if (found == NULL) {
+			GtkNative *native = gtk_native_get_for_surface (window);
+			if (native)
+				found = native;
+		}
+	}
+	*data = found;
+}
 void gdk_window_invalidate_rect (GdkSurface *window, const GdkRectangle *rect, gboolean invalidate_children)
 {
 	(void) window; (void) rect; (void) invalidate_children;
@@ -576,21 +612,113 @@ gdk_monitor_get_workarea (GdkMonitor *monitor, GdkRectangle *workarea)
 GdkEvent *
 gdk_event_copy (const GdkEvent *event)
 {
-	return event ? gdk_event_ref ((GdkEvent *) event) : NULL;
+	return event ? g_memdup2 (event, sizeof (GdkEvent)) : NULL;
 }
 
 void
 gdk_event_free (GdkEvent *event)
 {
-	if (event)
-		gdk_event_unref (event);
+	g_free (event);
 }
 
 GdkEvent *
 gdk_event_new (GdkEventType type)
 {
-	(void) type;
-	return NULL;
+	GdkEvent *event = g_new0 (GdkEvent, 1);
+	event->type = type;
+	return event;
+}
+
+gboolean
+gtk_true (void)
+{
+	return TRUE;
+}
+
+gboolean
+gtk_false (void)
+{
+	return FALSE;
+}
+
+void
+gtk_widget_destroyed (GtkWidget *widget, GtkWidget **widget_pointer)
+{
+	(void) widget;
+	if (widget_pointer)
+		*widget_pointer = NULL;
+}
+
+void
+gtk_container_check_resize (gpointer container)
+{
+	(void) container;
+}
+
+void
+verne_gtk_tree_view_enable_model_drag_source (GtkTreeView *tree_view, GdkModifierType start_button_mask,
+					      gconstpointer targets, gint n_targets, GdkDragAction actions)
+{
+	const GtkTargetEntry *entries = targets;
+	const char **mimes;
+	GdkContentFormats *formats;
+	gint i;
+
+	mimes = g_new0 (const char *, MAX (n_targets, 0) + 1);
+	for (i = 0; i < n_targets; i++)
+		mimes[i] = entries[i].target;
+	formats = gdk_content_formats_new (mimes, (guint) MAX (n_targets, 0));
+	(gtk_tree_view_enable_model_drag_source) (tree_view, start_button_mask, formats, actions);
+	gdk_content_formats_unref (formats);
+	g_free (mimes);
+}
+
+static GQuark
+verne_cell_render_quark (void)
+{
+	static GQuark q;
+	if (!q)
+		q = g_quark_from_static_string ("verne-cell-render");
+	return q;
+}
+
+static void
+verne_cell_snapshot (GtkCellRenderer *cell,
+		     GtkSnapshot *snapshot,
+		     GtkWidget *widget,
+		     const GdkRectangle *background_area,
+		     const GdkRectangle *cell_area,
+		     GtkCellRendererState flags)
+{
+	VerneCellRenderFunc render = NULL;
+	GtkCellRendererClass *parent;
+	GType type;
+	graphene_rect_t rect;
+	cairo_t *cr;
+
+	for (type = G_OBJECT_TYPE (cell); type != 0; type = g_type_parent (type)) {
+		render = g_type_get_qdata (type, verne_cell_render_quark ());
+		if (render)
+			break;
+	}
+	if (render) {
+		graphene_rect_init (&rect,
+				    background_area->x, background_area->y,
+				    background_area->width, background_area->height);
+		cr = gtk_snapshot_append_cairo (snapshot, &rect);
+		render (cell, cr, widget, background_area, cell_area, flags);
+		cairo_destroy (cr);
+	}
+	parent = g_type_class_peek_parent (G_OBJECT_GET_CLASS (cell));
+	if (parent && parent->snapshot && parent->snapshot != verne_cell_snapshot)
+		parent->snapshot (cell, snapshot, widget, background_area, cell_area, flags);
+}
+
+void
+verne_cell_renderer_class_set_render (GtkCellRendererClass *klass, VerneCellRenderFunc handler)
+{
+	g_type_set_qdata (G_TYPE_FROM_CLASS (klass), verne_cell_render_quark (), handler);
+	klass->snapshot = verne_cell_snapshot;
 }
 
 GdkAtom
@@ -794,5 +922,23 @@ void
 gtk_style_context_get_style (GtkStyleContext *context, ...)
 {
 	(void) context;
+}
+
+unsigned long
+verne_gdk_root_xid (void)
+{
+#ifdef GDK_WINDOWING_X11
+	GdkDisplay *display = gdk_display_get_default ();
+	Display *xdisplay;
+
+	if (display == NULL || !GDK_IS_X11_DISPLAY (display))
+		return 0;
+	xdisplay = gdk_x11_display_get_xdisplay (display);
+	if (xdisplay == NULL)
+		return 0;
+	return (unsigned long) RootWindow (xdisplay, DefaultScreen (xdisplay));
+#else
+	return 0;
+#endif
 }
 

@@ -838,12 +838,9 @@ nemo_path_bar_style_updated (GtkWidget *widget)
 }
 
 static void
-nemo_path_bar_screen_changed (GtkWidget *widget,
+    nemo_path_bar_screen_changed (GtkWidget *widget,
                       GdkScreen *previous_screen)
 {
-    if (GTK_WIDGET_CLASS (nemo_path_bar_parent_class)->screen_changed) {
-        GTK_WIDGET_CLASS (nemo_path_bar_parent_class)->screen_changed (widget, previous_screen);
-    }
         /* We might nave a new settings, so we remove the old one */
     if (previous_screen) {
         remove_settings_signal (NEMO_PATH_BAR (widget), previous_screen);

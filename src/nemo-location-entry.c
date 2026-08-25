@@ -314,7 +314,7 @@ nemo_location_entry_focus_in (GtkWidget     *widget,
 		entry->details->setting_special_text = FALSE;
 	}
 
-	return GTK_WIDGET_CLASS (nemo_location_entry_parent_class)->focus_in_event (widget, event);
+	return verne_widget_chain_focus_in (nemo_location_entry_parent_class, widget, event);
 }
 
 static void

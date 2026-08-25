@@ -626,10 +626,6 @@ nemo_window_constructed (GObject *self)
 	 */
 	gtk_application_window_set_show_menubar (GTK_APPLICATION_WINDOW (self), FALSE);
 
-	grid = gtk_grid_new ();
-	gtk_orientable_set_orientation (GTK_ORIENTABLE (grid), GTK_ORIENTATION_VERTICAL);
-	gtk_widget_show (grid);
-
 	nemo_window_initialize_menus (window);
 	nemo_window_initialize_actions (window);
 
@@ -1898,10 +1894,6 @@ nemo_window_state_event (GtkWidget *widget,
 					event->new_window_state & GDK_WINDOW_STATE_MAXIMIZED);
 	}
 
-	if (GTK_WIDGET_CLASS (nemo_window_parent_class)->window_state_event != NULL) {
-		return GTK_WIDGET_CLASS (nemo_window_parent_class)->window_state_event (widget, event);
-	}
-
 	return FALSE;
 }
 
@@ -2359,7 +2351,7 @@ nemo_window_class_init (NemoWindowClass *class)
 	verne_widget_class_set_realize (wclass, nemo_window_realize);
 	verne_widget_class_set_key_press_event (wclass, nemo_window_key_press_event);
     verne_widget_class_set_key_release_event (wclass, nemo_window_key_release_event);
-	wclass->window_state_event = nemo_window_state_event;
+	verne_widget_class_set_window_state_event (wclass, nemo_window_state_event);
 	verne_widget_class_set_button_press_event (wclass, nemo_window_button_press_event);
 	verne_widget_class_set_delete_event (wclass, nemo_window_delete_event);
 

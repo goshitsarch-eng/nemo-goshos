@@ -1810,10 +1810,6 @@ nemo_icon_view_screen_changed (GtkWidget *widget,
 	NemoDirectory *directory;
 	NemoIconContainer *icon_container;
 
-	if (GTK_WIDGET_CLASS (nemo_icon_view_parent_class)->screen_changed) {
-		GTK_WIDGET_CLASS (nemo_icon_view_parent_class)->screen_changed (widget, previous_screen);
-	}
-
 	view = NEMO_VIEW (widget);
 	if (NEMO_ICON_VIEW (view)->details->is_desktop) {
 		icon_container = get_icon_container (NEMO_ICON_VIEW (view));

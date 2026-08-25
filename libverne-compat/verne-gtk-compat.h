@@ -17,6 +17,7 @@
 #include <gdk/gdk.h>
 #include <cairo.h>
 #include <pango/pango.h>
+#include <pwd.h>
 
 G_BEGIN_DECLS
 
@@ -54,9 +55,8 @@ typedef void (*GtkClipboardTargetsReceivedFunc) (GtkClipboard *clipboard, GdkAto
 #ifndef GDK_3BUTTON_PRESS
 #define GDK_3BUTTON_PRESS ((GdkEventType) 1002)
 #endif
-
-#ifndef GDK_WINDOW_STATE_MAXIMIZED
-#define GDK_WINDOW_STATE_MAXIMIZED GDK_TOPLEVEL_STATE_MAXIMIZED
+#ifndef GDK_WINDOW_STATE
+#define GDK_WINDOW_STATE ((GdkEventType) 1003)
 #endif
 
 #ifndef GTK_STATE_FLAG_PRELIGHT
@@ -155,6 +155,26 @@ typedef struct {
 	gdouble delta_y;
 } GdkEventScroll;
 
+typedef enum {
+	GDK_WINDOW_STATE_WITHDRAWN = 1 << 0,
+	GDK_WINDOW_STATE_ICONIFIED = 1 << 1,
+	GDK_WINDOW_STATE_MAXIMIZED = 1 << 2,
+	GDK_WINDOW_STATE_STICKY = 1 << 3,
+	GDK_WINDOW_STATE_FULLSCREEN = 1 << 4,
+	GDK_WINDOW_STATE_ABOVE = 1 << 5,
+	GDK_WINDOW_STATE_BELOW = 1 << 6,
+	GDK_WINDOW_STATE_FOCUSED = 1 << 7,
+	GDK_WINDOW_STATE_TILED = 1 << 8
+} GdkWindowState;
+
+typedef struct {
+	GdkEventType type;
+	GdkSurface *window;
+	gint8 send_event;
+	GdkWindowState changed_mask;
+	GdkWindowState new_window_state;
+} GdkEventWindowState;
+
 typedef union {
 	GdkEventType type;
 	GdkEventAny any;
@@ -165,7 +185,25 @@ typedef union {
 	GdkEventFocus focus;
 	GdkEventFocus focus_change;
 	GdkEventScroll scroll;
+	GdkEventWindowState window_state;
 } VerneGdkEvent;
+
+/* Complete GTK4's opaque GdkEvent so GTK3 field access compiles.
+ * Layout matches the historic GdkEvent union. */
+struct _GdkEvent {
+	union {
+		GdkEventType type;
+		GdkEventAny any;
+		GdkEventButton button;
+		GdkEventMotion motion;
+		GdkEventKey key;
+		GdkEventCrossing crossing;
+		GdkEventFocus focus;
+		GdkEventFocus focus_change;
+		GdkEventScroll scroll;
+		GdkEventWindowState window_state;
+	};
+};
 
 #define GdkWindow GdkSurface
 #define GDK_WINDOW GDK_SURFACE
@@ -222,7 +260,7 @@ typedef struct _GtkContainerClass {
 	gchar * (* composite_name) (GtkContainer *container, GtkWidget *child);
 	void (* set_child_property) (GtkContainer *container, GtkWidget *child, guint property_id, const GValue *value, GParamSpec *pspec);
 	void (* get_child_property) (GtkContainer *container, GtkWidget *child, guint property_id, GValue *value, GParamSpec *pspec);
-	gpointer (* get_path_for_child) (GtkContainer *container, GtkWidget *child);
+	GtkWidget * (* get_path_for_child) (GtkContainer *container, GtkWidget *child);
 	unsigned int _handle_border_width : 1;
 	gpointer padding[8];
 } GtkContainerClass;
@@ -267,7 +305,11 @@ void gtk_widget_get_pointer (GtkWidget *widget, gint *x, gint *y);
 
 #define gtk_cairo_should_draw_window(cr, win) TRUE
 #define gtk_cairo_transform_to_window(cr, widget, win) ((void)0)
-#define gtk_widget_event(w,e) FALSE
+gboolean gtk_widget_event (GtkWidget *widget, GdkEvent *event);
+gboolean gtk_true (void);
+gboolean gtk_false (void);
+void gtk_widget_destroyed (GtkWidget *widget, GtkWidget **widget_pointer);
+void gtk_container_check_resize (gpointer container);
 
 /* gtk_scrolled_window_new lost adj arguments */
 static inline GtkWidget *
@@ -294,6 +336,52 @@ verne_gtk_image_new_from_icon_name (const char *name, int size)
 	return image;
 }
 #define gtk_image_new_from_icon_name(name, size) verne_gtk_image_new_from_icon_name (name, size)
+
+static inline void
+verne_gtk_image_set_from_icon_name (GtkImage *image, const char *name, int size)
+{
+	(void) size;
+	(gtk_image_set_from_icon_name) (image, name);
+}
+#define gtk_image_set_from_icon_name(image, name, ...) verne_gtk_image_set_from_icon_name (image, name, 0)
+
+static inline GtkWidget *
+verne_gtk_image_new_from_gicon (GIcon *icon, int size)
+{
+	(void) size;
+	return (gtk_image_new_from_gicon) (icon);
+}
+#define gtk_image_new_from_gicon(icon, ...) verne_gtk_image_new_from_gicon (icon, 0)
+
+static inline void
+verne_gtk_widget_size_allocate (GtkWidget *widget, const GtkAllocation *allocation)
+{
+	(gtk_widget_size_allocate) (widget, allocation, -1);
+}
+#define gtk_widget_size_allocate(widget, allocation, ...) verne_gtk_widget_size_allocate (widget, allocation)
+
+static inline void
+verne_gtk_style_context_get_padding (GtkStyleContext *context, GtkStateFlags state, GtkBorder *padding)
+{
+	(void) state;
+	(gtk_style_context_get_padding) (context, padding);
+}
+#define gtk_style_context_get_padding(context, state, padding) verne_gtk_style_context_get_padding (context, state, padding)
+
+static inline gboolean
+verne_gtk_file_chooser_set_current_folder (GtkFileChooser *chooser, const gchar *filename)
+{
+	GFile *file = g_file_new_for_path (filename);
+	gboolean ok = (gtk_file_chooser_set_current_folder) (chooser, file, NULL);
+	g_object_unref (file);
+	return ok;
+}
+#define gtk_file_chooser_set_current_folder(chooser, filename) verne_gtk_file_chooser_set_current_folder (chooser, filename)
+
+void verne_gtk_tree_view_enable_model_drag_source (GtkTreeView *tree_view, GdkModifierType start_button_mask,
+						   gconstpointer targets, gint n_targets, GdkDragAction actions);
+#define gtk_tree_view_enable_model_drag_source(tv, mask, targets, n, actions) \
+	verne_gtk_tree_view_enable_model_drag_source (tv, mask, targets, n, actions)
 
 GtkWidget *gtk_image_new_from_stock (const gchar *stock_id, int size);
 void gtk_image_set_from_stock (GtkImage *image, const gchar *stock_id, int size);
@@ -650,6 +738,7 @@ typedef struct _GtkBin { GtkContainer parent; GtkWidget *child; } GtkBin;
 typedef struct _GtkBinClass { GtkContainerClass parent_class; } GtkBinClass;
 GType gtk_bin_get_type (void);
 GtkWidget *gtk_bin_get_child (GtkBin *bin);
+G_DEFINE_AUTOPTR_CLEANUP_FUNC (GtkBin, g_object_unref)
 
 #define GTK_TYPE_EVENT_BOX (gtk_event_box_get_type ())
 #define GTK_EVENT_BOX(obj) (G_TYPE_CHECK_INSTANCE_CAST ((obj), GTK_TYPE_EVENT_BOX, GtkEventBox))
@@ -660,13 +749,14 @@ GtkWidget *gtk_event_box_new (void);
 void gtk_event_box_set_visible_window (GtkEventBox *box, gboolean visible);
 void gtk_event_box_set_above_child (GtkEventBox *box, gboolean above);
 
-#define GTK_TYPE_MISC (gtk_misc_get_type ())
+#define GTK_TYPE_MISC (verne_misc_get_type ())
 #define GTK_MISC(obj) ((GtkMisc *)(obj))
 #define GTK_MISC_CLASS(klass) ((GtkMiscClass *)(klass))
 #define GTK_IS_MISC(obj) (GTK_IS_WIDGET (obj))
 typedef struct _GtkMisc { GtkWidget parent; gfloat xalign, yalign; guint xpad, ypad; } GtkMisc;
 typedef struct _GtkMiscClass { GtkWidgetClass parent_class; } GtkMiscClass;
-GType gtk_misc_get_type (void);
+GType verne_misc_get_type (void);
+#define gtk_misc_get_type verne_misc_get_type
 void gtk_misc_set_alignment (GtkMisc *misc, gfloat xalign, gfloat yalign);
 void gtk_misc_get_alignment (GtkMisc *misc, gfloat *xalign, gfloat *yalign);
 void gtk_misc_set_padding (GtkMisc *misc, gint xpad, gint ypad);
@@ -870,6 +960,10 @@ typedef gboolean (*VernePopupMenu) (GtkWidget *widget);
 typedef void (*VerneStyleUpdated) (GtkWidget *widget);
 typedef void (*VerneGrabNotify) (GtkWidget *widget, gboolean was_grabbed);
 typedef void (*VerneShowFunc) (GtkWidget *widget);
+typedef gboolean (*VerneWindowStateEvent) (GtkWidget *widget, GdkEventWindowState *event);
+typedef void (*VerneCellRenderFunc) (GtkCellRenderer *cell, cairo_t *cr, GtkWidget *widget,
+				     const GdkRectangle *background_area, const GdkRectangle *cell_area,
+				     GtkCellRendererState flags);
 
 void verne_widget_class_set_button_press_event (GtkWidgetClass *klass, VerneButtonEvent handler);
 void verne_widget_class_set_button_release_event (GtkWidgetClass *klass, VerneButtonEvent handler);
@@ -893,6 +987,9 @@ void verne_widget_class_set_grab_notify (GtkWidgetClass *klass, VerneGrabNotify 
 void verne_widget_class_set_show (GtkWidgetClass *klass, VerneShowFunc handler);
 void verne_widget_class_set_configure_event (GtkWidgetClass *klass, gpointer handler);
 void verne_widget_class_set_get_accessible (GtkWidgetClass *klass, gpointer handler);
+void verne_widget_class_set_window_state_event (GtkWidgetClass *klass, VerneWindowStateEvent handler);
+void verne_widget_class_set_hide (GtkWidgetClass *klass, VerneShowFunc handler);
+void verne_cell_renderer_class_set_render (GtkCellRendererClass *klass, VerneCellRenderFunc handler);
 
 gboolean verne_widget_chain_button_press (gpointer parent_class, GtkWidget *widget, GdkEventButton *event);
 gboolean verne_widget_chain_button_release (gpointer parent_class, GtkWidget *widget, GdkEventButton *event);
@@ -904,6 +1001,7 @@ gboolean verne_widget_chain_draw (gpointer parent_class, GtkWidget *widget, cair
 void verne_widget_chain_size_allocate (gpointer parent_class, GtkWidget *widget, GtkAllocation *allocation);
 void verne_widget_chain_destroy (gpointer parent_class, GtkWidget *widget);
 void verne_widget_chain_show (gpointer parent_class, GtkWidget *widget);
+gboolean verne_widget_chain_focus_in (gpointer parent_class, GtkWidget *widget, GdkEventFocus *event);
 
 void verne_compat_init (void);
 
@@ -1155,7 +1253,7 @@ void gdk_window_destroy (GdkSurface *window);
 void gdk_window_show (GdkSurface *window);
 void gdk_window_hide (GdkSurface *window);
 void gdk_window_set_user_data (GdkSurface *window, gpointer user_data);
-gpointer gdk_window_get_user_data (GdkSurface *window);
+void gdk_window_get_user_data (GdkSurface *window, gpointer *data);
 void gdk_window_invalidate_rect (GdkSurface *window, const GdkRectangle *rect, gboolean invalidate_children);
 void gdk_window_get_geometry (GdkSurface *window, gint *x, gint *y, gint *width, gint *height);
 void gdk_window_get_position (GdkSurface *window, gint *x, gint *y);
@@ -1351,7 +1449,13 @@ typedef guint GtkJunctionSides;
 #define gtk_check_menu_item_new_with_label(l) gtk_check_menu_item_new_with_mnemonic (l)
 #define gtk_icon_theme_append_search_path(t, p) gtk_icon_theme_add_search_path (t, p)
 #define gtk_widget_new(type, ...) g_object_new (type, __VA_ARGS__)
-#define gtk_get_option_group(open) NULL
+static inline GOptionGroup *
+verne_gtk_get_option_group (gboolean open_default_display)
+{
+	(void) open_default_display;
+	return g_option_group_new ("gtk", "GTK Options", "Show GTK Options", NULL, NULL);
+}
+#define gtk_get_option_group(open) verne_gtk_get_option_group (open)
 #define gtk_css_provider_get_named(name, variant) gtk_css_provider_new ()
 #define gtk_message_dialog_set_image(d, i) ((void)0)
 
@@ -1414,19 +1518,20 @@ GdkPixbuf *gtk_icon_info_load_icon (gpointer info, GError **error);
 const gchar *gtk_icon_info_get_filename (gpointer info);
 GtkIconSize gtk_icon_size_from_name (const gchar *name);
 GtkWidget *gtk_menu_shell_get_selected_item (gpointer menu_shell);
-typedef struct {
-	const gchar *filename;
-	const gchar *uri;
-	const gchar *display_name;
-	const gchar *mime_type;
-	gboolean contains_image;
-} GtkFileFilterInfo;
 typedef enum {
 	GTK_FILE_FILTER_FILENAME = 1 << 0,
 	GTK_FILE_FILTER_URI = 1 << 1,
 	GTK_FILE_FILTER_DISPLAY_NAME = 1 << 2,
 	GTK_FILE_FILTER_MIME_TYPE = 1 << 3
 } GtkFileFilterFlags;
+typedef struct {
+	GtkFileFilterFlags contains;
+	const gchar *filename;
+	const gchar *uri;
+	const gchar *display_name;
+	const gchar *mime_type;
+	gboolean contains_image;
+} GtkFileFilterInfo;
 typedef gboolean (*GtkFileFilterFunc) (const GtkFileFilterInfo *info, gpointer data);
 void gtk_file_filter_add_custom (GtkFileFilter *filter, GtkFileFilterFlags needed, GtkFileFilterFunc func, gpointer data, GDestroyNotify notify);
 gchar *gtk_file_chooser_get_filename (GtkFileChooser *chooser);
@@ -1463,8 +1568,8 @@ typedef struct { gint dummy; } GtkIconInfo;
 typedef struct { gint dummy; } GtkActivatable;
 typedef struct {
 	GTypeInterface g_iface;
-	void (* update) (gpointer activatable, GtkAction *action, const gchar *property_name);
-	void (* sync_action_properties) (gpointer activatable, GtkAction *action);
+	void (* update) (GtkActivatable *activatable, GtkAction *action, const gchar *property_name);
+	void (* sync_action_properties) (GtkActivatable *activatable, GtkAction *action);
 } GtkActivatableIface;
 typedef struct { gint dummy; } GdkVisual;
 typedef GtkCheckButton GtkRadioButton;
@@ -1482,8 +1587,6 @@ typedef GtkWidget GtkMenuShell;
 #define GTK_STYLE_CLASS_BUTTON "button"
 #define GTK_STYLE_CLASS_RUBBERBAND "rubberband"
 #define GTK_STYLE_CLASS_DND "dnd"
-#define gtk_true() GINT_TO_POINTER (TRUE)
-#define gtk_false() GINT_TO_POINTER (FALSE)
 #define GDK_TOP_LEFT_CORNER 1
 #define GDK_BOTTOM_LEFT_CORNER 2
 #define GDK_TOP_RIGHT_CORNER 3
@@ -1500,6 +1603,7 @@ verne_gtk_init (int *argc, char ***argv)
 	(void) argc; (void) argv;
 	adw_init ();
 	(gtk_init) ();
+	verne_compat_init ();
 }
 #define gtk_init(argc, argv) verne_gtk_init (argc, argv)
 
@@ -1512,13 +1616,24 @@ verne_gtk_init (int *argc, char ***argv)
 #define gtk_file_chooser_get_uri(c) (gtk_file_chooser_get_file (c) ? g_file_get_uri (gtk_file_chooser_get_file (c)) : NULL)
 #define gdk_screen_get_root_window(s) ((GdkSurface *) NULL)
 #define gdk_window_add_filter(w, f, d) ((void)0)
-#define GDK_ROOT_WINDOW() ((GdkSurface *) NULL)
+unsigned long verne_gdk_root_xid (void);
+#define GDK_ROOT_WINDOW() verne_gdk_root_xid ()
 #define gdk_flush() ((void)0)
 #define gdk_display_get_n_monitors(d) verne_screen_n_monitors ()
 #define gdk_display_get_monitor(d, n) ((GdkMonitor *) NULL)
 #define gdk_device_manager_list_devices(m, t) NULL
 #define gdk_screen_get_number(s) 0
 #define gtk_tree_view_set_rules_hint(t, b) ((void)0)
+
+static inline gboolean
+verne_gtk_tree_view_get_tooltip_context (GtkTreeView *tree_view, gint *x, gint *y, gboolean keyboard_tip,
+					 GtkTreeModel **model, GtkTreePath **path, GtkTreeIter *iter)
+{
+	return (gtk_tree_view_get_tooltip_context) (tree_view, x ? *x : 0, y ? *y : 0,
+						    keyboard_tip, model, path, iter);
+}
+#define gtk_tree_view_get_tooltip_context(tv, x, y, kb, model, path, iter) \
+	verne_gtk_tree_view_get_tooltip_context (tv, x, y, kb, model, path, iter)
 #define gtk_paned_get_child1(p) gtk_paned_get_start_child (p)
 #define gtk_paned_get_child2(p) gtk_paned_get_end_child (p)
 #define gtk_menu_bar_get_child_pack_direction(m) 0
@@ -1539,7 +1654,6 @@ verne_gtk_init (int *argc, char ***argv)
 #define gtk_activatable_sync_action_properties(a, act) ((void)0)
 #define gtk_activatable_do_set_related_action(a, act) gtk_activatable_set_related_action (a, act)
 #define gtk_action_get_accel_path(a) ((const gchar *) NULL)
-#define gtk_widget_destroyed(w, ptr) ((void)0)
 #define GTK_STYLE_CLASS_VIEW "view"
 #define GTK_STYLE_CLASS_TOOLBAR "toolbar"
 #define GTK_STYLE_CLASS_SIDEBAR "sidebar"
@@ -1554,7 +1668,6 @@ verne_gtk_init (int *argc, char ***argv)
 #define GDK_DEVICE_TYPE_MASTER 0
 #define GTK_PACK_DIRECTION_LTR 0
 #define GTK_ICON_LOOKUP_FORCE_SIZE 0
-#define GDK_WINDOW_STATE_TILED 0
 #define GDK_PROP_MODE_REPLACE 0
 #ifndef GTK_WINDOW_TOPLEVEL
 #define GTK_WINDOW_TOPLEVEL 0
@@ -1565,8 +1678,6 @@ verne_gtk_init (int *argc, char ***argv)
 #define GtkPackDirection int
 #define GtkAccelMap GObject
 #define GtkWidgetPath GtkWidget
-#define GdkWindowState int
-#define GdkEventWindowState GdkEventAny
 #define gtk_widget_path_new() NULL
 #define gtk_widget_path_copy(p) (p)
 #define gtk_widget_path_append_with_siblings(p, s, i) 0
@@ -1582,7 +1693,7 @@ verne_gtk_window_new (int type)
 #if defined(gtk_window_new)
 #undef gtk_window_new
 #endif
-#define gtk_window_new(type) verne_gtk_window_new (type)
+#define gtk_window_new(...) verne_gtk_window_new (0)
 
 G_END_DECLS
 

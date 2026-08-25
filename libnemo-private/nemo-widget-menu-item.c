@@ -338,7 +338,7 @@ nemo_widget_menu_item_activate (GtkMenuItem *menu_item)
 static gboolean
 nemo_widget_menu_item_draw (GtkWidget *widget, cairo_t *cr)
 {
-  return GTK_WIDGET_CLASS (g_type_class_peek_parent (nemo_widget_menu_item_parent_class))->draw (widget, cr);
+	return verne_widget_chain_draw (nemo_widget_menu_item_parent_class, widget, cr);
 }
 
 static void

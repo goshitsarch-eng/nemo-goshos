@@ -70,7 +70,8 @@ nemo_cell_renderer_disk_class_init (NemoCellRendererDiskClass *klass)
 
     object_class->get_property = nemo_cell_renderer_disk_get_property;
     object_class->set_property = nemo_cell_renderer_disk_set_property;
-    cell_class->render = nemo_cell_renderer_disk_render;
+    cell_class->snapshot = NULL;
+    verne_cell_renderer_class_set_render (cell_class, nemo_cell_renderer_disk_render);
 
     g_object_class_install_property (object_class,
                                      PROP_DISK_FULL_PERCENTAGE,
@@ -276,10 +277,4 @@ nemo_cell_renderer_disk_render (GtkCellRenderer       *cell,
         gtk_style_context_restore (context);
     }
 
-    GTK_CELL_RENDERER_CLASS (parent_class)->render (cell,
-                                                    cr,
-                                                    widget,
-                                                    background_area,
-                                                    cell_area,
-                                                    flags);
 }

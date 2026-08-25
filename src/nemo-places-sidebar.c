@@ -4512,9 +4512,9 @@ nemo_places_sidebar_class_init (NemoPlacesSidebarClass *class)
     GObjectClass *oclass = G_OBJECT_CLASS (class);
     GtkWidgetClass *widget_class = GTK_WIDGET_CLASS (class);
 
-    oclass->dispose = nemo_places_sidebar_dispose;
+	oclass->dispose = nemo_places_sidebar_dispose;
 
-	widget_class->style_set = nemo_places_sidebar_style_set;
+	verne_widget_class_set_style_updated (widget_class, (VerneStyleUpdated) nemo_places_sidebar_style_set);
 	widget_class->focus = nemo_places_sidebar_focus;
 
     gtk_icon_size_lookup (GTK_ICON_SIZE_MENU, &menu_icon_pixels, NULL);

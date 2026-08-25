@@ -143,9 +143,9 @@ void gtk_event_box_set_visible_window (GtkEventBox *box, gboolean visible) { (vo
 void gtk_event_box_set_above_child (GtkEventBox *box, gboolean above) { (void) box; (void) above; }
 
 /* ---------- GtkMisc ---------- */
-G_DEFINE_TYPE (GtkMisc, gtk_misc, GTK_TYPE_WIDGET)
-static void gtk_misc_class_init (GtkMiscClass *c) { (void) c; }
-static void gtk_misc_init (GtkMisc *m) { m->xalign = 0.5; m->yalign = 0.5; }
+G_DEFINE_TYPE (GtkMisc, verne_misc, GTK_TYPE_WIDGET)
+static void verne_misc_class_init (GtkMiscClass *c) { (void) c; }
+static void verne_misc_init (GtkMisc *m) { m->xalign = 0.5; m->yalign = 0.5; }
 void gtk_misc_set_alignment (GtkMisc *misc, gfloat xalign, gfloat yalign)
 {
 	GtkWidget *w = GTK_WIDGET (misc);

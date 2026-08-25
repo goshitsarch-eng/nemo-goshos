@@ -900,7 +900,7 @@ nemo_main_application_local_command_line (GApplication *application,
         { "debug", 0, 0, G_OPTION_ARG_NONE, &debug,
           "Enable debugging code.  Example usage: 'NEMO_DEBUG=Actions,Window nemo --debug'.  Use NEMO_DEBUG=help for more topics.", NULL },
 		{ "quit", 'q', 0, G_OPTION_ARG_NONE, &kill_shell, 
-		  N_("Quit Nemo."), NULL },
+		  N_("Quit Verne."), NULL },
 		{ G_OPTION_REMAINING, 0, 0, G_OPTION_ARG_STRING_ARRAY, &remaining, NULL,  N_("[URI...]") },
 
 		{ NULL }
