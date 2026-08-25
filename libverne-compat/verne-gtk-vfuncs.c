@@ -659,12 +659,31 @@ wrapped_measure (GtkWidget *widget, GtkOrientation orientation, int for_size,
 static void
 wrapped_dispose (GObject *object)
 {
-	VerneVfuncs *v = lookup_vfuncs_type (G_OBJECT_TYPE (object));
+	GType type;
+	VerneVfuncs *v;
+	void (*real_dispose) (GObject *) = NULL;
 
+	if (g_object_get_data (object, "verne-disposing"))
+		return;
+	g_object_set_data (object, "verne-disposing", GINT_TO_POINTER (1));
+
+	v = lookup_vfuncs_type (G_OBJECT_TYPE (object));
 	if (v && v->destroy)
 		v->destroy (GTK_WIDGET (object));
-	if (v && v->orig_dispose)
-		v->orig_dispose (object);
+
+	/* orig_dispose on a subclass is often wrapped_dispose itself (parent
+	 * class already wrapped). Walk to the first real GObject dispose. */
+	for (type = G_OBJECT_TYPE (object); type != 0 && type != G_TYPE_NONE; type = g_type_parent (type)) {
+		VerneVfuncs *cur = (vfunc_table != NULL)
+			? g_hash_table_lookup (vfunc_table, GSIZE_TO_POINTER (type))
+			: NULL;
+		if (cur && cur->orig_dispose && cur->orig_dispose != wrapped_dispose) {
+			real_dispose = cur->orig_dispose;
+			break;
+		}
+	}
+	if (real_dispose)
+		real_dispose (object);
 }
 
 static void
