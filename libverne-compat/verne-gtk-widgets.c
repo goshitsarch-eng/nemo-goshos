@@ -1101,10 +1101,15 @@ static void
 gtk_check_menu_item_clicked (GtkButton *button)
 {
 	GtkCheckMenuItem *item = GTK_CHECK_MENU_ITEM (button);
+	GtkButtonClass *parent_button;
+
 	item->active = !item->active;
 	gtk_check_menu_item_sync_label (item);
 	g_signal_emit (item, check_menu_signals[CHECK_MENU_TOGGLED], 0);
-	GTK_BUTTON_CLASS (gtk_check_menu_item_parent_class)->clicked (button);
+	/* GTK4 GtkButtonClass->clicked is NULL; the signal is enough. */
+	parent_button = GTK_BUTTON_CLASS (gtk_check_menu_item_parent_class);
+	if (parent_button != NULL && parent_button->clicked != NULL)
+		parent_button->clicked (button);
 }
 
 static void
