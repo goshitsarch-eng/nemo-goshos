@@ -1607,7 +1607,7 @@ void gtk_window_add_accel_group (GtkWindow *window, GtkAccelGroup *accel)
 	if (g_object_get_data (G_OBJECT (window), "verne-accel-controller"))
 		return;
 	controller = GTK_EVENT_CONTROLLER (gtk_event_controller_key_new ());
-	gtk_event_controller_set_propagation_phase (controller, GTK_PHASE_BUBBLE);
+	gtk_event_controller_set_propagation_phase (controller, GTK_PHASE_CAPTURE);
 	g_signal_connect (controller, "key-pressed", G_CALLBACK (verne_accel_key_pressed), window);
 	gtk_widget_add_controller (GTK_WIDGET (window), controller);
 	g_object_set_data (G_OBJECT (window), "verne-accel-controller", controller);
