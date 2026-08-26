@@ -143,6 +143,27 @@ ensure_vfuncs (GtkWidgetClass *klass)
 	return v;
 }
 
+static GtkWidget *
+verne_pointer_event_widget (GtkWidget *widget, double x, double y)
+{
+	GtkWidget *root, *pick, *w;
+	double rx = x, ry = y;
+
+	root = GTK_WIDGET (gtk_widget_get_root (widget));
+	if (root == NULL)
+		return widget;
+	if (!gtk_widget_translate_coordinates (widget, root, x, y, &rx, &ry))
+		return widget;
+	pick = gtk_widget_pick (root, rx, ry, GTK_PICK_DEFAULT);
+	if (pick == NULL)
+		return widget;
+	for (w = pick; w != NULL; w = gtk_widget_get_parent (w)) {
+		if (g_object_get_qdata (G_OBJECT (w), verne_controllers_quark))
+			return w;
+	}
+	return pick;
+}
+
 static void
 fill_button_event (GdkEvent *ev, GtkGestureClick *click, gint n_press, gdouble x, gdouble y)
 {
@@ -233,6 +254,8 @@ on_pressed (GtkGestureClick *click, gint n_press, gdouble x, gdouble y, gpointer
 	GtkWidget *widget = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (click));
 
 	(void) data;
+	if (verne_pointer_event_widget (widget, x, y) != widget)
+		return;
 	/* GDK3 second-click sequence is BUTTON_PRESS then 2BUTTON_PRESS.
 	 * NemoIconContainer ignores 2BUTTON and activates from two
 	 * BUTTON_PRESS events. GTK4 GestureClick reports n_press==2 only,
@@ -252,6 +275,8 @@ on_released (GtkGestureClick *click, gint n_press, gdouble x, gdouble y, gpointe
 	VerneVfuncs *v = lookup_vfuncs_type (G_OBJECT_TYPE (widget));
 	GdkEvent ev;
 
+	if (verne_pointer_event_widget (widget, x, y) != widget)
+		return;
 	/* A live GdkDrag owns the pointer; synthesizing BUTTON_RELEASE here
 	 * would cancel GTK4 DND. Complete the in-process drop instead. */
 	if (g_object_get_data (G_OBJECT (widget), "verne-active-drag")) {
@@ -275,6 +300,8 @@ on_motion (GtkEventControllerMotion *motion, gdouble x, gdouble y, gpointer data
 	guint state = 0;
 	guint32 time = GDK_CURRENT_TIME;
 
+	if (verne_pointer_event_widget (widget, x, y) != widget)
+		return;
 	ge = gtk_event_controller_get_current_event (GTK_EVENT_CONTROLLER (motion));
 	if (ge) {
 		state = gdk_event_get_modifier_state (ge);
@@ -294,6 +321,9 @@ on_drag_update (GtkGestureDrag *drag, gdouble offset_x, gdouble offset_y, gpoint
 	guint32 time = GDK_CURRENT_TIME;
 
 	gtk_gesture_drag_get_start_point (drag, &sx, &sy);
+	if (verne_pointer_event_widget (widget, sx + offset_x, sy + offset_y) != widget &&
+	    g_object_get_data (G_OBJECT (widget), "verne-active-drag") == NULL)
+		return;
 	button = gtk_gesture_single_get_current_button (GTK_GESTURE_SINGLE (drag));
 	if (button == 1)
 		state |= GDK_BUTTON1_MASK;
