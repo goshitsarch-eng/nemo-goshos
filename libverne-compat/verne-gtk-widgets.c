@@ -1,5 +1,6 @@
 #include "config.h"
 #include "verne-gtk-compat.h"
+#include <cairo.h>
 #include <graphene.h>
 #include <gdk-pixbuf/gdk-pixbuf.h>
 #ifdef GDK_WINDOWING_X11
@@ -844,7 +845,42 @@ typedef struct {
 	GtkMenu *menu;
 	int x, y;
 	gboolean has_pos;
+	guint serial;
 } VernePopupData;
+
+static guint
+verne_menu_serial (GtkMenu *menu)
+{
+	return GPOINTER_TO_UINT (g_object_get_data (G_OBJECT (menu), "verne-popup-serial"));
+}
+
+static guint
+verne_menu_bump_serial (GtkMenu *menu)
+{
+	guint s = verne_menu_serial (menu) + 1;
+
+	g_object_set_data (G_OBJECT (menu), "verne-popup-serial", GUINT_TO_POINTER (s));
+	return s;
+}
+
+static void
+verne_menu_set_input_enabled (GtkWidget *w, gboolean enabled)
+{
+	GdkSurface *s;
+
+	if (w == NULL || !GTK_IS_NATIVE (w))
+		return;
+	s = gtk_native_get_surface (GTK_NATIVE (w));
+	if (s == NULL)
+		return;
+	if (enabled) {
+		gdk_surface_set_input_region (s, NULL);
+	} else {
+		cairo_region_t *empty = cairo_region_create ();
+		gdk_surface_set_input_region (s, empty);
+		cairo_region_destroy (empty);
+	}
+}
 
 static void
 verne_menu_unmap_surface (GtkWidget *w)
@@ -1016,7 +1052,8 @@ verne_menu_popup_idle (gpointer data)
 		g_free (p);
 		return G_SOURCE_REMOVE;
 	}
-	if (g_object_get_data (G_OBJECT (p->menu), "verne-dismissed")) {
+	if (g_object_get_data (G_OBJECT (p->menu), "verne-dismissed") ||
+	    p->serial != verne_menu_serial (p->menu)) {
 		g_object_unref (p->menu);
 		g_free (p);
 		return G_SOURCE_REMOVE;
@@ -1046,6 +1083,7 @@ verne_menu_popup_idle (gpointer data)
 	gtk_widget_set_opacity (w, 1.0);
 	gtk_widget_set_visible (w, TRUE);
 	gtk_window_present (GTK_WINDOW (p->menu));
+	verne_menu_set_input_enabled (w, TRUE);
 	gtk_widget_grab_focus (w);
 	if (p->has_pos)
 		verne_x11_move (GTK_WINDOW (p->menu), p->x, p->y);
@@ -1067,6 +1105,7 @@ verne_menu_popup_now (GtkMenu *menu, int root_x, int root_y, gboolean has_pos)
 	p->x = root_x;
 	p->y = root_y;
 	p->has_pos = has_pos;
+	p->serial = verne_menu_bump_serial (menu);
 	g_object_set_data (G_OBJECT (menu), "verne-dismissed", NULL);
 	g_idle_add (verne_menu_popup_idle, p);
 }
@@ -1112,8 +1151,11 @@ void gtk_menu_popdown (GtkMenu *menu) {
 	g_object_set_data (G_OBJECT (menu), "verne-popping", GINT_TO_POINTER (1));
 	g_object_set_data (G_OBJECT (menu), "verne-menu-hold", NULL);
 	g_object_set_data (G_OBJECT (menu), "verne-dismissed", GINT_TO_POINTER (1));
+	verne_menu_bump_serial (menu);
 	gtk_widget_set_visible (GTK_WIDGET (menu), FALSE);
 	gtk_widget_set_opacity (GTK_WIDGET (menu), 0.0);
+	verne_menu_set_input_enabled (GTK_WIDGET (menu), FALSE);
+	verne_x11_move (GTK_WINDOW (menu), -20000, -20000);
 	verne_menu_unmap_surface (GTK_WIDGET (menu));
 	attach = menu->attach;
 	if (GTK_IS_WIDGET (attach)) {
