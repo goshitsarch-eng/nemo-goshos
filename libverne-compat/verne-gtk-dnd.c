@@ -670,13 +670,24 @@ gtk_drag_begin_with_coordinates (GtkWidget *widget, GtkTargetList *targets, GdkD
 	if (surface == NULL || device == NULL)
 		return NULL;
 	provider = verne_content_provider_new_for_widget (widget, targets);
-	drag = gdk_drag_begin (surface, device, provider, actions ? actions : GDK_ACTION_COPY, (double) x, (double) y);
+	/* gdk_drag_begin dx/dy are offsets from the current pointer, not
+	 * widget coordinates. Passing event x/y as offsets put the hotspot
+	 * hundreds of pixels away and GTK4 cancelled the drag immediately.
+	 */
+	(void) x;
+	(void) y;
+	drag = gdk_drag_begin (surface, device, provider,
+			       actions ? actions : (GDK_ACTION_COPY | GDK_ACTION_MOVE | GDK_ACTION_LINK),
+			       0.0, 0.0);
 	g_object_unref (provider);
 	if (drag) {
 		g_object_set_qdata (G_OBJECT (drag), source_widget_quark (), widget);
 		g_signal_connect (drag, "dnd-finished", G_CALLBACK (on_dnd_finished), widget);
 		g_signal_connect (drag, "cancel", G_CALLBACK (on_drag_cancel), widget);
 		g_signal_emit_by_name (widget, "drag-begin", drag);
+		g_debug ("gdk_drag_begin started from %s", G_OBJECT_TYPE_NAME (widget));
+	} else {
+		g_warning ("gdk_drag_begin failed on %s", G_OBJECT_TYPE_NAME (widget));
 	}
 	return (GdkDragContext *) drag;
 }

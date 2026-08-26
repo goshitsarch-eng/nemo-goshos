@@ -129,6 +129,30 @@ emit_widget_event (GtkWidget *widget, const char *signal, gpointer event)
 }
 
 static void
+emit_motion (GtkWidget *widget, gdouble x, gdouble y, guint state, guint32 time)
+{
+	VerneVfuncs *v;
+	GdkEventMotion ev;
+
+	if (!GTK_IS_WIDGET (widget) || !gtk_widget_get_realized (widget) ||
+	    !gtk_widget_get_mapped (widget) ||
+	    g_object_get_data (G_OBJECT (widget), "verne-destroyed"))
+		return;
+	v = lookup_vfuncs_type (G_OBJECT_TYPE (widget));
+	memset (&ev, 0, sizeof (ev));
+	ev.type = GDK_MOTION_NOTIFY;
+	ev.window = gtk_widget_get_window (widget);
+	ev.x = x;
+	ev.y = y;
+	ev.x_root = x;
+	ev.y_root = y;
+	ev.state = state;
+	ev.time = time ? time : GDK_CURRENT_TIME;
+	if (!emit_widget_event (widget, "motion-notify-event", &ev) && v && v->motion)
+		v->motion (widget, &ev);
+}
+
+static void
 on_pressed (GtkGestureClick *click, gint n_press, gdouble x, gdouble y, gpointer data)
 {
 	GtkWidget *widget = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (click));
@@ -140,8 +164,11 @@ on_pressed (GtkGestureClick *click, gint n_press, gdouble x, gdouble y, gpointer
 	handled = emit_widget_event (widget, "button-press-event", &ev);
 	if (!handled && v && v->button_press)
 		handled = v->button_press (widget, &ev);
-	if (handled)
-		gtk_gesture_set_state (GTK_GESTURE (click), GTK_EVENT_SEQUENCE_CLAIMED);
+	/* Do not claim on press. Claiming takes a GTK4 pointer grab which
+	 * suppresses GtkEventControllerMotion, so icon/list DnD never starts.
+	 * GtkGestureDrag (grouped below) delivers button-down motion instead.
+	 */
+	(void) handled;
 }
 
 static void
@@ -161,28 +188,42 @@ static void
 on_motion (GtkEventControllerMotion *motion, gdouble x, gdouble y, gpointer data)
 {
 	GtkWidget *widget = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (motion));
-	VerneVfuncs *v;
-	GdkEventMotion ev;
 	GdkEvent *ge;
+	guint state = 0;
+	guint32 time = GDK_CURRENT_TIME;
 
-	if (!GTK_IS_WIDGET (widget) || !gtk_widget_get_realized (widget) ||
-	    !gtk_widget_get_mapped (widget) ||
-	    g_object_get_data (G_OBJECT (widget), "verne-destroyed"))
-		return;
-	v = lookup_vfuncs_type (G_OBJECT_TYPE (widget));
-
-	memset (&ev, 0, sizeof (ev));
 	ge = gtk_event_controller_get_current_event (GTK_EVENT_CONTROLLER (motion));
-	ev.type = GDK_MOTION_NOTIFY;
-	ev.window = gtk_widget_get_window (widget);
-	ev.x = x;
-	ev.y = y;
-	ev.x_root = x;
-	ev.y_root = y;
-	ev.state = ge ? gdk_event_get_modifier_state (ge) : 0;
-	ev.time = ge ? gdk_event_get_time (ge) : GDK_CURRENT_TIME;
-	if (!emit_widget_event (widget, "motion-notify-event", &ev) && v && v->motion)
-		v->motion (widget, &ev);
+	if (ge) {
+		state = gdk_event_get_modifier_state (ge);
+		time = gdk_event_get_time (ge);
+	}
+	emit_motion (widget, x, y, state, time);
+}
+
+static void
+on_drag_update (GtkGestureDrag *drag, gdouble offset_x, gdouble offset_y, gpointer data)
+{
+	GtkWidget *widget = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (drag));
+	GdkEvent *ge;
+	double sx = 0, sy = 0;
+	guint button;
+	guint state = 0;
+	guint32 time = GDK_CURRENT_TIME;
+
+	gtk_gesture_drag_get_start_point (drag, &sx, &sy);
+	button = gtk_gesture_single_get_current_button (GTK_GESTURE_SINGLE (drag));
+	if (button == 1)
+		state |= GDK_BUTTON1_MASK;
+	else if (button == 2)
+		state |= GDK_BUTTON2_MASK;
+	else if (button == 3)
+		state |= GDK_BUTTON3_MASK;
+	ge = gtk_event_controller_get_current_event (GTK_EVENT_CONTROLLER (drag));
+	if (ge) {
+		state |= gdk_event_get_modifier_state (ge);
+		time = gdk_event_get_time (ge);
+	}
+	emit_motion (widget, sx + offset_x, sy + offset_y, state, time);
 }
 
 static void
@@ -362,7 +403,17 @@ ensure_controllers (GtkWidget *widget)
 	g_signal_connect (click, "released", G_CALLBACK (on_released), NULL);
 	gtk_widget_add_controller (widget, GTK_EVENT_CONTROLLER (click));
 
+	{
+		GtkGesture *drag = gtk_gesture_drag_new ();
+		gtk_gesture_single_set_button (GTK_GESTURE_SINGLE (drag), 0);
+		gtk_event_controller_set_propagation_phase (GTK_EVENT_CONTROLLER (drag), GTK_PHASE_CAPTURE);
+		g_signal_connect (drag, "drag-update", G_CALLBACK (on_drag_update), NULL);
+		gtk_gesture_group (click, drag);
+		gtk_widget_add_controller (widget, GTK_EVENT_CONTROLLER (drag));
+	}
+
 	motion = gtk_event_controller_motion_new ();
+	gtk_event_controller_set_propagation_phase (motion, GTK_PHASE_CAPTURE);
 	g_signal_connect (motion, "motion", G_CALLBACK (on_motion), NULL);
 	g_signal_connect (motion, "enter", G_CALLBACK (on_enter), NULL);
 	g_signal_connect (motion, "leave", G_CALLBACK (on_leave), NULL);
