@@ -39,6 +39,38 @@ drop_xy_quark (void)
 	return q;
 }
 
+static GList *verne_drop_dests;
+
+static void
+verne_drop_dest_gone (gpointer data, GObject *widget)
+{
+	(void) data;
+	verne_drop_dests = g_list_remove (verne_drop_dests, widget);
+}
+
+static void
+verne_drop_dest_register (GtkWidget *widget)
+{
+	if (widget == NULL || g_list_find (verne_drop_dests, widget))
+		return;
+	verne_drop_dests = g_list_prepend (verne_drop_dests, widget);
+	g_object_weak_ref (G_OBJECT (widget), verne_drop_dest_gone, NULL);
+}
+
+static void
+verne_drop_dest_unregister (GtkWidget *widget)
+{
+	if (widget == NULL || g_list_find (verne_drop_dests, widget) == NULL)
+		return;
+	g_object_weak_unref (G_OBJECT (widget), verne_drop_dest_gone, NULL);
+	verne_drop_dests = g_list_remove (verne_drop_dests, widget);
+}
+
+typedef struct {
+	int x;
+	int y;
+} VerneDropXY;
+
 static GQuark
 selected_action_quark (void)
 {
@@ -315,8 +347,34 @@ clear_pending_drop (void)
 static void
 pack_drop_xy (gpointer context, double x, double y)
 {
-	g_object_set_qdata (G_OBJECT (context), drop_xy_quark (),
-			    GINT_TO_POINTER (((int) x & 0xffff) | (((int) y & 0xffff) << 16)));
+	VerneDropXY *xy;
+
+	if (context == NULL)
+		return;
+	xy = g_new (VerneDropXY, 1);
+	xy->x = (int) x;
+	xy->y = (int) y;
+	g_object_set_qdata_full (G_OBJECT (context), drop_xy_quark (), xy, g_free);
+}
+
+static void
+unpack_drop_xy (gpointer context, int *x, int *y)
+{
+	VerneDropXY *xy;
+
+	if (x)
+		*x = 0;
+	if (y)
+		*y = 0;
+	if (context == NULL)
+		return;
+	xy = g_object_get_qdata (G_OBJECT (context), drop_xy_quark ());
+	if (xy == NULL)
+		return;
+	if (x)
+		*x = xy->x;
+	if (y)
+		*y = xy->y;
 }
 
 static GdkDragAction
@@ -379,12 +437,50 @@ on_async_drop (GtkDropTargetAsync *self, GdkDrop *drop, double x, double y, gpoi
 	return handled;
 }
 
+static int
+verne_widget_depth (GtkWidget *widget)
+{
+	int depth = 0;
+
+	while (widget) {
+		depth++;
+		widget = gtk_widget_get_parent (widget);
+	}
+	return depth;
+}
+
+static gboolean
+verne_point_in_widget (GtkWidget *root, GtkWidget *widget, double px, double py,
+		       double *out_x, double *out_y)
+{
+	graphene_point_t p;
+	int width, height;
+
+	if (!GTK_IS_WIDGET (widget) || !gtk_widget_get_mapped (widget) ||
+	    !gtk_widget_get_visible (widget))
+		return FALSE;
+	if (!gtk_widget_compute_point (root, widget,
+				       &GRAPHENE_POINT_INIT ((float) px, (float) py), &p))
+		return FALSE;
+	width = gtk_widget_get_width (widget);
+	height = gtk_widget_get_height (widget);
+	if (width < 1 || height < 1)
+		return FALSE;
+	if (p.x < 0 || p.y < 0 || p.x >= (float) width || p.y >= (float) height)
+		return FALSE;
+	if (out_x)
+		*out_x = p.x;
+	if (out_y)
+		*out_y = p.y;
+	return TRUE;
+}
+
 static GtkWidget *
 verne_local_find_dest (VerneLocalDrag *local, double *x, double *y)
 {
 	GdkSeat *seat;
 	GdkDevice *device;
-	GList *toplevels, *l;
+	GList *toplevels, *l, *d;
 
 	seat = gdk_display_get_default_seat (gdk_display_get_default ());
 	device = seat ? gdk_seat_get_pointer (seat) : NULL;
@@ -396,9 +492,9 @@ verne_local_find_dest (VerneLocalDrag *local, double *x, double *y)
 		GtkWidget *win = l->data;
 		GtkNative *native;
 		GdkSurface *surface;
-		GtkWidget *root, *picked, *w;
-		double sx = 0, sy = 0, tx = 0, ty = 0, px, py;
-		int sw, sh;
+		GtkWidget *root, *picked, *w, *best = NULL;
+		double sx = 0, sy = 0, tx = 0, ty = 0, px, py, ox = 0, oy = 0, bx = 0, by = 0;
+		int sw, sh, best_depth = -1;
 
 		if (win == local->icon_window)
 			continue;
@@ -415,34 +511,43 @@ verne_local_find_dest (VerneLocalDrag *local, double *x, double *y)
 		px = sx - tx;
 		py = sy - ty;
 		root = GTK_WIDGET (gtk_widget_get_root (win));
-		picked = gtk_widget_pick (root, px, py, GTK_PICK_DEFAULT);
+
+		picked = gtk_widget_pick (root, px, py,
+					  GTK_PICK_INSENSITIVE | GTK_PICK_NON_TARGETABLE);
 		for (w = picked; w; w = gtk_widget_get_parent (w)) {
-			if (g_object_get_qdata (G_OBJECT (w), dest_quark ())) {
-				graphene_point_t p;
-				if (gtk_widget_compute_point (root, w, &GRAPHENE_POINT_INIT ((float) px, (float) py), &p)) {
-					*x = p.x;
-					*y = p.y;
-				} else {
-					*x = px;
-					*y = py;
-				}
-				g_list_free (toplevels);
-				return w;
+			if (g_object_get_qdata (G_OBJECT (w), dest_quark ()) == NULL)
+				continue;
+			if (!verne_point_in_widget (root, w, px, py, &ox, &oy))
+				continue;
+			best = w;
+			bx = ox;
+			by = oy;
+			best_depth = verne_widget_depth (w);
+			break;
+		}
+
+		for (d = verne_drop_dests; d; d = d->next) {
+			GtkWidget *dest = d->data;
+			int depth;
+
+			if (!GTK_IS_WIDGET (dest) || gtk_widget_get_native (dest) != native)
+				continue;
+			if (!verne_point_in_widget (root, dest, px, py, &ox, &oy))
+				continue;
+			depth = verne_widget_depth (dest);
+			if (depth >= best_depth) {
+				best = dest;
+				bx = ox;
+				by = oy;
+				best_depth = depth;
 			}
 		}
-		if (local->source && gtk_widget_get_native (local->source) == native &&
-		    g_object_get_qdata (G_OBJECT (local->source), dest_quark ())) {
-			graphene_point_t p;
-			if (gtk_widget_compute_point (root, local->source,
-						      &GRAPHENE_POINT_INIT ((float) px, (float) py), &p)) {
-				*x = p.x;
-				*y = p.y;
-			} else {
-				*x = px;
-				*y = py;
-			}
+
+		if (best) {
+			*x = bx;
+			*y = by;
 			g_list_free (toplevels);
-			return local->source;
+			return best;
 		}
 	}
 	g_list_free (toplevels);
@@ -1243,6 +1348,7 @@ gtk_drag_dest_set (GtkWidget *widget, GtkDestDefaults flags, const GtkTargetEntr
 		gtk_drop_target_async_set_formats (async, formats);
 		gtk_drop_target_async_set_actions (async, actions ? actions : (GDK_ACTION_COPY | GDK_ACTION_MOVE | GDK_ACTION_LINK));
 	}
+	verne_drop_dest_register (widget);
 	gdk_content_formats_unref (formats);
 }
 
@@ -1254,6 +1360,7 @@ gtk_drag_dest_unset (GtkWidget *widget)
 		gtk_widget_remove_controller (widget, GTK_EVENT_CONTROLLER (async));
 	g_object_set_qdata (G_OBJECT (widget), dest_quark (), NULL);
 	g_object_set_qdata (G_OBJECT (widget), dest_targets_quark (), NULL);
+	verne_drop_dest_unregister (widget);
 }
 
 void
@@ -1360,7 +1467,6 @@ gtk_drag_get_data (GtkWidget *widget, GdkDragContext *context, GdkAtom target, g
 {
 	VerneDropRead *rd;
 	const char *mimes[2];
-	gpointer packed;
 
 	if (!context)
 		return;
@@ -1370,17 +1476,16 @@ gtk_drag_get_data (GtkWidget *widget, GdkDragContext *context, GdkAtom target, g
 		guint src_info, dst_info;
 		gint x, y;
 
-		packed = g_object_get_qdata (G_OBJECT (context), drop_xy_quark ());
-		x = GPOINTER_TO_INT (packed) & 0xffff;
-		y = (GPOINTER_TO_INT (packed) >> 16) & 0xffff;
+		unpack_drop_xy (context, &x, &y);
 		sel.target = target ? target : (GdkAtom) "text/uri-list";
 		sel.type = sel.target;
 		sel.format = 8;
 		src_info = info_for_target (local->targets, sel.target);
 		dst_info = info_for_target (gtk_drag_dest_get_target_list (widget), sel.target);
 		g_signal_emit_by_name (local->source, "drag-data-get", local, &sel, src_info, time);
-		g_warning ("local drag-data-get target=%s len=%d src_info=%u dst_info=%u",
-			   sel.target ? (const char *) sel.target : "(null)", sel.length, src_info, dst_info);
+		g_warning ("local drag-data-get target=%s len=%d src_info=%u dst_info=%u xy=%d,%d dest=%s",
+			   sel.target ? (const char *) sel.target : "(null)", sel.length, src_info, dst_info,
+			   x, y, widget ? G_OBJECT_TYPE_NAME (widget) : "(null)");
 		g_signal_emit_by_name (widget, "drag-data-received", local, x, y, &sel, dst_info, time);
 		g_free (sel.data);
 		return;
@@ -1390,9 +1495,7 @@ gtk_drag_get_data (GtkWidget *widget, GdkDragContext *context, GdkAtom target, g
 	rd = g_new0 (VerneDropRead, 1);
 	rd->widget = widget;
 	rd->drop = GDK_DROP (context);
-	packed = g_object_get_qdata (G_OBJECT (context), drop_xy_quark ());
-	rd->x = GPOINTER_TO_INT (packed) & 0xffff;
-	rd->y = (GPOINTER_TO_INT (packed) >> 16) & 0xffff;
+	unpack_drop_xy (context, &rd->x, &rd->y);
 	rd->time = time;
 	rd->info = info_for_target (gtk_drag_dest_get_target_list (widget), target);
 	mimes[0] = target ? (const char *) target : "text/uri-list";

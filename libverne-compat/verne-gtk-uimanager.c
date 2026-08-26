@@ -147,6 +147,11 @@ on_action_notify_label (GtkAction *action, GParamSpec *pspec, gpointer item)
 		return;
 	label = gtk_action_get_label (action);
 	gtk_menu_item_set_label (GTK_MENU_ITEM (item), label ? label : "");
+	{
+		const gchar *accel_path = gtk_action_get_accel_path (action);
+		if (accel_path)
+			gtk_menu_item_set_accel_path (GTK_MENU_ITEM (item), accel_path);
+	}
 }
 
 static GtkWidget *
@@ -182,6 +187,11 @@ build_menu_item_for_action (GtkUIManager *self, UiNode *node)
 					 G_CALLBACK (on_action_notify_sensitive), item, 0);
 		g_signal_connect_object (action, "notify::label",
 					 G_CALLBACK (on_action_notify_label), item, 0);
+		{
+			const gchar *accel_path = gtk_action_get_accel_path (action);
+			if (accel_path)
+				gtk_menu_item_set_accel_path (GTK_MENU_ITEM (item), accel_path);
+		}
 	}
 	return item;
 }
