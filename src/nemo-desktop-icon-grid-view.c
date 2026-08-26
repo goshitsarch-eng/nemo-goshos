@@ -86,6 +86,7 @@ struct NemoDesktopIconGridViewDetails
 	guint ensure_icons_timeout2;
 	gboolean pending_rescan;
     gboolean updating_menus;
+	gboolean live_monitor_started;
 	GFileMonitor *dir_monitor;
 };
 
@@ -730,6 +731,9 @@ delayed_init (NemoDesktopIconGridView *desktop_icon_grid_view)
 	GFile *dir;
 	char *path;
 
+	if (desktop_icon_grid_view->details->live_monitor_started) {
+		return;
+	}
 	if (desktop_icon_grid_view->details->reload_desktop_timeout != 0) {
 		return;
 	}
@@ -738,6 +742,8 @@ delayed_init (NemoDesktopIconGridView *desktop_icon_grid_view)
 	if (model == NULL) {
 		return;
 	}
+
+	desktop_icon_grid_view->details->live_monitor_started = TRUE;
 
 	g_warning ("desktop delayed_init monitor path will be %s",
 		   desktop_directory ? desktop_directory : "(unset)");
