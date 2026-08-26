@@ -1796,6 +1796,42 @@ gtk_activatable_get_type (void)
 	return type;
 }
 
+const gchar *
+verne_dialog_button_label (const gchar *text)
+{
+	if (text == NULL || text[0] == '\0' || text[0] == '_')
+		return text;
+	if (strchr (text, ' ') != NULL)
+		return text;
+	if (g_strcmp0 (text, "cancel") == 0 || g_strcmp0 (text, "gtk-cancel") == 0)
+		return "_Cancel";
+	if (g_strcmp0 (text, "ok") == 0 || g_strcmp0 (text, "gtk-ok") == 0)
+		return "_OK";
+	if (g_strcmp0 (text, "document-open") == 0 || g_strcmp0 (text, "gtk-open") == 0)
+		return "_Open";
+	if (g_strcmp0 (text, "document-save") == 0 || g_strcmp0 (text, "gtk-save") == 0)
+		return "_Save";
+	if (g_strcmp0 (text, "document-save-as") == 0)
+		return "Save _As";
+	if (g_strcmp0 (text, "window-close") == 0 || g_strcmp0 (text, "gtk-close") == 0)
+		return "_Close";
+	if (g_strcmp0 (text, "apply") == 0 || g_strcmp0 (text, "gtk-apply") == 0)
+		return "_Apply";
+	if (g_strcmp0 (text, "help-browser") == 0 || g_strcmp0 (text, "gtk-help") == 0)
+		return "_Help";
+	if (g_strcmp0 (text, "gtk-yes") == 0)
+		return "_Yes";
+	if (g_strcmp0 (text, "gtk-no") == 0)
+		return "_No";
+	return text;
+}
+
+GtkWidget *
+verne_dialog_add_button (GtkDialog *dialog, const gchar *text, gint response)
+{
+	return (gtk_dialog_add_button) (dialog, verne_dialog_button_label (text), response);
+}
+
 void
 gtk_builder_add_callback_symbols (GtkBuilder *builder, const char *first, ...)
 {

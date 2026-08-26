@@ -14,6 +14,7 @@ typedef struct {
 	GtkWidget *list;
 	GtkWidget *filter_combo;
 	GtkWidget *up;
+	GtkWidget *dialog;
 	gint accept_response;
 } VerneFileChooser;
 
@@ -76,11 +77,28 @@ verne_fc_file_visible (VerneFileChooser *fc, GFile *file, GFileInfo *info)
 }
 
 static void
+verne_fc_update_accept (VerneFileChooser *fc)
+{
+	gboolean sensitive = FALSE;
+
+	if (fc->dialog == NULL)
+		return;
+	if (fc->action == GTK_FILE_CHOOSER_ACTION_SELECT_FOLDER)
+		sensitive = fc->folder != NULL || fc->selected != NULL;
+	else if (fc->selected != NULL) {
+		GFileType type = g_file_query_file_type (fc->selected, G_FILE_QUERY_INFO_NONE, NULL);
+		sensitive = type != G_FILE_TYPE_DIRECTORY;
+	}
+	gtk_dialog_set_response_sensitive (GTK_DIALOG (fc->dialog), fc->accept_response, sensitive);
+}
+
+static void
 verne_fc_set_selected (VerneFileChooser *fc, GFile *file)
 {
 	g_clear_object (&fc->selected);
 	if (file)
 		fc->selected = g_object_ref (file);
+	verne_fc_update_accept (fc);
 }
 
 static GtkWidget *
@@ -427,6 +445,7 @@ verne_file_chooser_dialog_new (const char *title, GtkWindow *parent,
 	gtk_window_set_default_size (GTK_WINDOW (dialog), 640, 480);
 	fc = g_new0 (VerneFileChooser, 1);
 	fc->action = action;
+	fc->dialog = dialog;
 	fc->accept_response = GTK_RESPONSE_ACCEPT;
 	g_object_set_qdata_full (G_OBJECT (dialog), verne_fc_quark (), fc, verne_fc_free);
 

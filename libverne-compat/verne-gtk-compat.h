@@ -446,6 +446,10 @@ verne_gtk_button_set_label (GtkButton *button, const char *label)
 /* dialog run (nested loop, GTK3 behavior) */
 void verne_prepare_dialog (GtkWidget *widget);
 gint gtk_dialog_run (GtkDialog *dialog);
+const gchar *verne_dialog_button_label (const gchar *text);
+GtkWidget *verne_dialog_add_button (GtkDialog *dialog, const gchar *text, gint response);
+#undef gtk_dialog_add_button
+#define gtk_dialog_add_button(d, t, r) verne_dialog_add_button ((d), (t), (r))
 
 /* stock / about */
 #define GTK_STOCK_OK "ok"
