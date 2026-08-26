@@ -1636,7 +1636,12 @@ typedef guint GtkJunctionSides;
 static inline GOptionGroup *
 verne_gtk_get_option_group (gboolean open_default_display)
 {
-	(void) open_default_display;
+	/* GTK3's gtk_get_option_group(TRUE) initialized GTK during parse. */
+	if (open_default_display) {
+		verne_compat_init ();
+		adw_init ();
+		(gtk_init) ();
+	}
 	return g_option_group_new ("gtk", "GTK Options", "Show GTK Options", NULL, NULL);
 }
 #define gtk_get_option_group(open) verne_gtk_get_option_group (open)
