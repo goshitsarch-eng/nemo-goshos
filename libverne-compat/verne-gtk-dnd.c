@@ -1253,8 +1253,11 @@ verne_local_poll (gpointer data)
 	if (!GTK_IS_WIDGET (source))
 		return G_SOURCE_REMOVE;
 	local = g_object_get_data (G_OBJECT (source), "verne-active-drag");
-	if (local == NULL || !VERNE_IS_LOCAL_DRAG (local) || local->drop_emitted)
+	if (local == NULL || !VERNE_IS_LOCAL_DRAG (local) || local->drop_emitted) {
+		if (local && VERNE_IS_LOCAL_DRAG (local))
+			local->poll_id = 0;
 		return G_SOURCE_REMOVE;
+	}
 	if (local->handed_over) {
 		verne_local_move_icon (local);
 		verne_xdnd_pump (local);

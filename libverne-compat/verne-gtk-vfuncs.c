@@ -212,9 +212,8 @@ emit_motion (GtkWidget *widget, gdouble x, gdouble y, guint state, guint32 time)
 }
 
 static void
-on_pressed (GtkGestureClick *click, gint n_press, gdouble x, gdouble y, gpointer data)
+emit_button_press (GtkWidget *widget, GtkGestureClick *click, gint n_press, gdouble x, gdouble y)
 {
-	GtkWidget *widget = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (click));
 	VerneVfuncs *v = lookup_vfuncs_type (G_OBJECT_TYPE (widget));
 	GdkEvent ev;
 	gboolean handled = FALSE;
@@ -225,11 +224,25 @@ on_pressed (GtkGestureClick *click, gint n_press, gdouble x, gdouble y, gpointer
 	if (!handled && v && v->button_press)
 		handled = v->button_press (widget, &ev.button);
 	verne_clear_current_event ();
+	(void) handled;
+}
+
+static void
+on_pressed (GtkGestureClick *click, gint n_press, gdouble x, gdouble y, gpointer data)
+{
+	GtkWidget *widget = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (click));
+
+	(void) data;
+	/* GDK3 delivers BUTTON_PRESS then 2BUTTON_PRESS for the second click.
+	 * NemoIconContainer ignores 2BUTTON and detects doubles from two
+	 * BUTTON_PRESS events; GTK4 GestureClick only reports n_press==2. */
+	emit_button_press (widget, click, 1, x, y);
+	if (n_press >= 2)
+		emit_button_press (widget, click, n_press, x, y);
 	/* Do not claim on press. Claiming takes a GTK4 pointer grab which
 	 * suppresses GtkEventControllerMotion, so icon/list DnD never starts.
 	 * GtkGestureDrag (grouped below) delivers button-down motion instead.
 	 */
-	(void) handled;
 }
 
 static void
