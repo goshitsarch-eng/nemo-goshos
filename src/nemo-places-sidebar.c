@@ -750,6 +750,9 @@ update_places (NemoPlacesSidebar *sidebar)
 
 	DEBUG ("Updating places sidebar");
 
+    if (sidebar->tree_view == NULL || sidebar->store == NULL)
+        return;
+
     sidebar->updating_sidebar = TRUE;
 
 	model = NULL;
@@ -1972,6 +1975,9 @@ get_selected_iter (NemoPlacesSidebar *sidebar,
 		   GtkTreeIter *iter)
 {
 	GtkTreeSelection *selection;
+
+	if (sidebar->tree_view == NULL)
+		return FALSE;
 
 	selection = gtk_tree_view_get_selection (sidebar->tree_view);
 
@@ -4433,9 +4439,24 @@ static void
 nemo_places_sidebar_dispose (GObject *object)
 {
 	NemoPlacesSidebar *sidebar;
+	GtkTreeView *tree_view;
 
 	sidebar = NEMO_PLACES_SIDEBAR (object);
 
+	if (sidebar->update_places_on_idle_id != 0) {
+		g_source_remove (sidebar->update_places_on_idle_id);
+		sidebar->update_places_on_idle_id = 0;
+	}
+
+	tree_view = sidebar->tree_view;
+	if (tree_view != NULL) {
+		GtkTreeSelection *selection;
+
+		selection = gtk_tree_view_get_selection (tree_view);
+		g_signal_handlers_disconnect_by_data (selection, sidebar);
+		g_signal_handlers_disconnect_by_data (tree_view, sidebar);
+		gtk_tree_view_set_model (tree_view, NULL);
+	}
 	sidebar->window = NULL;
 	sidebar->tree_view = NULL;
 
@@ -4465,9 +4486,7 @@ nemo_places_sidebar_dispose (GObject *object)
         sidebar->update_places_on_idle_id = 0;
     }
 
-	if (sidebar->tree_view != NULL)
-		gtk_tree_view_set_model (GTK_TREE_VIEW (sidebar->tree_view), NULL);
-
+	g_clear_object (&sidebar->store_filter);
 	g_clear_object (&sidebar->store);
 
     g_clear_pointer (&sidebar->top_bookend_uri, g_free);
