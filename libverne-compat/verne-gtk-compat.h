@@ -455,6 +455,7 @@ void verne_gtk_tree_view_enable_model_drag_source (GtkTreeView *tree_view, GdkMo
  * path ourselves so list/sidebar drop hit-testing still works. */
 void verne_gtk_tree_view_set_drag_dest_row (GtkTreeView *tree_view, GtkTreePath *path, GtkTreeViewDropPosition pos);
 void verne_gtk_tree_view_get_drag_dest_row (GtkTreeView *tree_view, GtkTreePath **path, GtkTreeViewDropPosition *pos);
+void verne_tree_view_paint_dest_overlay (GtkWidget *widget, GtkSnapshot *snapshot);
 #if defined(gtk_tree_view_set_drag_dest_row)
 #undef gtk_tree_view_set_drag_dest_row
 #endif

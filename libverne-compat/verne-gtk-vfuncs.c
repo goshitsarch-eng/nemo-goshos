@@ -910,6 +910,7 @@ wrapped_snapshot (GtkWidget *widget, GtkSnapshot *snapshot)
 			gtk_widget_snapshot_child (widget, child, snapshot);
 		}
 	}
+	verne_tree_view_paint_dest_overlay (widget, snapshot);
 	g_object_set_data (G_OBJECT (widget), "verne-in-snapshot", NULL);
 }
 
