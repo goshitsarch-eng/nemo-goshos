@@ -410,26 +410,13 @@ gboolean
 eel_gtk_get_treeview_pointer_location (GtkTreeView *treeview,
                                gint *x, gint *y)
 {
-    GdkWindow *bin_window;
-
-    gint out_x, out_y;
-
+    (void) treeview;
     *x = *y = 0;
 
-    bin_window = gtk_tree_view_get_bin_window (treeview);
-
-    if (bin_window != NULL) {
-        GdkDevice *device = eel_gdk_get_pointer_device ();
-        if (device != NULL) {
-            gdk_window_get_device_position (bin_window, device, &out_x, &out_y, NULL);
-
-            *x = out_x;
-            *y = out_y;
-
-            return TRUE;
-        }
-    }
-
+    /* GTK4 reports the drag-ghost surface as the pointer location, so
+     * gdk_window_get_device_position cannot be trusted during DnD.
+     * Returning FALSE makes row-text checks default to allowing the
+     * operation (and painting dest-row highlights). */
     return FALSE;
 }
 
