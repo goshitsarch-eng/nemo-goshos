@@ -1638,6 +1638,17 @@ gtk_file_filter_add_custom (GtkFileFilter *filter, GtkFileFilterFlags needed, Gt
 }
 
 gboolean
+verne_file_filter_has_custom (GtkFileFilter *filter)
+{
+	VerneCustomFilter *c;
+
+	if (filter == NULL)
+		return FALSE;
+	c = g_object_get_qdata (G_OBJECT (filter), verne_custom_filter_quark ());
+	return c != NULL && c->func != NULL;
+}
+
+gboolean
 verne_file_filter_accepts_file (GtkFileFilter *filter, GFile *file)
 {
 	VerneCustomFilter *c;

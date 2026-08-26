@@ -408,15 +408,8 @@ verne_gtk_style_context_get_padding (GtkStyleContext *context, GtkStateFlags sta
 }
 #define gtk_style_context_get_padding(context, state, padding) verne_gtk_style_context_get_padding (context, state, padding)
 
-static inline gboolean
-verne_gtk_file_chooser_set_current_folder (GtkFileChooser *chooser, const gchar *filename)
-{
-	GFile *file = g_file_new_for_path (filename);
-	gboolean ok = (gtk_file_chooser_set_current_folder) (chooser, file, NULL);
-	g_object_unref (file);
-	return ok;
-}
-#define gtk_file_chooser_set_current_folder(chooser, filename) verne_gtk_file_chooser_set_current_folder (chooser, filename)
+gboolean verne_file_chooser_set_current_folder (gpointer chooser, const gchar *filename);
+#define gtk_file_chooser_set_current_folder(chooser, filename) verne_file_chooser_set_current_folder (chooser, filename)
 
 void verne_gtk_tree_view_enable_model_drag_source (GtkTreeView *tree_view, GdkModifierType start_button_mask,
 						   gconstpointer targets, gint n_targets, GdkDragAction actions);
@@ -1636,7 +1629,24 @@ typedef struct {
 typedef gboolean (*GtkFileFilterFunc) (const GtkFileFilterInfo *info, gpointer data);
 void gtk_file_filter_add_custom (GtkFileFilter *filter, GtkFileFilterFlags needed, GtkFileFilterFunc func, gpointer data, GDestroyNotify notify);
 gboolean verne_file_filter_accepts_file (GtkFileFilter *filter, GFile *file);
+gboolean verne_file_filter_has_custom (GtkFileFilter *filter);
+gboolean verne_is_file_chooser (gpointer widget);
+GtkWidget *verne_file_chooser_dialog_new (const char *title, GtkWindow *parent,
+					  GtkFileChooserAction action,
+					  const char *first_button_text, ...) G_GNUC_NULL_TERMINATED;
+GFile *verne_file_chooser_get_file (gpointer chooser);
+gchar *verne_file_chooser_get_uri (gpointer chooser);
+void verne_file_chooser_add_filter (gpointer chooser, GtkFileFilter *filter);
+GtkFileFilter *verne_file_chooser_get_filter (gpointer chooser);
 gchar *gtk_file_chooser_get_filename (GtkFileChooser *chooser);
+#undef gtk_file_chooser_dialog_new
+#define gtk_file_chooser_dialog_new verne_file_chooser_dialog_new
+#undef gtk_file_chooser_get_file
+#define gtk_file_chooser_get_file(c) verne_file_chooser_get_file (c)
+#undef gtk_file_chooser_add_filter
+#define gtk_file_chooser_add_filter(c, f) verne_file_chooser_add_filter ((c), (f))
+#undef gtk_file_chooser_get_filter
+#define gtk_file_chooser_get_filter(c) verne_file_chooser_get_filter (c)
 GdkSurface *gdk_device_get_window_at_position (GdkDevice *device, gint *x, gint *y);
 void gdk_window_set_background_rgba (GdkSurface *window, const GdkRGBA *rgba);
 void gdk_window_set_transient_for (GdkSurface *window, GdkSurface *parent);
@@ -1730,7 +1740,7 @@ void verne_toggle_button_set_active (gpointer button, gboolean active);
 #define gtk_window_propagate_key_event(w, e) FALSE
 #define gtk_icon_size_register(name, w, h) GTK_ICON_SIZE_INHERIT
 #define gtk_file_chooser_set_local_only(c, b) ((void)0)
-#define gtk_file_chooser_get_uri(c) (gtk_file_chooser_get_file (c) ? g_file_get_uri (gtk_file_chooser_get_file (c)) : NULL)
+#define gtk_file_chooser_get_uri(c) verne_file_chooser_get_uri (c)
 #define gdk_screen_get_root_window(s) ((GdkSurface *) NULL)
 #define gdk_window_add_filter(w, f, d) ((void)0)
 unsigned long verne_gdk_root_xid (void);
