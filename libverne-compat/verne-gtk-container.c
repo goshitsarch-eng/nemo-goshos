@@ -36,7 +36,7 @@ gtk_container_add (gpointer container_ptr, GtkWidget *child)
 	if (G_TYPE_CHECK_INSTANCE_TYPE (container, gtk_container_get_type ()) &&
 	    !GTK_IS_WINDOW (container) && !GTK_IS_BOX (container) &&
 	    !GTK_IS_GRID (container) && !GTK_IS_NOTEBOOK (container) &&
-	    !GTK_IS_DIALOG (container)) {
+	    !GTK_IS_OVERLAY (container) && !GTK_IS_DIALOG (container)) {
 		GtkContainerClass *klass = (GtkContainerClass *) G_OBJECT_GET_CLASS (container);
 		if (klass && klass->add) {
 			klass->add (GTK_CONTAINER (container), child);
@@ -76,7 +76,11 @@ gtk_container_add (gpointer container_ptr, GtkWidget *child)
 	} else if (GTK_IS_REVEALER (container)) {
 		gtk_revealer_set_child (GTK_REVEALER (container), child);
 	} else if (GTK_IS_OVERLAY (container)) {
-		if (gtk_overlay_get_child (GTK_OVERLAY (container)) == NULL)
+		GtkWidget *main_child = gtk_overlay_get_child (GTK_OVERLAY (container));
+		/* Extra overlay widgets (floating bar, etc.) must not steal the
+		 * main child slot. After a view switch the previous main child is
+		 * gone — always restore content with set_child, not add_overlay. */
+		if (main_child == NULL || main_child == child)
 			gtk_overlay_set_child (GTK_OVERLAY (container), child);
 		else
 			gtk_overlay_add_overlay (GTK_OVERLAY (container), child);
@@ -127,7 +131,8 @@ gtk_container_remove (gpointer container_ptr, GtkWidget *child)
 
 	if (G_TYPE_CHECK_INSTANCE_TYPE (container, gtk_container_get_type ()) &&
 	    !GTK_IS_WINDOW (container) && !GTK_IS_BOX (container) &&
-	    !GTK_IS_GRID (container) && !GTK_IS_NOTEBOOK (container)) {
+	    !GTK_IS_GRID (container) && !GTK_IS_NOTEBOOK (container) &&
+	    !GTK_IS_OVERLAY (container) && !GTK_IS_DIALOG (container)) {
 		GtkContainerClass *klass = (GtkContainerClass *) G_OBJECT_GET_CLASS (container);
 		if (klass && klass->remove) {
 			klass->remove (GTK_CONTAINER (container), child);
@@ -141,6 +146,17 @@ gtk_container_remove (gpointer container_ptr, GtkWidget *child)
 		gtk_grid_remove (GTK_GRID (container), child);
 	else if (GTK_IS_WINDOW (container) && gtk_window_get_child (GTK_WINDOW (container)) == child)
 		gtk_window_set_child (GTK_WINDOW (container), NULL);
+	else if (GTK_IS_OVERLAY (container)) {
+		if (gtk_overlay_get_child (GTK_OVERLAY (container)) == child)
+			gtk_overlay_set_child (GTK_OVERLAY (container), NULL);
+		else
+			gtk_overlay_remove_overlay (GTK_OVERLAY (container), child);
+	} else if (GTK_IS_REVEALER (container) && gtk_revealer_get_child (GTK_REVEALER (container)) == child)
+		gtk_revealer_set_child (GTK_REVEALER (container), NULL);
+	else if (GTK_IS_VIEWPORT (container) && gtk_viewport_get_child (GTK_VIEWPORT (container)) == child)
+		gtk_viewport_set_child (GTK_VIEWPORT (container), NULL);
+	else if (GTK_IS_EXPANDER (container) && gtk_expander_get_child (GTK_EXPANDER (container)) == child)
+		gtk_expander_set_child (GTK_EXPANDER (container), NULL);
 	else if (GTK_IS_SCROLLED_WINDOW (container))
 		gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (container), NULL);
 	else if (GTK_IS_FRAME (container))
@@ -297,14 +313,26 @@ gtk_paned_pack2 (GtkPaned *paned, GtkWidget *child, gboolean resize, gboolean sh
 void
 gtk_widget_destroy (GtkWidget *widget)
 {
+	GtkWidget *parent;
+
 	if (widget == NULL)
 		return;
-	if (GTK_IS_WINDOW (widget))
+
+	/* Hold a ref across unparent so dispose matches GTK3 gtk_widget_destroy. */
+	g_object_ref (widget);
+
+	parent = gtk_widget_get_parent (widget);
+	if (parent != NULL)
+		gtk_container_remove (parent, widget);
+	else if (GTK_IS_WINDOW (widget)) {
+		/* Hide first so a WM-destroyed native is not torn down twice. */
+		gtk_widget_set_visible (widget, FALSE);
+		if (gtk_widget_get_mapped (widget))
+			gtk_widget_unrealize (widget);
 		gtk_window_destroy (GTK_WINDOW (widget));
-	else if (gtk_widget_get_parent (widget))
-		gtk_container_remove (gtk_widget_get_parent (widget), widget);
-	else
-		g_object_unref (widget);
+	}
+
+	g_object_unref (widget);
 }
 
 void
@@ -355,6 +383,41 @@ dialog_response_cb (GtkDialog *dialog, gint response, gpointer data)
 		g_main_loop_quit (dialog_loop);
 }
 
+static gboolean
+verne_dialog_close_request (GtkWindow *window, gpointer data)
+{
+	(void) data;
+	gtk_widget_set_visible (GTK_WIDGET (window), FALSE);
+	if (GTK_IS_DIALOG (window))
+		gtk_dialog_response (GTK_DIALOG (window), GTK_RESPONSE_DELETE_EVENT);
+	return TRUE;
+}
+
+void
+verne_prepare_dialog (GtkWidget *widget)
+{
+	GtkApplication *app;
+	GtkWindow *active;
+
+	if (widget == NULL || !GTK_IS_DIALOG (widget))
+		return;
+	if (g_object_get_data (G_OBJECT (widget), "verne-dialog-prepared"))
+		return;
+	g_object_set_data (G_OBJECT (widget), "verne-dialog-prepared", GINT_TO_POINTER (1));
+
+	gtk_window_set_hide_on_close (GTK_WINDOW (widget), TRUE);
+	g_signal_connect (widget, "close-request", G_CALLBACK (verne_dialog_close_request), NULL);
+
+	if (gtk_window_get_transient_for (GTK_WINDOW (widget)) == NULL) {
+		app = GTK_APPLICATION (g_application_get_default ());
+		if (app) {
+			active = gtk_application_get_active_window (app);
+			if (active && GTK_WIDGET (active) != widget)
+				gtk_window_set_transient_for (GTK_WINDOW (widget), active);
+		}
+	}
+}
+
 gint
 gtk_dialog_run (GtkDialog *dialog)
 {
@@ -362,6 +425,7 @@ gtk_dialog_run (GtkDialog *dialog)
 	dialog_response = GTK_RESPONSE_NONE;
 	dialog_loop = g_main_loop_new (NULL, FALSE);
 	id = g_signal_connect (dialog, "response", G_CALLBACK (dialog_response_cb), NULL);
+	verne_prepare_dialog (GTK_WIDGET (dialog));
 	gtk_window_set_modal (GTK_WINDOW (dialog), TRUE);
 	gtk_widget_set_visible (GTK_WIDGET (dialog), TRUE);
 	gtk_window_present (GTK_WINDOW (dialog));

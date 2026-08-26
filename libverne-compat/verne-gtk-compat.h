@@ -451,6 +451,7 @@ verne_gtk_button_set_label (GtkButton *button, const char *label)
 #endif
 
 /* dialog run (nested loop, GTK3 behavior) */
+void verne_prepare_dialog (GtkWidget *widget);
 gint gtk_dialog_run (GtkDialog *dialog);
 
 /* stock / about */

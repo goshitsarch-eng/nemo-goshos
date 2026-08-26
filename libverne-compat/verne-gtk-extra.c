@@ -1094,9 +1094,21 @@ static void
 on_related_action_active (GObject *action, GParamSpec *pspec, gpointer activatable)
 {
 	(void) pspec;
-	if (GTK_IS_TOGGLE_BUTTON (activatable) && GTK_IS_TOGGLE_ACTION (action))
+	if (GTK_IS_TOGGLE_BUTTON (activatable) && GTK_IS_TOGGLE_ACTION (action)) {
+		g_object_set_data (G_OBJECT (activatable), "verne-syncing-toggle", GINT_TO_POINTER (1));
 		gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (activatable),
 					      gtk_toggle_action_get_active (GTK_TOGGLE_ACTION (action)));
+		g_object_set_data (G_OBJECT (activatable), "verne-syncing-toggle", NULL);
+	}
+}
+
+static void
+on_related_toggle_toggled (GtkToggleButton *button, gpointer action)
+{
+	if (g_object_get_data (G_OBJECT (button), "verne-syncing-toggle"))
+		return;
+	if (gtk_toggle_button_get_active (button))
+		gtk_action_activate (GTK_ACTION (action));
 }
 
 void
@@ -1122,19 +1134,23 @@ gtk_activatable_set_related_action (gpointer activatable, GtkAction *action)
 		if (gtk_action_get_tooltip (action))
 			gtk_widget_set_tooltip_text (GTK_WIDGET (activatable), gtk_action_get_tooltip (action));
 		gtk_widget_set_sensitive (GTK_WIDGET (activatable), gtk_action_get_sensitive (action));
-		if (g_object_get_data (G_OBJECT (activatable), "verne-action-clicked") == NULL) {
-			g_signal_connect_swapped (activatable, "clicked", G_CALLBACK (gtk_action_activate), action);
-			g_object_set_data (G_OBJECT (activatable), "verne-action-clicked", GINT_TO_POINTER (1));
-		}
 		if (GTK_IS_TOGGLE_BUTTON (activatable) && GTK_IS_TOGGLE_ACTION (action)) {
 			gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (activatable),
 						      gtk_toggle_action_get_active (GTK_TOGGLE_ACTION (action)));
+			if (g_object_get_data (G_OBJECT (activatable), "verne-action-toggled") == NULL) {
+				g_signal_connect (activatable, "toggled",
+						  G_CALLBACK (on_related_toggle_toggled), action);
+				g_object_set_data (G_OBJECT (activatable), "verne-action-toggled", GINT_TO_POINTER (1));
+			}
 			if (g_object_get_data (G_OBJECT (activatable), "verne-action-active") == NULL) {
 				g_signal_connect_object (action, "notify::active",
 							 G_CALLBACK (on_related_action_active),
 							 activatable, 0);
 				g_object_set_data (G_OBJECT (activatable), "verne-action-active", GINT_TO_POINTER (1));
 			}
+		} else if (g_object_get_data (G_OBJECT (activatable), "verne-action-clicked") == NULL) {
+			g_signal_connect_swapped (activatable, "clicked", G_CALLBACK (gtk_action_activate), action);
+			g_object_set_data (G_OBJECT (activatable), "verne-action-clicked", GINT_TO_POINTER (1));
 		}
 	}
 }
@@ -1264,13 +1280,73 @@ verne_icon_lookup_flags (const gchar *name)
 	return 0;
 }
 
+static gboolean
+verne_icon_is_missing (gpointer paintable)
+{
+	const char *found;
+
+	if (paintable == NULL)
+		return TRUE;
+	if (!GTK_IS_ICON_PAINTABLE (paintable))
+		return FALSE;
+	found = gtk_icon_paintable_get_icon_name (GTK_ICON_PAINTABLE (paintable));
+	if (found == NULL || found[0] == '\0')
+		return TRUE;
+	return g_strcmp0 (found, "image-missing") == 0 ||
+	       g_strcmp0 (found, "image-x-generic") == 0 ||
+	       g_strcmp0 (found, "text-x-generic") == 0;
+}
+
+static const char *verne_drive_fallbacks[] = {
+	"computer-symbolic",
+	"drive-harddisk",
+	"computer",
+	"folder-symbolic",
+	NULL
+};
+
+static gpointer
+verne_lookup_named_icon (GtkIconTheme *theme, const gchar *name, gint size, gint scale)
+{
+	const gchar *mapped;
+	gpointer paintable;
+	GtkIconLookupFlags flags;
+	const char **fallbacks = NULL;
+
+	mapped = verne_map_icon_name (name);
+	if (mapped == NULL || mapped[0] == '\0')
+		return NULL;
+	if (g_strcmp0 (mapped, "drive-harddisk-symbolic") == 0 ||
+	    g_strcmp0 (mapped, "drive-harddisk") == 0)
+		fallbacks = verne_drive_fallbacks;
+	flags = verne_icon_lookup_flags (mapped);
+	paintable = gtk_icon_theme_lookup_icon (theme, mapped, fallbacks,
+						size, scale, GTK_TEXT_DIR_NONE, flags);
+	if (verne_icon_is_missing (paintable) && flags != 0) {
+		if (paintable)
+			g_object_unref (paintable);
+		paintable = gtk_icon_theme_lookup_icon (theme, mapped, fallbacks,
+							size, scale, GTK_TEXT_DIR_NONE, 0);
+	}
+	if (verne_icon_is_missing (paintable)) {
+		if (paintable)
+			g_object_unref (paintable);
+		paintable = NULL;
+	}
+	return paintable;
+}
+
 gpointer
 gtk_icon_theme_lookup_icon_for_scale (GtkIconTheme *theme, const gchar *name, gint size, gint scale, GtkIconLookupFlags flags)
 {
-	const gchar *mapped = verne_map_icon_name (name);
+	gpointer paintable;
+
 	(void) flags;
-	return gtk_icon_theme_lookup_icon (theme, mapped, NULL, size, scale, GTK_TEXT_DIR_NONE,
-					   verne_icon_lookup_flags (mapped));
+	paintable = verne_lookup_named_icon (theme, name, size, scale);
+	if (paintable)
+		return paintable;
+	return gtk_icon_theme_lookup_icon (theme, verne_map_icon_name (name), NULL, size, scale,
+					   GTK_TEXT_DIR_NONE, 0);
 }
 
 static GIcon *
@@ -1288,12 +1364,20 @@ verne_map_gicon (GIcon *icon)
 	if (names == NULL)
 		return g_object_ref (icon);
 	n = (int) g_strv_length ((gchar **) names);
-	mapped = g_new0 (gchar *, n + 1);
+	mapped = g_new0 (gchar *, n + 4);
 	for (i = 0; i < n; i++) {
 		const gchar *m = verne_map_icon_name (names[i]);
 		if (m != names[i])
 			changed = TRUE;
 		mapped[i] = g_strdup (m);
+	}
+	/* Adwaita may ship computer-symbolic but not a usable drive-harddisk pixbuf. */
+	if (n > 0 && (g_strcmp0 (mapped[0], "drive-harddisk-symbolic") == 0 ||
+		      g_strcmp0 (mapped[0], "drive-harddisk") == 0)) {
+		mapped[n++] = g_strdup ("computer-symbolic");
+		mapped[n++] = g_strdup ("drive-harddisk");
+		mapped[n++] = g_strdup ("computer");
+		changed = TRUE;
 	}
 	if (!changed) {
 		g_strfreev (mapped);
@@ -1308,17 +1392,28 @@ gpointer
 gtk_icon_theme_lookup_by_gicon_for_scale (GtkIconTheme *theme, GIcon *icon, gint size, gint scale, GtkIconLookupFlags flags)
 {
 	GIcon *mapped;
-	gpointer paintable;
+	gpointer paintable = NULL;
 	(void) flags;
+
 	mapped = icon ? verne_map_gicon (icon) : NULL;
-	{
+	if (mapped && G_IS_THEMED_ICON (mapped)) {
+		const gchar *const *names = g_themed_icon_get_names (G_THEMED_ICON (mapped));
+		int i;
+		for (i = 0; names && names[i]; i++) {
+			paintable = verne_lookup_named_icon (theme, names[i], size, scale);
+			if (paintable)
+				break;
+		}
+	}
+	if (paintable == NULL) {
 		const gchar *first = NULL;
 		if (mapped && G_IS_THEMED_ICON (mapped)) {
 			const gchar *const *names = g_themed_icon_get_names (G_THEMED_ICON (mapped));
 			if (names)
 				first = names[0];
 		}
-		paintable = gtk_icon_theme_lookup_by_gicon (theme, mapped ? mapped : icon, size, scale, GTK_TEXT_DIR_NONE,
+		paintable = gtk_icon_theme_lookup_by_gicon (theme, mapped ? mapped : icon, size, scale,
+							    GTK_TEXT_DIR_NONE,
 							    verne_icon_lookup_flags (first));
 	}
 	g_clear_object (&mapped);

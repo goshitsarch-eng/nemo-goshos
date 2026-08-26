@@ -470,6 +470,8 @@ verne_window_present_safe (GtkWindow *window)
 		return;
 	g_object_set_qdata (G_OBJECT (window), verne_presenting_quark (), GINT_TO_POINTER (1));
 
+	verne_prepare_dialog (widget);
+
 	if (!gtk_widget_get_visible (widget))
 		gtk_widget_set_visible (widget, TRUE);
 
