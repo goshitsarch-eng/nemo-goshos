@@ -1113,7 +1113,7 @@ static Window
 verne_xdnd_target_at_pointer (Display *dpy, VerneLocalDrag *local, int *root_x, int *root_y)
 {
 	Window root, root_ret, parent, *children = NULL;
-	Window target = None, fallback = None, desktop = None;
+	Window target = None, fallback = None;
 	int rx = 0, ry = 0, wx = 0, wy = 0;
 	unsigned int mask = 0, nchild = 0, i;
 	GHashTable *skip;
@@ -1149,25 +1149,21 @@ verne_xdnd_target_at_pointer (Display *dpy, VerneLocalDrag *local, int *root_x, 
 		if (found == None)
 			continue;
 		wmclass = verne_xid_wm_class (dpy, found);
-		if (verne_wm_class_is_verne_desktop (wmclass)) {
-			desktop = found;
-			g_free (wmclass);
-			break;
-		}
-		if (target == None) {
-			if (verne_wm_class_is_foreign_desktop (wmclass))
+		/* xfdesktop (and similar) often sit above Verne dest. Skip them
+		 * so dest still receives drops. Other apps stacked above dest
+		 * (Thunar, etc.) must win — dest is a full-screen canvas. */
+		if (verne_wm_class_is_foreign_desktop (wmclass)) {
+			if (fallback == None)
 				fallback = found;
-			else
-				target = found;
+			g_free (wmclass);
+			continue;
 		}
 		g_free (wmclass);
-		if (target != None && desktop != None)
-			break;
+		target = found;
+		break;
 	}
 	XFree (children);
 	g_hash_table_destroy (skip);
-	if (desktop != None)
-		return desktop;
 	if (target != None)
 		return target;
 	return fallback;
