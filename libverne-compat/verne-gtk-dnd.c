@@ -663,16 +663,15 @@ verne_idle_finish_local (gpointer data)
 {
 	VerneLocalDrag *local = data;
 	GtkWidget *source;
-	GtkWidget *dest;
 
+	g_warning ("idle finish local drag");
 	source = local->source;
-	dest = local->current_dest;
 	if (source && GTK_IS_WIDGET (source) &&
 	    g_object_get_data (G_OBJECT (source), "verne-active-drag") == (gpointer) local)
 		g_signal_emit_by_name (source, "drag-end", local);
-	if (dest && GTK_IS_WIDGET (dest))
-		g_signal_emit_by_name (dest, "drag-leave", local, GDK_CURRENT_TIME);
+	g_warning ("idle finish after drag-end");
 	verne_local_cleanup (local);
+	g_warning ("idle finish after cleanup");
 	g_object_unref (local);
 	return G_SOURCE_REMOVE;
 }
@@ -694,7 +693,6 @@ verne_local_cleanup (VerneLocalDrag *local)
 
 		local->icon_window = NULL;
 		local->picture = NULL;
-		gtk_widget_set_visible (icon, FALSE);
 		g_idle_add (verne_idle_destroy_window, g_object_ref (icon));
 	}
 	if (source)
