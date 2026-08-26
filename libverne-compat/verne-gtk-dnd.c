@@ -193,7 +193,7 @@ verne_content_provider_new_for_widget (GtkWidget *widget, GtkTargetList *targets
 	p->widget = widget;
 	p->targets = targets;
 	if (targets)
-		targets->ref++;
+		gtk_target_list_ref (targets);
 	return GDK_CONTENT_PROVIDER (p);
 }
 
@@ -1097,7 +1097,7 @@ gtk_drag_begin_with_coordinates (GtkWidget *widget, GtkTargetList *targets, GdkD
 	local->source = widget;
 	local->targets = targets;
 	if (targets)
-		targets->ref++;
+		gtk_target_list_ref (targets);
 	local->actions = actions ? actions : (GDK_ACTION_COPY | GDK_ACTION_MOVE | GDK_ACTION_LINK);
 	if (local->actions & GDK_ACTION_MOVE)
 		local->selected = GDK_ACTION_MOVE;
