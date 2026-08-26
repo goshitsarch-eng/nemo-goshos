@@ -1238,8 +1238,41 @@ verne_cell_renderer_class_set_render (GtkCellRendererClass *klass, VerneCellRend
 	klass->snapshot = verne_cell_snapshot;
 }
 
-gboolean gtk_targets_include_text (GdkAtom *targets, gint n_targets) { (void) targets; (void) n_targets; return TRUE; }
-gboolean gtk_targets_include_uri (GdkAtom *targets, gint n_targets) { (void) targets; (void) n_targets; return TRUE; }
+gboolean
+gtk_targets_include_text (GdkAtom *targets, gint n_targets)
+{
+	gint i;
+
+	for (i = 0; i < n_targets; i++) {
+		const char *name = (const char *) targets[i];
+		if (name == NULL)
+			continue;
+		if (g_strcmp0 (name, "UTF8_STRING") == 0 ||
+		    g_strcmp0 (name, "TEXT") == 0 ||
+		    g_strcmp0 (name, "STRING") == 0 ||
+		    g_strcmp0 (name, "COMPOUND_TEXT") == 0 ||
+		    g_strcmp0 (name, "text/plain") == 0 ||
+		    g_str_has_prefix (name, "text/plain;"))
+			return TRUE;
+	}
+	return FALSE;
+}
+
+gboolean
+gtk_targets_include_uri (GdkAtom *targets, gint n_targets)
+{
+	gint i;
+
+	for (i = 0; i < n_targets; i++) {
+		const char *name = (const char *) targets[i];
+		if (name == NULL)
+			continue;
+		if (g_strcmp0 (name, "text/uri-list") == 0 ||
+		    g_strcmp0 (name, "application/vnd.portal.files") == 0)
+			return TRUE;
+	}
+	return FALSE;
+}
 
 guchar *
 gtk_selection_data_get_text (const GtkSelectionData *s)

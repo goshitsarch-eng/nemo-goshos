@@ -167,12 +167,28 @@ selection_new (GdkAtom target)
 	return s;
 }
 
+static guint
+clipboard_info_for_target (GtkClipboard *clipboard, GdkAtom target)
+{
+	guint i;
+
+	if (clipboard->targets == NULL)
+		return 0;
+	for (i = 0; i < clipboard->n_targets; i++) {
+		if (g_strcmp0 (clipboard->targets[i].target, (const char *) target) == 0)
+			return clipboard->targets[i].info;
+	}
+	return 0;
+}
+
 void
 gtk_clipboard_request_contents (GtkClipboard *clipboard, GdkAtom target, GtkClipboardReceivedFunc cb, gpointer data)
 {
 	GtkSelectionData *s = selection_new (target);
+
 	if (clipboard->get_func)
-		clipboard->get_func (clipboard, s, 0, clipboard->user_data);
+		clipboard->get_func (clipboard, s, clipboard_info_for_target (clipboard, target),
+				     clipboard->user_data);
 	cb (clipboard, s, data);
 	gtk_selection_data_free (s);
 }
@@ -221,9 +237,18 @@ gtk_clipboard_request_text (GtkClipboard *clipboard, GtkClipboardTextReceivedFun
 void
 gtk_clipboard_request_targets (GtkClipboard *clipboard, GtkClipboardTargetsReceivedFunc cb, gpointer data)
 {
-	GdkAtom atoms[1] = { gdk_atom_intern ("text/plain", FALSE) };
-	(void) clipboard;
-	cb (clipboard, atoms, 1, data);
+	GdkAtom *atoms = NULL;
+	gint n = 0;
+	guint i;
+
+	if (clipboard->targets && clipboard->n_targets > 0) {
+		n = (gint) clipboard->n_targets;
+		atoms = g_new (GdkAtom, (guint) n);
+		for (i = 0; i < clipboard->n_targets; i++)
+			atoms[i] = gdk_atom_intern (clipboard->targets[i].target, FALSE);
+	}
+	cb (clipboard, atoms, n, data);
+	g_free (atoms);
 }
 
 GObject *gtk_clipboard_get_owner (GtkClipboard *clipboard) { return clipboard->owner; }
@@ -233,7 +258,8 @@ gtk_clipboard_wait_for_contents (GtkClipboard *clipboard, GdkAtom target)
 {
 	GtkSelectionData *s = selection_new (target);
 	if (clipboard->get_func)
-		clipboard->get_func (clipboard, s, 0, clipboard->user_data);
+		clipboard->get_func (clipboard, s, clipboard_info_for_target (clipboard, target),
+				     clipboard->user_data);
 	return s;
 }
 
