@@ -4039,18 +4039,33 @@ icon_cell_renderer_func (GtkTreeViewColumn *column,
 			      "visible", FALSE,
 			      NULL);
 	} else {
-		if (gicon) {
-			NemoIconInfo *info = nemo_icon_info_lookup (gicon, 16, 1);
-			pixbuf = nemo_icon_info_get_pixbuf_nodefault (info);
-			nemo_icon_info_unref (info);
-		}
 		g_object_set (cell,
 			      "visible", TRUE,
 			      "xpad", 3,
 			      "ypad", 2,
 			      NULL);
-		verne_cell_renderer_set_pixbuf (cell, pixbuf);
-		g_clear_object (&pixbuf);
+		if (gicon && G_IS_THEMED_ICON (gicon)) {
+			const gchar *const *names = g_themed_icon_get_names (G_THEMED_ICON (gicon));
+			const char *name = (names && names[0]) ? verne_map_icon_name (names[0]) : NULL;
+			GObjectClass *klass = G_OBJECT_GET_CLASS (cell);
+
+			if (g_object_class_find_property (klass, "gicon"))
+				g_object_set (cell, "gicon", NULL, NULL);
+			if (g_object_class_find_property (klass, "pixbuf"))
+				g_object_set (cell, "pixbuf", NULL, NULL);
+			if (g_object_class_find_property (klass, "texture"))
+				g_object_set (cell, "texture", NULL, NULL);
+			if (g_object_class_find_property (klass, "icon-name"))
+				g_object_set (cell, "icon-name", name, NULL);
+		} else if (gicon) {
+			NemoIconInfo *info = nemo_icon_info_lookup (gicon, 16, 1);
+			pixbuf = nemo_icon_info_get_pixbuf_nodefault (info);
+			nemo_icon_info_unref (info);
+			verne_cell_renderer_set_pixbuf (cell, pixbuf);
+			g_clear_object (&pixbuf);
+		} else {
+			verne_cell_renderer_set_pixbuf (cell, NULL);
+		}
 	}
 	g_clear_object (&gicon);
 }
