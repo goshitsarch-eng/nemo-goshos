@@ -1207,12 +1207,19 @@ verne_paint_tree_dest_row (GtkTreeView *tree_view, GtkSnapshot *snapshot)
 		rect.x = wx;
 		rect.y = wy;
 	}
-	if (rect.width < 2 || rect.height < 2)
-		return;
-
 	ww = gtk_widget_get_width (GTK_WIDGET (tree_view));
 	wh = gtk_widget_get_height (GTK_WIDGET (tree_view));
-	if (ww < 1 || wh < 1)
+	if (rect.width < 2)
+		rect.width = MAX (ww - MAX (rect.x, 0) - 2, 4);
+	if (verne_tree_dest_paint_logs < 8) {
+		char *ps = gtk_tree_path_to_string (row->path);
+
+		g_warning ("paint dest row path=%s pos=%d rect=%d,%d %dx%d widget=%dx%d",
+			   ps ? ps : "?", (int) row->pos, rect.x, rect.y, rect.width, rect.height, ww, wh);
+		g_free (ps);
+		verne_tree_dest_paint_logs++;
+	}
+	if (rect.height < 2 || ww < 1 || wh < 1)
 		return;
 
 	style = gtk_widget_get_style_context (GTK_WIDGET (tree_view));
@@ -1246,9 +1253,6 @@ verne_paint_tree_dest_row (GtkTreeView *tree_view, GtkSnapshot *snapshot)
 		gtk_snapshot_append_color (snapshot, &edge,
 					   &GRAPHENE_RECT_INIT ((float) (x + w - 3), (float) y, 3.0f, (float) h));
 	}
-	if (g_atomic_int_add (&verne_tree_dest_paint_logs, 1) < 6)
-		g_warning ("paint dest row pos=%d rect=%d,%d %dx%d widget=%dx%d",
-			   (int) row->pos, rect.x, rect.y, rect.width, rect.height, ww, wh);
 }
 
 static void
@@ -1309,11 +1313,8 @@ verne_tree_dest_tick (GtkWidget *widget, GdkFrameClock *clock, gpointer data)
 	(void) clock;
 	(void) data;
 	row = g_object_get_qdata (G_OBJECT (widget), verne_tree_dest_quark ());
-	if (row == NULL || row->path == NULL) {
-		g_object_set_data (G_OBJECT (widget), "verne-dest-tick", NULL);
-		return G_SOURCE_REMOVE;
-	}
-	gtk_widget_queue_draw (widget);
+	if (row && row->path)
+		gtk_widget_queue_draw (widget);
 	return G_SOURCE_CONTINUE;
 }
 
