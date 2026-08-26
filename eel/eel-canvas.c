@@ -108,6 +108,59 @@ static GObjectClass *item_parent_class;
 static gpointer accessible_item_parent_class;
 static gpointer accessible_parent_class;
 
+static GQuark
+canvas_live_quark (void)
+{
+	static GQuark q;
+	if (q == 0)
+		q = g_quark_from_static_string ("eel-canvas-live-items");
+	return q;
+}
+
+static GHashTable *
+canvas_live_table (EelCanvas *canvas)
+{
+	GHashTable *t;
+
+	t = g_object_get_qdata (G_OBJECT (canvas), canvas_live_quark ());
+	if (t == NULL) {
+		t = g_hash_table_new (NULL, NULL);
+		g_object_set_qdata_full (G_OBJECT (canvas), canvas_live_quark (), t,
+					 (GDestroyNotify) g_hash_table_destroy);
+	}
+	return t;
+}
+
+static void
+canvas_register_item (EelCanvasItem *item)
+{
+	if (item != NULL && item->canvas != NULL)
+		g_hash_table_add (canvas_live_table (item->canvas), item);
+}
+
+static void
+canvas_unregister_item (EelCanvasItem *item)
+{
+	GHashTable *t;
+
+	if (item == NULL || item->canvas == NULL)
+		return;
+	t = g_object_get_qdata (G_OBJECT (item->canvas), canvas_live_quark ());
+	if (t != NULL)
+		g_hash_table_remove (t, item);
+}
+
+static gboolean
+canvas_item_is_live (EelCanvas *canvas, EelCanvasItem *item)
+{
+	GHashTable *t;
+
+	if (canvas == NULL || item == NULL || canvas->destroying)
+		return FALSE;
+	t = g_object_get_qdata (G_OBJECT (canvas), canvas_live_quark ());
+	return t != NULL && g_hash_table_contains (t, item);
+}
+
 
 /**
  * eel_canvas_item_get_type:
@@ -193,6 +246,7 @@ eel_canvas_item_new (EelCanvasGroup *parent, GType type, const gchar *first_arg_
 static void
 item_post_create_setup (EelCanvasItem *item)
 {
+	canvas_register_item (item);
 	group_add (EEL_CANVAS_GROUP (item->parent), item);
 
 	redraw_and_repick_if_mapped (item);
@@ -297,6 +351,8 @@ eel_canvas_item_dispose (GObject *object)
 	g_return_if_fail (EEL_IS_CANVAS_ITEM (object));
 
 	item = EEL_CANVAS_ITEM (object);
+
+	canvas_unregister_item (item);
 
 	if (item->canvas) {
 		eel_canvas_item_request_redraw (item);
@@ -445,7 +501,13 @@ eel_canvas_item_invoke_update (EelCanvasItem *item,
 static double
 eel_canvas_item_invoke_point (EelCanvasItem *item, double x, double y, int cx, int cy, EelCanvasItem **actual_item)
 {
-	/* Calculate x & y in item local coordinates */
+	if (item == NULL || item->canvas == NULL ||
+	    item->canvas->in_layout || item->canvas->destroying ||
+	    !canvas_item_is_live (item->canvas, item)) {
+		if (actual_item)
+			*actual_item = NULL;
+		return 1e18;
+	}
 
 	if (EEL_CANVAS_ITEM_GET_CLASS (item)->point)
 		return EEL_CANVAS_ITEM_GET_CLASS (item)->point (item, x, y, cx, cy, actual_item);
@@ -1551,6 +1613,9 @@ eel_canvas_group_point (EelCanvasItem *item, double x, double y, int cx, int cy,
 	for (list = group->item_list; list; list = list->next) {
 		child = list->data;
 
+		if (!canvas_item_is_live (item->canvas, child))
+			continue;
+
 		if ((child->x1 > x2) || (child->y1 > y2) || (child->x2 < x1) || (child->y2 < y1))
 			continue;
 
@@ -2386,6 +2451,7 @@ eel_canvas_init (EelCanvas *canvas)
 
 	canvas->root = EEL_CANVAS_ITEM (g_object_new (eel_canvas_group_get_type (), NULL));
 	canvas->root->canvas = canvas;
+	canvas_register_item (canvas->root);
 
 	g_object_ref_sink (canvas->root);
 
@@ -2688,10 +2754,13 @@ eel_canvas_size_allocate (GtkWidget *widget, GtkAllocation *allocation)
 	g_return_if_fail (EEL_IS_CANVAS (widget));
 	g_return_if_fail (allocation != NULL);
 
+	canvas = EEL_CANVAS (widget);
+	canvas->in_layout = TRUE;
+	canvas->current_item = NULL;
+	canvas->new_current_item = NULL;
+
 	if (GTK_WIDGET_CLASS (canvas_parent_class)->size_allocate)
 		(* GTK_WIDGET_CLASS (canvas_parent_class)->size_allocate) (widget, allocation->width, allocation->height, -1);
-
-	canvas = EEL_CANVAS (widget);
 
 	/* Recenter the view, if appropriate */
 
@@ -2710,6 +2779,7 @@ eel_canvas_size_allocate (GtkWidget *widget, GtkAllocation *allocation)
 
 	g_signal_emit_by_name (hadjustment, "changed");
 	g_signal_emit_by_name (vadjustment, "changed");
+	canvas->in_layout = FALSE;
 }
 
 /* Emits an event for an item in the canvas, be it the current item, grabbed
@@ -2726,14 +2796,16 @@ emit_event (EelCanvas *canvas, VerneGdkEvent *event)
 	guint mask;
 
 	/* Could be an old pick event */
-	if (!gtk_widget_get_realized (GTK_WIDGET (canvas)) || canvas->root == NULL || canvas->destroying) {
+	if (!gtk_widget_get_realized (GTK_WIDGET (canvas)) || canvas->root == NULL || canvas->destroying || canvas->in_layout) {
 		return FALSE;
 	}
 
 	/* Perform checks for grabbed items */
 
 	if (canvas->grabbed_item &&
-	    !is_descendant (canvas->current_item, canvas->grabbed_item)) {
+	    (!canvas_item_is_live (canvas, canvas->grabbed_item) ||
+	     !canvas_item_is_live (canvas, canvas->current_item) ||
+	     !is_descendant (canvas->current_item, canvas->grabbed_item))) {
 		return FALSE;
         }
 
@@ -2820,8 +2892,12 @@ emit_event (EelCanvas *canvas, VerneGdkEvent *event)
 	/* Choose where we send the event */
 
 	item = canvas->current_item;
+	if (!canvas_item_is_live (canvas, item)) {
+		canvas->current_item = NULL;
+		item = NULL;
+	}
 
-	if (canvas->focused_item
+	if (canvas_item_is_live (canvas, canvas->focused_item)
 	    && ((event->type == GDK_KEY_PRESS) ||
 		(event->type == GDK_KEY_RELEASE) ||
 		(event->type == GDK_FOCUS_CHANGE)))
@@ -2835,6 +2911,8 @@ emit_event (EelCanvas *canvas, VerneGdkEvent *event)
 	finished = FALSE;
 
 	while (item && !finished) {
+		if (!canvas_item_is_live (canvas, item))
+			break;
 		g_object_ref (item);
 
 		g_signal_emit (
@@ -2844,7 +2922,7 @@ emit_event (EelCanvas *canvas, VerneGdkEvent *event)
 		parent = item->parent;
 		g_object_unref (item);
 
-		item = parent;
+		item = canvas_item_is_live (canvas, parent) ? parent : NULL;
 	}
 
 	return finished;
@@ -2863,7 +2941,7 @@ pick_current_item (EelCanvas *canvas, VerneGdkEvent *event)
 
 	retval = FALSE;
 
-	if (canvas->root == NULL || canvas->destroying)
+	if (canvas->root == NULL || canvas->destroying || canvas->in_layout)
 		return retval;
 
 	/* If a button is down, we'll perform enter and leave events on the
@@ -2938,10 +3016,13 @@ pick_current_item (EelCanvas *canvas, VerneGdkEvent *event)
 		eel_canvas_c2w (canvas, cx, cy, &x, &y);
 
 		/* find the closest item */
-		if (canvas->root && (canvas->root->flags & EEL_CANVAS_ITEM_MAPPED))
+		if (canvas->root && canvas_item_is_live (canvas, canvas->root) &&
+		    (canvas->root->flags & EEL_CANVAS_ITEM_MAPPED))
 			eel_canvas_item_invoke_point (canvas->root, x, y, cx, cy,
 							&canvas->new_current_item);
 		else
+			canvas->new_current_item = NULL;
+		if (!canvas_item_is_live (canvas, canvas->new_current_item))
 			canvas->new_current_item = NULL;
 	} else
 		canvas->new_current_item = NULL;
@@ -2952,7 +3033,7 @@ pick_current_item (EelCanvas *canvas, VerneGdkEvent *event)
 	/* Synthesize events for old and new current items */
 
 	if ((canvas->new_current_item != canvas->current_item)
-	    && (canvas->current_item != NULL)
+	    && canvas_item_is_live (canvas, canvas->current_item)
 	    && !canvas->left_grabbed_item) {
 		VerneGdkEvent new_event;
 
@@ -2976,6 +3057,8 @@ pick_current_item (EelCanvas *canvas, VerneGdkEvent *event)
 	/* Handle the rest of cases */
 
 	canvas->left_grabbed_item = FALSE;
+	if (!canvas_item_is_live (canvas, canvas->new_current_item))
+		canvas->new_current_item = NULL;
 	canvas->current_item = canvas->new_current_item;
 
 	if (canvas->current_item != NULL) {
@@ -3010,7 +3093,7 @@ eel_canvas_button (GtkWidget *widget, GdkEventButton *event)
 
 	canvas = EEL_CANVAS (widget);
 
-	if (canvas->root == NULL || canvas->destroying)
+	if (canvas->root == NULL || canvas->destroying || canvas->in_layout)
 		return FALSE;
 
 	/*
@@ -3085,7 +3168,7 @@ eel_canvas_motion (GtkWidget *widget, GdkEventMotion *event)
 
 	canvas = EEL_CANVAS (widget);
 
-	if (canvas->root == NULL || canvas->destroying)
+	if (canvas->root == NULL || canvas->destroying || canvas->in_layout)
 		return FALSE;
 
 	if (event->window != gtk_layout_get_bin_window (GTK_LAYOUT (canvas)))
@@ -3107,7 +3190,7 @@ eel_canvas_key (GtkWidget *widget, GdkEventKey *event)
 
 	canvas = EEL_CANVAS (widget);
 
-	if (canvas->root == NULL || canvas->destroying)
+	if (canvas->root == NULL || canvas->destroying || canvas->in_layout)
 		return FALSE;
 
 	if (emit_event (canvas, (VerneGdkEvent *) event))
@@ -3129,6 +3212,9 @@ eel_canvas_crossing (GtkWidget *widget, GdkEventCrossing *event)
 	g_return_val_if_fail (event != NULL, FALSE);
 
 	canvas = EEL_CANVAS (widget);
+
+	if (canvas->root == NULL || canvas->destroying || canvas->in_layout)
+		return FALSE;
 
 	if (event->window != gtk_layout_get_bin_window (GTK_LAYOUT (canvas)))
 		return FALSE;

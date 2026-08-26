@@ -1001,6 +1001,14 @@ align_icons (NemoIconContainer *container)
 static void
 redo_layout_internal (NemoIconContainer *container)
 {
+    EelCanvas *canvas = EEL_CANVAS (container);
+    gboolean nested_layout;
+
+    nested_layout = canvas->in_layout;
+    canvas->in_layout = TRUE;
+    canvas->current_item = NULL;
+    canvas->new_current_item = NULL;
+
     container->details->fixed_text_height = -1;
 
     if (NEMO_ICON_CONTAINER_GET_CLASS (container)->finish_adding_new_icons != NULL) {
@@ -1031,6 +1039,9 @@ redo_layout_internal (NemoIconContainer *container)
 
 	process_pending_icon_to_reveal (container);
 	process_pending_icon_to_rename (container);
+
+	if (!nested_layout)
+		canvas->in_layout = FALSE;
 }
 
 static gboolean

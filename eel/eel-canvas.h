@@ -421,6 +421,9 @@ struct _EelCanvas {
 
 	/* Ignore pointer events while the item tree is being torn down. */
 	unsigned int destroying : 1;
+
+	/* Ignore pointer events while size_allocate relayouts icons. */
+	unsigned int in_layout : 1;
 };
 
 struct _EelCanvasClass {
