@@ -1759,7 +1759,6 @@ cairo_surface_t *gdk_window_create_similar_image_surface (GdkSurface *window, ca
 void gdk_window_move_to_rect (GdkSurface *window, const GdkRectangle *rect, GdkGravity rect_anchor, GdkGravity window_anchor, GdkAnchorHints hints, int dx, int dy) {
 	(void) window; (void) rect; (void) rect_anchor; (void) window_anchor; (void) hints; (void) dx; (void) dy;
 }
-void gdk_window_remove_filter (GdkSurface *window, gpointer func, gpointer data) { (void) window; (void) func; (void) data; }
 gboolean gdk_property_get (GdkSurface *window, GdkAtom property, GdkAtom type, gulong offset, gulong length, gint pdelete, GdkAtom *actual_type, gint *actual_format, gint *actual_length, guchar **data) {
 	(void) window; (void) property; (void) type; (void) offset; (void) length; (void) pdelete;
 	if (actual_type) *actual_type = NULL;
@@ -1775,7 +1774,6 @@ GdkSurface *gdk_selection_owner_get (GdkAtom selection) { (void) selection; retu
 gboolean gdk_display_supports_selection_notification (GdkDisplay *display) { (void) display; return FALSE; }
 gboolean gdk_screen_get_setting (GdkScreen *screen, const gchar *name, GValue *value) { (void) screen; (void) name; (void) value; return FALSE; }
 GList *gdk_screen_get_window_stack (GdkScreen *screen) { (void) screen; return NULL; }
-unsigned long gdk_x11_get_xatom_by_name (const gchar *name) { (void) name; return 0; }
 struct passwd *
 gnome_desktop_get_session_user_pwent (void)
 {

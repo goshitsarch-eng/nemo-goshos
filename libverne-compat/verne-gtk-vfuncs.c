@@ -148,8 +148,10 @@ emit_motion (GtkWidget *widget, gdouble x, gdouble y, guint state, guint32 time)
 	ev.y_root = y;
 	ev.state = state;
 	ev.time = time ? time : GDK_CURRENT_TIME;
+	verne_set_current_event (widget, (const GdkEvent *) &ev);
 	if (!emit_widget_event (widget, "motion-notify-event", &ev) && v && v->motion)
 		v->motion (widget, &ev);
+	verne_clear_current_event ();
 }
 
 static void
@@ -161,9 +163,11 @@ on_pressed (GtkGestureClick *click, gint n_press, gdouble x, gdouble y, gpointer
 	gboolean handled = FALSE;
 
 	fill_button_event (&ev, click, n_press, x, y);
+	verne_set_current_event (widget, (const GdkEvent *) &ev);
 	handled = emit_widget_event (widget, "button-press-event", &ev);
 	if (!handled && v && v->button_press)
 		handled = v->button_press (widget, &ev);
+	verne_clear_current_event ();
 	/* Do not claim on press. Claiming takes a GTK4 pointer grab which
 	 * suppresses GtkEventControllerMotion, so icon/list DnD never starts.
 	 * GtkGestureDrag (grouped below) delivers button-down motion instead.
@@ -187,8 +191,10 @@ on_released (GtkGestureClick *click, gint n_press, gdouble x, gdouble y, gpointe
 
 	fill_button_event (&ev, click, n_press, x, y);
 	ev.type = GDK_BUTTON_RELEASE;
+	verne_set_current_event (widget, (const GdkEvent *) &ev);
 	if (!emit_widget_event (widget, "button-release-event", &ev) && v && v->button_release)
 		v->button_release (widget, &ev);
+	verne_clear_current_event ();
 }
 
 static void
@@ -263,8 +269,10 @@ on_enter (GtkEventControllerMotion *motion, gdouble x, gdouble y, gpointer data)
 	ev.x = x;
 	ev.y = y;
 	ev.mode = GDK_CROSSING_NORMAL;
+	verne_set_current_event (widget, (const GdkEvent *) &ev);
 	if (!emit_widget_event (widget, "enter-notify-event", &ev) && v && v->enter)
 		v->enter (widget, &ev);
+	verne_clear_current_event ();
 }
 
 static void
@@ -282,8 +290,10 @@ on_leave (GtkEventControllerMotion *motion, gpointer data)
 	memset (&ev, 0, sizeof (ev));
 	ev.type = GDK_LEAVE_NOTIFY;
 	ev.mode = GDK_CROSSING_NORMAL;
+	verne_set_current_event (widget, (const GdkEvent *) &ev);
 	if (!emit_widget_event (widget, "leave-notify-event", &ev) && v && v->leave)
 		v->leave (widget, &ev);
+	verne_clear_current_event ();
 }
 
 static gboolean
@@ -292,7 +302,9 @@ on_key (GtkEventControllerKey *self, guint keyval, guint keycode, GdkModifierTyp
 	GtkWidget *widget = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (self));
 	VerneVfuncs *v = lookup_vfuncs_type (G_OBJECT_TYPE (widget));
 	GdkEventKey ev;
+	GdkEvent *ge;
 	gboolean press = GPOINTER_TO_INT (data);
+	gboolean handled = FALSE;
 
 	memset (&ev, 0, sizeof (ev));
 	ev.type = press ? GDK_KEY_PRESS : GDK_KEY_RELEASE;
@@ -300,18 +312,22 @@ on_key (GtkEventControllerKey *self, guint keyval, guint keycode, GdkModifierTyp
 	ev.hardware_keycode = keycode;
 	ev.state = state;
 	ev.window = gtk_widget_get_window (widget);
+	ge = gtk_event_controller_get_current_event (GTK_EVENT_CONTROLLER (self));
+	ev.time = ge ? gdk_event_get_time (ge) : GDK_CURRENT_TIME;
+	verne_set_current_event (widget, (const GdkEvent *) &ev);
 	if (press) {
 		if (emit_widget_event (widget, "key-press-event", &ev))
-			return TRUE;
-		if (v && v->key_press)
-			return v->key_press (widget, &ev);
+			handled = TRUE;
+		else if (v && v->key_press)
+			handled = v->key_press (widget, &ev);
 	} else {
 		if (emit_widget_event (widget, "key-release-event", &ev))
-			return TRUE;
-		if (v && v->key_release)
-			return v->key_release (widget, &ev);
+			handled = TRUE;
+		else if (v && v->key_release)
+			handled = v->key_release (widget, &ev);
 	}
-	return FALSE;
+	verne_clear_current_event ();
+	return handled;
 }
 
 static gboolean
@@ -334,10 +350,17 @@ on_scroll (GtkEventControllerScroll *self, gdouble dx, gdouble dy, gpointer data
 	else
 		ev.direction = GDK_SCROLL_LEFT;
 	ev.window = gtk_widget_get_window (widget);
-	if (emit_widget_event (widget, "scroll-event", &ev))
+	verne_set_current_event (widget, (const GdkEvent *) &ev);
+	if (emit_widget_event (widget, "scroll-event", &ev)) {
+		verne_clear_current_event ();
 		return TRUE;
-	if (v && v->scroll)
-		return v->scroll (widget, &ev);
+	}
+	if (v && v->scroll) {
+		gboolean handled = v->scroll (widget, &ev);
+		verne_clear_current_event ();
+		return handled;
+	}
+	verne_clear_current_event ();
 	return FALSE;
 }
 
@@ -1054,6 +1077,7 @@ gboolean
 gtk_widget_event (GtkWidget *widget, GdkEvent *event)
 {
 	const char *name = NULL;
+	gboolean handled;
 
 	g_return_val_if_fail (GTK_IS_WIDGET (widget), FALSE);
 	g_return_val_if_fail (event != NULL, FALSE);
@@ -1098,7 +1122,10 @@ gtk_widget_event (GtkWidget *widget, GdkEvent *event)
 	}
 	if (name == NULL)
 		return FALSE;
-	return emit_widget_event (widget, name, event);
+	verne_set_current_event (widget, event);
+	handled = emit_widget_event (widget, name, event);
+	verne_clear_current_event ();
+	return handled;
 }
 
 static void

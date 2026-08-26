@@ -16,6 +16,7 @@ typedef struct {
 	GtkWidget *up;
 	GtkWidget *dialog;
 	gint accept_response;
+	gboolean local_only;
 } VerneFileChooser;
 
 static GQuark
@@ -152,6 +153,8 @@ verne_fc_rebuild (VerneFileChooser *fc)
 	if (fc->folder == NULL)
 		return;
 	path = g_file_get_path (fc->folder);
+	if (path == NULL)
+		path = g_file_get_uri (fc->folder);
 	if (path && fc->path)
 		gtk_editable_set_text (GTK_EDITABLE (fc->path), path);
 	g_free (path);
@@ -222,13 +225,21 @@ static void
 on_path_activate (GtkEntry *entry, gpointer data)
 {
 	const gchar *text = gtk_editable_get_text (GTK_EDITABLE (entry));
+	VerneFileChooser *fc = verne_fc_get (data);
 	GFile *dir;
 
-	if (text == NULL || text[0] == '\0')
+	if (fc == NULL || text == NULL || text[0] == '\0')
 		return;
-	dir = g_file_new_for_path (text);
+	if (strstr (text, "://") != NULL)
+		dir = g_file_new_for_uri (text);
+	else
+		dir = g_file_new_for_commandline_arg (text);
+	if (fc->local_only && !g_file_is_native (dir)) {
+		g_object_unref (dir);
+		return;
+	}
 	if (g_file_query_file_type (dir, G_FILE_QUERY_INFO_NONE, NULL) == G_FILE_TYPE_DIRECTORY)
-		verne_fc_go (verne_fc_get (data), dir);
+		verne_fc_go (fc, dir);
 	g_object_unref (dir);
 }
 
@@ -447,6 +458,7 @@ verne_file_chooser_dialog_new (const char *title, GtkWindow *parent,
 	fc->action = action;
 	fc->dialog = dialog;
 	fc->accept_response = GTK_RESPONSE_ACCEPT;
+	fc->local_only = TRUE;
 	g_object_set_qdata_full (G_OBJECT (dialog), verne_fc_quark (), fc, verne_fc_free);
 
 	va_start (args, first_button_text);
@@ -463,4 +475,21 @@ verne_file_chooser_dialog_new (const char *title, GtkWindow *parent,
 	verne_fc_go (fc, home);
 	g_object_unref (home);
 	return dialog;
+}
+
+void
+gtk_file_chooser_set_local_only (GtkFileChooser *chooser, gboolean local_only)
+{
+	VerneFileChooser *fc = verne_fc_get (chooser);
+
+	if (fc)
+		fc->local_only = local_only;
+}
+
+gboolean
+gtk_file_chooser_get_local_only (GtkFileChooser *chooser)
+{
+	VerneFileChooser *fc = verne_fc_get (chooser);
+
+	return fc ? fc->local_only : TRUE;
 }

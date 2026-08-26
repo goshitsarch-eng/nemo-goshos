@@ -1,5 +1,6 @@
 #include "config.h"
 #include "verne-gtk-compat.h"
+#include <string.h>
 
 enum {
 	ACTION_PROP_0,
@@ -112,6 +113,7 @@ gtk_action_finalize (GObject *object)
 	g_free (action->stock_id);
 	g_free (action->icon_name);
 	g_free (action->accelerator);
+	g_free (action->accel_path);
 	g_clear_object (&action->gicon);
 	G_OBJECT_CLASS (gtk_action_parent_class)->finalize (object);
 }
@@ -235,10 +237,61 @@ void gtk_action_set_stock_id (GtkAction *action, const gchar *stock_id) {
 const gchar *gtk_action_get_stock_id (GtkAction *action) { return action ? action->stock_id : NULL; }
 void gtk_action_set_is_important (GtkAction *action, gboolean is_important) { if (action) action->is_important = is_important; }
 gboolean gtk_action_get_is_important (GtkAction *action) { return action ? action->is_important : FALSE; }
-void gtk_action_set_accel_path (GtkAction *action, const gchar *accel_path) { (void) action; (void) accel_path; }
-void gtk_action_set_accel_group (GtkAction *action, gpointer accel_group) { (void) action; (void) accel_group; }
-void gtk_action_connect_accelerator (GtkAction *action) { (void) action; }
-void gtk_action_disconnect_accelerator (GtkAction *action) { (void) action; }
+
+void
+gtk_action_set_accel_path (GtkAction *action, const gchar *accel_path)
+{
+	GtkAccelKey key;
+
+	if (action == NULL)
+		return;
+	g_free (action->accel_path);
+	action->accel_path = g_strdup (accel_path);
+	if (accel_path && action->accelerator && action->accelerator[0]) {
+		guint accel_key = 0;
+		GdkModifierType accel_mods = 0;
+
+		gtk_accelerator_parse (action->accelerator, &accel_key, &accel_mods);
+		if (accel_key)
+			gtk_accel_map_add_entry (accel_path, accel_key, accel_mods);
+	}
+	memset (&key, 0, sizeof key);
+	if (accel_path && gtk_accel_map_lookup_entry (accel_path, &key) && key.accel_key) {
+		gchar *name = gtk_accelerator_name (key.accel_key, key.accel_mods);
+		g_free (action->accelerator);
+		action->accelerator = name;
+	}
+}
+
+const gchar *
+gtk_action_get_accel_path (GtkAction *action)
+{
+	return action ? action->accel_path : NULL;
+}
+
+void
+gtk_action_set_accel_group (GtkAction *action, gpointer accel_group)
+{
+	if (action)
+		action->accel_group = accel_group;
+}
+
+void
+gtk_action_connect_accelerator (GtkAction *action)
+{
+	if (action == NULL || action->accel_group == NULL || action->accelerator == NULL)
+		return;
+	verne_accel_group_connect_action (action->accel_group, action, action->accelerator);
+}
+
+void
+gtk_action_disconnect_accelerator (GtkAction *action)
+{
+	if (action == NULL || action->accel_group == NULL)
+		return;
+	verne_accel_group_disconnect_action (action->accel_group, action);
+}
+
 void gtk_action_set_visible_horizontal (GtkAction *action, gboolean visible) { if (action) action->visible_horizontal = visible; }
 GList *gtk_action_get_proxies (GtkAction *action) { (void) action; return NULL; }
 void gtk_action_block_activate (GtkAction *action) { (void) action; }
@@ -496,12 +549,22 @@ gtk_action_group_add_action (GtkActionGroup *group, GtkAction *action)
 void
 gtk_action_group_add_action_with_accel (GtkActionGroup *group, GtkAction *action, const gchar *accelerator)
 {
+	gchar *path = NULL;
+
 	if (action->name)
 		g_hash_table_insert (group->actions, g_strdup (action->name), g_object_ref (action));
 	if (accelerator && accelerator[0] != '\0') {
 		g_free (action->accelerator);
 		action->accelerator = g_strdup (accelerator);
 	}
+	if (group->name && action->name)
+		path = g_strdup_printf ("<Actions>/%s/%s", group->name, action->name);
+	if (path) {
+		gtk_action_set_accel_path (action, path);
+		g_free (path);
+	}
+	if (group->accel)
+		gtk_action_set_accel_group (action, group->accel);
 	if (group->accel && action->accelerator)
 		verne_accel_group_connect_action (group->accel, action, action->accelerator);
 }
@@ -517,7 +580,10 @@ verne_action_group_bind_accels (GtkActionGroup *group, GtkAccelGroup *accel)
 	actions = gtk_action_group_list_actions (group);
 	for (l = actions; l; l = l->next) {
 		GtkAction *a = l->data;
-		if (a && a->accelerator)
+		if (a == NULL)
+			continue;
+		gtk_action_set_accel_group (a, accel);
+		if (a->accelerator)
 			verne_accel_group_connect_action (accel, a, a->accelerator);
 	}
 	g_list_free (actions);

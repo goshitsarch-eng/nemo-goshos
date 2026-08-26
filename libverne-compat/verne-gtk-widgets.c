@@ -1100,6 +1100,51 @@ void gtk_menu_shell_insert (gpointer menu_shell, GtkWidget *child, gint position
 	(void) position;
 }
 
+void
+gtk_menu_shell_select_first (gpointer menu_shell, gboolean search_sensitive)
+{
+	GtkWidget *box = NULL;
+	GtkWidget *child;
+
+	if (menu_shell == NULL)
+		return;
+	if (GTK_IS_MENU (menu_shell))
+		box = GTK_MENU (menu_shell)->box;
+	else if (GTK_IS_WIDGET (menu_shell))
+		box = GTK_WIDGET (menu_shell);
+	if (box == NULL)
+		return;
+	for (child = gtk_widget_get_first_child (box); child; child = gtk_widget_get_next_sibling (child)) {
+		if (!gtk_widget_get_visible (child))
+			continue;
+		if (search_sensitive && !gtk_widget_get_sensitive (child))
+			continue;
+		if (GTK_IS_SEPARATOR (child))
+			continue;
+		g_object_set_data (G_OBJECT (menu_shell), "verne-selected-item", child);
+		if (gtk_widget_get_focusable (child))
+			gtk_widget_grab_focus (child);
+		break;
+	}
+}
+
+void
+verne_im_multicontext_append_menuitems (gpointer context, gpointer menushell)
+{
+	GtkWidget *item;
+	const gchar *module;
+
+	(void) context;
+	if (menushell == NULL)
+		return;
+	module = g_getenv ("GTK_IM_MODULE");
+	item = gtk_check_menu_item_new_with_label (module && module[0] ? module : "Simple");
+	gtk_check_menu_item_set_active (GTK_CHECK_MENU_ITEM (item), TRUE);
+	gtk_widget_set_sensitive (item, FALSE);
+	gtk_widget_show (item);
+	gtk_menu_shell_append (menushell, item);
+}
+
 typedef struct _GtkMenuBarClass { GtkBoxClass parent_class; } GtkMenuBarClass;
 struct _GtkMenuBar { GtkBox parent; };
 G_DEFINE_TYPE (GtkMenuBar, gtk_menu_bar, GTK_TYPE_BOX)
@@ -1562,7 +1607,7 @@ void gtk_window_add_accel_group (GtkWindow *window, GtkAccelGroup *accel)
 	if (g_object_get_data (G_OBJECT (window), "verne-accel-controller"))
 		return;
 	controller = GTK_EVENT_CONTROLLER (gtk_event_controller_key_new ());
-	gtk_event_controller_set_propagation_phase (controller, GTK_PHASE_CAPTURE);
+	gtk_event_controller_set_propagation_phase (controller, GTK_PHASE_BUBBLE);
 	g_signal_connect (controller, "key-pressed", G_CALLBACK (verne_accel_key_pressed), window);
 	gtk_widget_add_controller (GTK_WIDGET (window), controller);
 	g_object_set_data (G_OBJECT (window), "verne-accel-controller", controller);
