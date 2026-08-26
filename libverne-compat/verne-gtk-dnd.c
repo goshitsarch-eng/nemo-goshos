@@ -211,6 +211,8 @@ static GdkDrop *pending_drop;
 static double pending_drop_x, pending_drop_y;
 static gboolean drop_already_emitted;
 
+static gboolean on_async_drop (GtkDropTargetAsync *self, GdkDrop *drop, double x, double y, gpointer data);
+
 static void
 clear_pending_drop (void)
 {
@@ -231,6 +233,7 @@ on_async_motion (GtkDropTargetAsync *self, GdkDrop *drop, double x, double y, gp
 	guint32 time = GDK_CURRENT_TIME;
 
 	(void) self;
+	g_debug ("drop dest motion at %.0f,%.0f on %s", x, y, G_OBJECT_TYPE_NAME (widget));
 	g_object_set_qdata (G_OBJECT (drop), drop_xy_quark (),
 			    GINT_TO_POINTER (((int) x & 0xffff) | (((int) y & 0xffff) << 16)));
 	g_signal_emit_by_name (widget, "drag-motion", drop, (int) x, (int) y, time, &handled);
@@ -255,6 +258,17 @@ on_async_motion (GtkDropTargetAsync *self, GdkDrop *drop, double x, double y, gp
 	pending_drop_widget = widget;
 	pending_drop_x = x;
 	pending_drop_y = y;
+	{
+		Display *dpy = GDK_DISPLAY_XDISPLAY (gdk_display_get_default ());
+		unsigned int mask = 0;
+		Window r, c;
+		int rx, ry, wx, wy;
+		if (dpy && XQueryPointer (dpy, DefaultRootWindow (dpy), &r, &c, &rx, &ry, &wx, &wy, &mask) &&
+		    !(mask & Button1Mask) && pending_drop && !drop_already_emitted) {
+			g_debug ("drop dest motion with button1 up, completing drop");
+			on_async_drop (self, drop, x, y, widget);
+		}
+	}
 	return selected;
 }
 
@@ -300,6 +314,8 @@ verne_dnd_gesture_end (GtkWidget *widget)
 	on_async_drop (NULL, pending_drop, pending_drop_x, pending_drop_y, pending_drop_widget);
 }
 
+static guint poll_ticks;
+
 static gboolean
 verne_poll_drag_release (gpointer data)
 {
@@ -308,6 +324,7 @@ verne_poll_drag_release (gpointer data)
 	Window root, child;
 	int rx, ry, wx, wy;
 	unsigned int mask = 0;
+	gboolean button1;
 
 	if (g_object_get_data (G_OBJECT (widget), "verne-active-drag") == NULL)
 		return G_SOURCE_REMOVE;
@@ -316,9 +333,19 @@ verne_poll_drag_release (gpointer data)
 		return G_SOURCE_REMOVE;
 	if (!XQueryPointer (dpy, DefaultRootWindow (dpy), &root, &child, &rx, &ry, &wx, &wy, &mask))
 		return G_SOURCE_CONTINUE;
-	if (mask & Button1Mask)
+	button1 = (mask & Button1Mask) != 0;
+	poll_ticks++;
+	if (poll_ticks <= 3 || (poll_ticks % 10) == 0)
+		g_debug ("dnd poll tick=%u button1=%d pending=%p",
+			   poll_ticks, button1, pending_drop);
+	if (button1)
 		return G_SOURCE_CONTINUE;
-	g_debug ("pointer button1 up, completing drop");
+	/* Do not complete until dest motion has given us a drop, otherwise
+	 * the first timeout (while the GdkDrag grab hides Button1) aborts
+	 * the poll before the pointer ever reaches the target. */
+	if (pending_drop == NULL || pending_drop_widget == NULL)
+		return G_SOURCE_CONTINUE;
+	g_debug ("pointer button1 up, completing drop after %u ticks", poll_ticks);
 	verne_dnd_gesture_end (widget);
 	return G_SOURCE_REMOVE;
 }
@@ -792,7 +819,9 @@ gtk_drag_begin_with_coordinates (GtkWidget *widget, GtkTargetList *targets, GdkD
 	if (drag) {
 		g_object_set_qdata (G_OBJECT (drag), source_widget_quark (), widget);
 		g_object_set_data (G_OBJECT (widget), "verne-active-drag", drag);
-		g_timeout_add (50, verne_poll_drag_release, widget);
+		poll_ticks = 0;
+		g_object_ref (widget);
+		g_timeout_add_full (G_PRIORITY_DEFAULT, 50, verne_poll_drag_release, widget, g_object_unref);
 		g_signal_connect (drag, "dnd-finished", G_CALLBACK (on_dnd_finished), widget);
 		g_signal_connect (drag, "cancel", G_CALLBACK (on_drag_cancel), widget);
 		g_signal_connect (drag, "drop-performed", G_CALLBACK (on_drop_performed), widget);

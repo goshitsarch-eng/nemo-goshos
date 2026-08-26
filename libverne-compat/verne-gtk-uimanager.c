@@ -121,6 +121,34 @@ on_toggle_action_notify_active (GtkAction *action, GParamSpec *pspec, gpointer i
 						gtk_toggle_action_get_active (GTK_TOGGLE_ACTION (action)));
 }
 
+static void
+on_action_notify_visible (GtkAction *action, GParamSpec *pspec, gpointer item)
+{
+	(void) pspec;
+	if (GTK_IS_WIDGET (item))
+		gtk_widget_set_visible (item, gtk_action_get_visible (action));
+}
+
+static void
+on_action_notify_sensitive (GtkAction *action, GParamSpec *pspec, gpointer item)
+{
+	(void) pspec;
+	if (GTK_IS_WIDGET (item))
+		gtk_widget_set_sensitive (item, gtk_action_get_sensitive (action));
+}
+
+static void
+on_action_notify_label (GtkAction *action, GParamSpec *pspec, gpointer item)
+{
+	const gchar *label;
+
+	(void) pspec;
+	if (!GTK_IS_MENU_ITEM (item))
+		return;
+	label = gtk_action_get_label (action);
+	gtk_menu_item_set_label (GTK_MENU_ITEM (item), label ? label : "");
+}
+
 static GtkWidget *
 build_menu_item_for_action (GtkUIManager *self, UiNode *node)
 {
@@ -147,6 +175,14 @@ build_menu_item_for_action (GtkUIManager *self, UiNode *node)
 		gtk_widget_set_visible (item, FALSE);
 	if (action && !gtk_action_get_sensitive (action))
 		gtk_widget_set_sensitive (item, FALSE);
+	if (action) {
+		g_signal_connect_object (action, "notify::visible",
+					 G_CALLBACK (on_action_notify_visible), item, 0);
+		g_signal_connect_object (action, "notify::sensitive",
+					 G_CALLBACK (on_action_notify_sensitive), item, 0);
+		g_signal_connect_object (action, "notify::label",
+					 G_CALLBACK (on_action_notify_label), item, 0);
+	}
 	return item;
 }
 
