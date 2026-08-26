@@ -5866,12 +5866,6 @@ nemo_icon_container_layout_now (NemoIconContainer *container)
 	gtk_container_check_resize (GTK_CONTAINER (gtk_widget_get_parent (GTK_WIDGET (container))));
 }
 
-	/* Also need to make sure we're properly resized, for instance
-	 * newly added files may trigger a change in the size allocation and
-	 * thus toggle scrollbars on */
-	gtk_container_check_resize (GTK_CONTAINER (gtk_widget_get_parent (GTK_WIDGET (container))));
-}
-
 /**
  * nemo_icon_container_remove:
  * @container: A NemoIconContainer.
