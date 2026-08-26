@@ -240,7 +240,9 @@ on_async_drop (GtkDropTargetAsync *self, GdkDrop *drop, double x, double y, gpoi
 	(void) self;
 	g_object_set_qdata (G_OBJECT (drop), drop_xy_quark (),
 			    GINT_TO_POINTER (((int) x & 0xffff) | (((int) y & 0xffff) << 16)));
+	g_debug ("drop at %.0f,%.0f on %s", x, y, G_OBJECT_TYPE_NAME (widget));
 	g_signal_emit_by_name (widget, "drag-drop", drop, (int) x, (int) y, GDK_CURRENT_TIME, &handled);
+	g_debug ("drag-drop handled=%d", handled);
 	return handled;
 }
 
@@ -374,6 +376,7 @@ drop_read_done (GObject *source, GAsyncResult *result, gpointer data)
 		sel.length = (gint) n;
 	}
 	g_signal_emit_by_name (rd->widget, "drag-data-received", rd->drop, rd->x, rd->y, &sel, rd->info, rd->time);
+	g_debug ("drag-data-received mime=%s len=%d info=%u", mime ? mime : "(null)", sel.length, rd->info);
 	g_free (sel.data);
 	g_free (rd);
 }
@@ -638,6 +641,9 @@ gtk_drag_source_get_target_list (GtkWidget *widget)
 static void
 on_dnd_finished (GdkDrag *drag, gpointer widget)
 {
+	g_debug ("dnd-finished on %s", widget ? G_OBJECT_TYPE_NAME (widget) : "?");
+	if (widget)
+		g_object_set_data (G_OBJECT (widget), "verne-active-drag", NULL);
 	g_signal_emit_by_name (widget, "drag-end", drag);
 }
 
@@ -645,8 +651,18 @@ static void
 on_drag_cancel (GdkDrag *drag, GdkDragCancelReason reason, gpointer widget)
 {
 	gboolean handled = FALSE;
+	g_debug ("drag cancel reason=%d on %s", (int) reason, widget ? G_OBJECT_TYPE_NAME (widget) : "?");
+	if (widget)
+		g_object_set_data (G_OBJECT (widget), "verne-active-drag", NULL);
 	g_signal_emit_by_name (widget, "drag-failed", drag, (int) reason, &handled);
 	g_signal_emit_by_name (widget, "drag-end", drag);
+}
+
+static void
+on_drop_performed (GdkDrag *drag, gpointer widget)
+{
+	(void) drag;
+	g_debug ("drop-performed on %s", widget ? G_OBJECT_TYPE_NAME (widget) : "?");
 }
 
 GdkDragContext *
@@ -685,8 +701,10 @@ gtk_drag_begin_with_coordinates (GtkWidget *widget, GtkTargetList *targets, GdkD
 	g_object_unref (provider);
 	if (drag) {
 		g_object_set_qdata (G_OBJECT (drag), source_widget_quark (), widget);
+		g_object_set_data (G_OBJECT (widget), "verne-active-drag", drag);
 		g_signal_connect (drag, "dnd-finished", G_CALLBACK (on_dnd_finished), widget);
 		g_signal_connect (drag, "cancel", G_CALLBACK (on_drag_cancel), widget);
+		g_signal_connect (drag, "drop-performed", G_CALLBACK (on_drop_performed), widget);
 		g_signal_emit_by_name (widget, "drag-begin", drag);
 		g_debug ("gdk_drag_begin started from %s", G_OBJECT_TYPE_NAME (widget));
 	} else {
