@@ -767,6 +767,9 @@ update_places (NemoPlacesSidebar *sidebar)
 				    &last_iter,
 				    PLACES_SIDEBAR_COLUMN_URI, &last_uri, -1);
 	}
+	/* GTK4 GtkTreeView keeps filter iters across store rebuilds and then
+	 * aborts in do_validate_rows (stamp mismatch → heap corruption). */
+	gtk_tree_view_set_model (sidebar->tree_view, NULL);
 	gtk_tree_store_clear (sidebar->store);
 
 	sidebar->devices_header_added = FALSE;
@@ -1299,6 +1302,8 @@ update_places (NemoPlacesSidebar *sidebar)
                 		   mount_uri, NULL, NULL, NULL, 0,
                 		   _("Browse the contents of the network"), 0, FALSE,
                            cat_iter);
+
+	gtk_tree_view_set_model (sidebar->tree_view, GTK_TREE_MODEL (sidebar->store_filter));
 
 	/* restore selection */
     restore_expand_state (sidebar);
@@ -3988,8 +3993,9 @@ trash_state_changed_cb (NemoTrashMonitor *trash_monitor,
 
 	sidebar = NEMO_PLACES_SIDEBAR (data);
 
-	/* The trash icon changed, update the sidebar */
-	update_places (sidebar);
+	/* The trash icon changed; rebuild on idle so we are not inside a
+	 * GtkTreeView validation pass (GTK4 stamp mismatch / heap abort). */
+	update_places_on_idle (sidebar);
 
 	reset_menu (sidebar);
 }
