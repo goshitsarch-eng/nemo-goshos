@@ -357,16 +357,28 @@ gtk_layout_size_allocate (GtkWidget *widget, int width, int height, int baseline
 {
 	GtkLayoutPrivate *priv = gtk_layout_get_instance_private (GTK_LAYOUT (widget));
 	GtkWidget *child;
-	(void) baseline; (void) width; (void) height;
+	(void) baseline;
+	(void) width;
+	(void) height;
 	for (child = gtk_widget_get_first_child (widget); child; child = gtk_widget_get_next_sibling (child)) {
 		ChildPos *pos = g_hash_table_lookup (priv->child_pos, child);
-		int cw = gtk_widget_get_width (child);
-		int ch = gtk_widget_get_height (child);
-		int x = pos ? pos->x : 0;
-		int y = pos ? pos->y : 0;
-		GskTransform *t = gsk_transform_translate (NULL, &GRAPHENE_POINT_INIT (x, y));
-		if (cw < 1) cw = 1;
-		if (ch < 1) ch = 1;
+		int min_w = 0, nat_w = 0, min_h = 0, nat_h = 0;
+		int cw, ch, x, y;
+		GskTransform *t;
+
+		if (!gtk_widget_should_layout (child))
+			continue;
+		gtk_widget_measure (child, GTK_ORIENTATION_HORIZONTAL, -1, &min_w, &nat_w, NULL, NULL);
+		cw = MAX (nat_w, min_w);
+		if (cw < 1)
+			cw = MAX (gtk_widget_get_width (child), 1);
+		gtk_widget_measure (child, GTK_ORIENTATION_VERTICAL, cw, &min_h, &nat_h, NULL, NULL);
+		ch = MAX (nat_h, min_h);
+		if (ch < 1)
+			ch = MAX (gtk_widget_get_height (child), 1);
+		x = pos ? pos->x : 0;
+		y = pos ? pos->y : 0;
+		t = gsk_transform_translate (NULL, &GRAPHENE_POINT_INIT ((float) x, (float) y));
 		gtk_widget_allocate (child, cw, ch, -1, t);
 	}
 }
@@ -426,6 +438,7 @@ gtk_layout_put (GtkLayout *layout, GtkWidget *child, gint x, gint y)
 	pos->x = x; pos->y = y;
 	gtk_widget_set_parent (child, GTK_WIDGET (layout));
 	g_hash_table_insert (priv->child_pos, child, pos);
+	gtk_widget_queue_allocate (GTK_WIDGET (layout));
 }
 
 void

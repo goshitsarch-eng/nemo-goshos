@@ -416,7 +416,12 @@ verne_gtk_image_new_from_gicon (GIcon *icon, int size)
 static inline void
 verne_gtk_widget_size_allocate (GtkWidget *widget, const GtkAllocation *allocation)
 {
-	(gtk_widget_size_allocate) (widget, allocation, -1);
+	GtkAllocation copy = *allocation;
+	if (copy.width < 1)
+		copy.width = 1;
+	if (copy.height < 1)
+		copy.height = 1;
+	(gtk_widget_size_allocate) (widget, &copy, -1);
 }
 #define gtk_widget_size_allocate(widget, allocation, ...) verne_gtk_widget_size_allocate (widget, allocation)
 
