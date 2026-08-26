@@ -1485,14 +1485,14 @@ verne_xdnd_send_drop (VerneLocalDrag *local)
 	}
 	wmclass = verne_xid_wm_class (dpy, local->xdnd_target);
 	if (verne_wm_class_is_verne_desktop (wmclass)) {
-		/* GTK4 does not deliver XDND on the transparent desktop
-		 * native to the icon canvas. Copy/move from the source so
-		 * nemo-desktop's directory monitor can show the icon.
-		 * Prefer COPY so dest is a created-file event; do not send
-		 * XdndDrop afterward or dest DnD teardown swallows the icon. */
+		/* End dest DnD first. Copying before Leave lets dest teardown
+		 * mark the new NemoFile gone, so the icon never sticks.
+		 * Prefer COPY so dest sees a created-file event. */
 		local->selected = GDK_ACTION_COPY;
-		verne_copy_uris_to_desktop (local);
 		verne_xdnd_send_leave (local);
+		verne_xdnd_pump (local);
+		g_usleep (150000);
+		verne_copy_uris_to_desktop (local);
 		local->xdnd_dropped = TRUE;
 		local->xdnd_finished = TRUE;
 		g_warning ("desktop drop finished without XdndDrop class=%s",
