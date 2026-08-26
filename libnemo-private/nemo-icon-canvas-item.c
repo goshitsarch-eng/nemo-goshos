@@ -1381,10 +1381,10 @@ draw_drop_target_overlay (NemoIconCanvasItem *icon_item,
 		box.x1 = MAX (box.x1, details->text_rect.x1);
 		box.y1 = MAX (box.y1, details->text_rect.y1);
 	}
-	box.x0 -= 4;
-	box.y0 -= 4;
-	box.x1 += 4;
-	box.y1 += 4;
+	box.x0 -= 16;
+	box.y0 -= 16;
+	box.x1 += 16;
+	box.y1 += 16;
 
 	style = gtk_widget_get_style_context (GTK_WIDGET (EEL_CANVAS_ITEM (icon_item)->canvas));
 	if (!gtk_style_context_lookup_color (style, "accent_bg_color", &accent))
@@ -1407,10 +1407,10 @@ draw_drop_target_overlay (NemoIconCanvasItem *icon_item,
 	cairo_arc (cr, x + r, y + h - r, r, G_PI_2, G_PI);
 	cairo_arc (cr, x + r, y + r, r, G_PI, 3 * G_PI_2);
 	cairo_close_path (cr);
-	cairo_set_source_rgba (cr, accent.red, accent.green, accent.blue, 0.28);
+	cairo_set_source_rgba (cr, accent.red, accent.green, accent.blue, 0.40);
 	cairo_fill_preserve (cr);
 	cairo_set_source_rgba (cr, accent.red, accent.green, accent.blue, 0.95);
-	cairo_set_line_width (cr, 3.0);
+	cairo_set_line_width (cr, 4.5);
 	cairo_stroke (cr);
 	cairo_restore (cr);
 }
