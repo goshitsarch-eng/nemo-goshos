@@ -232,6 +232,50 @@ emit_motion (GtkWidget *widget, gdouble x, gdouble y, guint state, guint32 time)
 	verne_clear_current_event ();
 }
 
+typedef struct {
+	GtkWidget *widget;
+	guint button;
+	guint state;
+	guint32 time;
+	double x;
+	double y;
+} VerneIdleClick;
+
+static gboolean
+verne_idle_second_click (gpointer data)
+{
+	VerneIdleClick *click = data;
+	GtkWidget *widget = click->widget;
+	VerneVfuncs *v;
+	GdkEvent ev;
+
+	if (GTK_IS_WIDGET (widget) && gtk_widget_get_realized (widget) &&
+	    gtk_widget_get_mapped (widget) &&
+	    g_object_get_data (G_OBJECT (widget), "verne-destroyed") == NULL) {
+		v = lookup_vfuncs_type (G_OBJECT_TYPE (widget));
+		memset (&ev, 0, sizeof (ev));
+		ev.button.type = GDK_BUTTON_PRESS;
+		ev.button.window = gtk_widget_get_window (widget);
+		ev.button.x = click->x;
+		ev.button.y = click->y;
+		ev.button.x_root = click->x;
+		ev.button.y_root = click->y;
+		ev.button.button = click->button;
+		ev.button.state = click->state;
+		ev.button.time = click->time;
+		verne_set_current_event (widget, &ev);
+		if (!emit_widget_event (widget, "button-press-event", &ev) && v && v->button_press)
+			v->button_press (widget, &ev.button);
+		ev.button.type = GDK_BUTTON_RELEASE;
+		if (!emit_widget_event (widget, "button-release-event", &ev) && v && v->button_release)
+			v->button_release (widget, &ev.button);
+		verne_clear_current_event ();
+	}
+	g_object_unref (widget);
+	g_free (click);
+	return G_SOURCE_REMOVE;
+}
+
 static void
 emit_button_press (GtkWidget *widget, GtkGestureClick *click, gint n_press, gdouble x, gdouble y)
 {
@@ -258,10 +302,31 @@ on_pressed (GtkGestureClick *click, gint n_press, gdouble x, gdouble y, gpointer
 		return;
 	/* GDK3 second-click sequence is BUTTON_PRESS then 2BUTTON_PRESS.
 	 * NemoIconContainer ignores 2BUTTON and activates from two
-	 * BUTTON_PRESS events. GTK4 GestureClick reports n_press==2 only,
-	 * so map every click to BUTTON_PRESS. */
+	 * BUTTON_PRESS events. GTK4 GestureClick reports n_press==2 only.
+	 * Run the second BUTTON_PRESS on idle so folder activate is not
+	 * nested inside the GTK4 gesture/snapshot stack. */
+	if (n_press >= 2) {
+		VerneIdleClick *pending = g_new0 (VerneIdleClick, 1);
+		GdkEvent *ge;
+
+		pending->widget = g_object_ref (widget);
+		pending->x = x;
+		pending->y = y;
+		pending->button = gtk_gesture_single_get_current_button (GTK_GESTURE_SINGLE (click));
+		ge = gtk_event_controller_get_current_event (GTK_EVENT_CONTROLLER (click));
+		if (ge) {
+			pending->state = gdk_event_get_modifier_state (ge);
+			pending->time = gdk_event_get_time (ge);
+			pending->button = gdk_button_event_get_button (ge);
+		}
+		if (pending->button == 0)
+			pending->button = 1;
+		if (pending->button == 1)
+			pending->state |= GDK_BUTTON1_MASK;
+		g_object_set_data (G_OBJECT (widget), "verne-idle-second-click", pending);
+		return;
+	}
 	emit_button_press (widget, click, 1, x, y);
-	(void) n_press;
 	/* Do not claim on press. Claiming takes a GTK4 pointer grab which
 	 * suppresses GtkEventControllerMotion, so icon/list DnD never starts.
 	 * GtkGestureDrag (grouped below) delivers button-down motion instead.
@@ -277,6 +342,15 @@ on_released (GtkGestureClick *click, gint n_press, gdouble x, gdouble y, gpointe
 
 	if (verne_pointer_event_widget (widget, x, y) != widget)
 		return;
+	if (n_press >= 2) {
+		VerneIdleClick *pending = g_object_get_data (G_OBJECT (widget), "verne-idle-second-click");
+
+		g_object_set_data (G_OBJECT (widget), "verne-idle-second-click", NULL);
+		if (pending) {
+			g_idle_add (verne_idle_second_click, pending);
+			return;
+		}
+	}
 	/* A live GdkDrag owns the pointer; synthesizing BUTTON_RELEASE here
 	 * would cancel GTK4 DND. Complete the in-process drop instead. */
 	if (g_object_get_data (G_OBJECT (widget), "verne-active-drag")) {
