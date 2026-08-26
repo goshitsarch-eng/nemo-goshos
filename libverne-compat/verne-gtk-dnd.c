@@ -1379,6 +1379,7 @@ gtk_drag_dest_set (GtkWidget *widget, GtkDestDefaults flags, const GtkTargetEntr
 	g_object_set_qdata_full (G_OBJECT (widget), dest_targets_quark (), list, (GDestroyNotify) gtk_target_list_unref);
 	formats = formats_from_entries (targets, n_targets);
 	if (async == NULL) {
+		/* gtk_drop_target_async_new () takes ownership of formats. */
 		async = gtk_drop_target_async_new (formats, actions ? actions : (GDK_ACTION_COPY | GDK_ACTION_MOVE | GDK_ACTION_LINK));
 		gtk_event_controller_set_propagation_phase (GTK_EVENT_CONTROLLER (async), GTK_PHASE_CAPTURE);
 		g_signal_connect (async, "accept", G_CALLBACK (on_async_accept), widget);
@@ -1391,9 +1392,9 @@ gtk_drag_dest_set (GtkWidget *widget, GtkDestDefaults flags, const GtkTargetEntr
 	} else {
 		gtk_drop_target_async_set_formats (async, formats);
 		gtk_drop_target_async_set_actions (async, actions ? actions : (GDK_ACTION_COPY | GDK_ACTION_MOVE | GDK_ACTION_LINK));
+		gdk_content_formats_unref (formats);
 	}
 	verne_drop_dest_register (widget);
-	gdk_content_formats_unref (formats);
 }
 
 void

@@ -1127,7 +1127,7 @@ wrap_class (VerneVfuncs *v)
 		wclass->size_allocate = wrapped_size_allocate;
 	if (v->pref_width || v->pref_height)
 		wclass->measure = wrapped_measure;
-	if (v->destroy)
+	if (v->destroy && !g_type_is_a (G_TYPE_FROM_CLASS (oclass), GTK_TYPE_WINDOW))
 		oclass->dispose = wrapped_dispose;
 	if (v->show || g_type_is_a (G_TYPE_FROM_CLASS (oclass), GTK_TYPE_WINDOW))
 		wclass->show = wrapped_show;
