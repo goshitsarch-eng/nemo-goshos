@@ -16,7 +16,7 @@ verne_compat_lib = static_library('verne-compat',
     'verne-gail.c',
     'verne-stubs.c',
   ],
-  dependencies: [ gtk, adwaita, atk, glib, gobject, gdk_pixbuf_dep, x11 ],
+  dependencies: [ gtk, adwaita, atk, glib, gobject, gdk_pixbuf_dep, x11, xi ],
   include_directories: [ rootInclude, verne_compat_inc ],
   c_args: [
     '-DG_LOG_DOMAIN="VerneCompat"',
