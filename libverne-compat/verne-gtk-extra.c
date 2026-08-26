@@ -818,9 +818,34 @@ gdk_window_get_geometry (GdkSurface *window, gint *x, gint *y, gint *width, gint
 {
 	if (x) *x = 0;
 	if (y) *y = 0;
-	if (width) *width = window ? gdk_surface_get_width (window) : 0;
-	if (height) *height = window ? gdk_surface_get_height (window) : 0;
+	if (width)
+		*width = (window && GDK_IS_SURFACE (window)) ? gdk_surface_get_width (window) : 0;
+	if (height)
+		*height = (window && GDK_IS_SURFACE (window)) ? gdk_surface_get_height (window) : 0;
 }
+
+gint
+gdk_window_get_origin (GdkSurface *window, gint *x, gint *y)
+{
+	int ox = 0, oy = 0;
+
+	if (window != NULL && GDK_IS_SURFACE (window)) {
+#ifdef GDK_WINDOWING_X11
+		if (GDK_IS_X11_SURFACE (window)) {
+			Display *dpy = gdk_x11_display_get_xdisplay (gdk_surface_get_display (window));
+			Window child = None;
+
+			XTranslateCoordinates (dpy, gdk_x11_surface_get_xid (window),
+					       DefaultRootWindow (dpy),
+					       0, 0, &ox, &oy, &child);
+		}
+#endif
+	}
+	if (x) *x = ox;
+	if (y) *y = oy;
+	return 1;
+}
+
 void gdk_window_get_position (GdkSurface *window, gint *x, gint *y)
 {
 	(void) window;

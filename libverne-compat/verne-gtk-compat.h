@@ -1308,7 +1308,7 @@ typedef enum {
 #define gdk_window_move_resize(w, x, y, width, height) ((void)0)
 #define gdk_app_launch_context_set_screen(c, s) ((void)0)
 #define gtk_widget_get_parent_window(w) ((w) && gtk_widget_get_parent (w) ? gtk_widget_get_window (gtk_widget_get_parent (w)) : gtk_widget_get_window (w))
-#define gdk_window_get_origin(w, x, y) G_STMT_START { if (x) *(x)=0; if (y) *(y)=0; } G_STMT_END
+gint gdk_window_get_origin (GdkSurface *window, gint *x, gint *y);
 #define gdk_window_get_toplevel(w) (w)
 #define gdk_cairo_get_clip_rectangle(cr, r) verne_gdk_cairo_get_clip_rectangle (cr, r)
 #define gtk_style_context_get_background_color(ctx, state, rgba) G_STMT_START { if (rgba) { (rgba)->red=1; (rgba)->green=1; (rgba)->blue=1; (rgba)->alpha=1; } } G_STMT_END
