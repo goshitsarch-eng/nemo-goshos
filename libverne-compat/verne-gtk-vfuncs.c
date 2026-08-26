@@ -1703,10 +1703,15 @@ gtk_icon_size_lookup (GtkIconSize size, gint *width, gint *height)
 gboolean
 gtk_show_uri_on_window (GtkWindow *parent, const char *uri, guint32 timestamp, GError **error)
 {
-	GtkUriLauncher *launcher = gtk_uri_launcher_new (uri);
+	(void) parent;
 	(void) timestamp;
-	gtk_uri_launcher_launch (launcher, parent, NULL, NULL, NULL);
-	g_object_unref (launcher);
-	(void) error;
-	return TRUE;
+	if (uri == NULL || uri[0] == '\0') {
+		g_set_error (error, G_IO_ERROR, G_IO_ERROR_INVALID_ARGUMENT,
+			     "Missing URI");
+		return FALSE;
+	}
+	/* GTK3 gtk_show_uri was synchronous and filled GError so Help (F1)
+	 * could show a dialog. GtkUriLauncher is async and uses the portal,
+	 * which is disabled in this environment and swallowed failures. */
+	return g_app_info_launch_default_for_uri (uri, NULL, error);
 }

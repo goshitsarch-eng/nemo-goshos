@@ -9,9 +9,8 @@ static GHashTable *clipboards;
 
 static void gtk_clipboard_class_init (GtkClipboardClass *c)
 {
+	/* Hyphens and underscores are the same GObject signal name. */
 	g_signal_new ("owner-change", G_TYPE_FROM_CLASS (c), G_SIGNAL_RUN_FIRST,
-		      0, NULL, NULL, NULL, G_TYPE_NONE, 1, G_TYPE_POINTER);
-	g_signal_new ("owner_change", G_TYPE_FROM_CLASS (c), G_SIGNAL_RUN_FIRST,
 		      0, NULL, NULL, NULL, G_TYPE_NONE, 1, G_TYPE_POINTER);
 }
 static void gtk_clipboard_init (GtkClipboard *c) { (void) c; }
