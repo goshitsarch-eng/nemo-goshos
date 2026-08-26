@@ -216,12 +216,14 @@ typedef struct _VerneLocalDrag {
 	GtkWidget *icon_window;
 	GtkWidget *picture;
 	GtkWidget *current_dest;
+	GdkDrag *native_drag;
 	double dest_x;
 	double dest_y;
 	int hot_x;
 	int hot_y;
 	guint poll_id;
 	gboolean drop_emitted;
+	gboolean handed_over;
 } VerneLocalDrag;
 
 typedef struct _VerneLocalDragClass {
@@ -249,6 +251,11 @@ verne_local_drag_finalize (GObject *object)
 	if (self->targets) {
 		gtk_target_list_unref (self->targets);
 		self->targets = NULL;
+	}
+	if (self->native_drag) {
+		g_signal_handlers_disconnect_by_data (self->native_drag, self);
+		g_object_unref (self->native_drag);
+		self->native_drag = NULL;
 	}
 	G_OBJECT_CLASS (verne_local_drag_parent_class)->finalize (object);
 }
@@ -503,6 +510,10 @@ verne_local_cleanup (VerneLocalDrag *local)
 	}
 	if (source)
 		g_object_set_data (G_OBJECT (source), "verne-active-drag", NULL);
+	if (local->native_drag) {
+		g_signal_handlers_disconnect_by_data (local->native_drag, local);
+		g_clear_object (&local->native_drag);
+	}
 	g_object_unref (local);
 }
 
@@ -538,6 +549,133 @@ verne_local_emit_drop (VerneLocalDrag *local)
 }
 
 static gboolean
+verne_pointer_over_own_toplevel (VerneLocalDrag *local)
+{
+	GdkSeat *seat;
+	GdkDevice *device;
+	GList *toplevels, *l;
+
+	seat = gdk_display_get_default_seat (gdk_display_get_default ());
+	device = seat ? gdk_seat_get_pointer (seat) : NULL;
+	if (device == NULL)
+		return TRUE;
+
+	toplevels = gtk_window_list_toplevels ();
+	for (l = toplevels; l; l = l->next) {
+		GtkWidget *win = l->data;
+		GtkNative *native;
+		GdkSurface *surface;
+		double sx = 0, sy = 0;
+		int sw, sh;
+
+		if (win == local->icon_window)
+			continue;
+		native = GTK_NATIVE (win);
+		surface = gtk_native_get_surface (native);
+		if (surface == NULL)
+			continue;
+		gdk_surface_get_device_position (surface, device, &sx, &sy, NULL);
+		sw = gdk_surface_get_width (surface);
+		sh = gdk_surface_get_height (surface);
+		if (sx >= 0 && sy >= 0 && sx < sw && sy < sh) {
+			g_list_free (toplevels);
+			return TRUE;
+		}
+	}
+	g_list_free (toplevels);
+	return FALSE;
+}
+
+static void
+verne_native_drag_finished (GdkDrag *drag, gpointer data)
+{
+	VerneLocalDrag *local = data;
+	GtkWidget *source = local->source;
+
+	(void) drag;
+	if (local->drop_emitted)
+		return;
+	local->drop_emitted = TRUE;
+	g_warning ("native XDND finished");
+	if (source)
+		g_signal_emit_by_name (source, "drag-end", local);
+	verne_local_cleanup (local);
+}
+
+static void
+verne_native_drag_cancel (GdkDrag *drag, GdkDragCancelReason reason, gpointer data)
+{
+	VerneLocalDrag *local = data;
+	GtkWidget *source = local->source;
+	gboolean handled = FALSE;
+
+	(void) drag;
+	g_warning ("native XDND cancel reason=%d", (int) reason);
+	if (local->drop_emitted)
+		return;
+	local->drop_emitted = TRUE;
+	if (source) {
+		g_signal_emit_by_name (source, "drag-failed", local, 0, &handled);
+		g_signal_emit_by_name (source, "drag-end", local);
+	}
+	verne_local_cleanup (local);
+}
+
+static void
+verne_local_handover_native (VerneLocalDrag *local)
+{
+	GtkNative *native;
+	GdkSurface *surface;
+	GdkSeat *seat;
+	GdkDevice *device;
+	GdkContentProvider *provider;
+	VerneContentProvider *vp;
+	GdkDrag *drag;
+	GdkPaintable *paintable = NULL;
+
+	if (local->handed_over || local->source == NULL)
+		return;
+	native = gtk_widget_get_native (local->source);
+	surface = native ? gtk_native_get_surface (native) : NULL;
+	seat = gdk_display_get_default_seat (gdk_display_get_default ());
+	device = seat ? gdk_seat_get_pointer (seat) : NULL;
+	if (surface == NULL || device == NULL)
+		return;
+
+	provider = verne_content_provider_new_for_widget (local->source, local->targets);
+	vp = (VerneContentProvider *) provider;
+	drag = gdk_drag_begin (surface, device, provider, local->actions, 0, 0);
+	if (drag == NULL) {
+		g_warning ("gdk_drag_begin failed, staying local");
+		g_object_unref (provider);
+		return;
+	}
+	vp->drag = drag;
+	g_object_unref (provider);
+	g_object_set_qdata (G_OBJECT (drag), source_widget_quark (), local->source);
+
+	if (local->picture)
+		paintable = gtk_picture_get_paintable (GTK_PICTURE (local->picture));
+	if (paintable)
+		gtk_drag_icon_set_from_paintable (drag, paintable, local->hot_x, local->hot_y);
+
+	local->native_drag = drag;
+	local->handed_over = TRUE;
+	if (local->poll_id) {
+		g_source_remove (local->poll_id);
+		local->poll_id = 0;
+	}
+	if (local->icon_window) {
+		gtk_window_destroy (GTK_WINDOW (local->icon_window));
+		local->icon_window = NULL;
+		local->picture = NULL;
+	}
+	g_signal_connect (drag, "cancel", G_CALLBACK (verne_native_drag_cancel), local);
+	g_signal_connect (drag, "dnd-finished", G_CALLBACK (verne_native_drag_finished), local);
+	g_warning ("handed local drag over to native XDND");
+}
+
+static gboolean
 verne_local_poll (gpointer data)
 {
 	GtkWidget *source = data;
@@ -546,10 +684,15 @@ verne_local_poll (gpointer data)
 	if (!GTK_IS_WIDGET (source))
 		return G_SOURCE_REMOVE;
 	local = g_object_get_data (G_OBJECT (source), "verne-active-drag");
-	if (local == NULL || !VERNE_IS_LOCAL_DRAG (local) || local->drop_emitted)
+	if (local == NULL || !VERNE_IS_LOCAL_DRAG (local) || local->drop_emitted || local->handed_over)
 		return G_SOURCE_REMOVE;
 	verne_local_move_icon (local);
 	verne_local_update_dest (local);
+	if (local->current_dest == NULL && !verne_pointer_over_own_toplevel (local)) {
+		verne_local_handover_native (local);
+		if (local->handed_over)
+			return G_SOURCE_REMOVE;
+	}
 	if (!verne_local_button1_down ()) {
 		local->poll_id = 0;
 		g_warning ("local DnD poll saw button1 up, dropping");
