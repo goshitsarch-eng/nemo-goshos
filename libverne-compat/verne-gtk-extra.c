@@ -1195,9 +1195,17 @@ verne_paint_tree_dest_row (GtkTreeView *tree_view, GtkSnapshot *snapshot)
 		return;
 
 	gtk_tree_view_get_background_area (tree_view, row->path, NULL, &rect);
+	if (rect.width < 2 || rect.height < 2) {
+		GtkTreeViewColumn *col = gtk_tree_view_get_column (tree_view, 0);
+
+		if (col)
+			gtk_tree_view_get_cell_area (tree_view, row->path, col, &rect);
+	}
 	gtk_tree_view_convert_bin_window_to_widget_coords (tree_view, rect.x, rect.y, &wx, &wy);
-	rect.x = wx;
-	rect.y = wy;
+	if (wx >= -40 && wy >= -40) {
+		rect.x = wx;
+		rect.y = wy;
+	}
 	if (rect.width < 2 || rect.height < 2)
 		return;
 
@@ -1222,9 +1230,9 @@ verne_paint_tree_dest_row (GtkTreeView *tree_view, GtkSnapshot *snapshot)
 		cairo_line_to (cr, rect.x + rect.width - 4, y + 0.5);
 		cairo_stroke (cr);
 	} else {
-		x = rect.x + 2;
+		x = 2;
 		y = rect.y + 1;
-		w = MAX (rect.width - 4, 4);
+		w = MAX (ww - 4, 4);
 		h = MAX (rect.height - 2, 4);
 		r = MIN (6.0, h / 2.0);
 		cairo_new_sub_path (cr);
@@ -1233,10 +1241,10 @@ verne_paint_tree_dest_row (GtkTreeView *tree_view, GtkSnapshot *snapshot)
 		cairo_arc (cr, x + r, y + h - r, r, G_PI_2, G_PI);
 		cairo_arc (cr, x + r, y + r, r, G_PI, 3 * G_PI_2);
 		cairo_close_path (cr);
-		cairo_set_source_rgba (cr, accent.red, accent.green, accent.blue, 0.32);
+		cairo_set_source_rgba (cr, accent.red, accent.green, accent.blue, 0.45);
 		cairo_fill_preserve (cr);
 		cairo_set_source_rgba (cr, accent.red, accent.green, accent.blue, 0.95);
-		cairo_set_line_width (cr, 2.5);
+		cairo_set_line_width (cr, 3.0);
 		cairo_stroke (cr);
 	}
 	cairo_restore (cr);
@@ -1295,15 +1303,30 @@ verne_gtk_tree_view_set_drag_dest_row (GtkTreeView *tree_view, GtkTreePath *path
 		return;
 	verne_tree_view_hook_snapshot (tree_view);
 	if (path == NULL) {
+		if (g_object_get_qdata (G_OBJECT (tree_view), verne_tree_dest_quark ()) != NULL)
+			g_warning ("tree dest row cleared widget=%s", G_OBJECT_TYPE_NAME (tree_view));
 		g_object_set_qdata (G_OBJECT (tree_view), verne_tree_dest_quark (), NULL);
 		gtk_widget_queue_draw (GTK_WIDGET (tree_view));
 		return;
+	}
+	{
+		VerneTreeDestRow *prev;
+		char *ps = gtk_tree_path_to_string (path);
+
+		prev = g_object_get_qdata (G_OBJECT (tree_view), verne_tree_dest_quark ());
+		if (prev == NULL || prev->pos != pos || prev->path == NULL ||
+		    gtk_tree_path_compare (prev->path, path) != 0)
+			g_warning ("tree dest row widget=%s path=%s pos=%d",
+				   G_OBJECT_TYPE_NAME (tree_view), ps ? ps : "?", (int) pos);
+		g_free (ps);
 	}
 	row = g_new0 (VerneTreeDestRow, 1);
 	row->path = gtk_tree_path_copy (path);
 	row->pos = pos;
 	g_object_set_qdata_full (G_OBJECT (tree_view), verne_tree_dest_quark (), row, verne_tree_dest_free);
 	gtk_widget_queue_draw (GTK_WIDGET (tree_view));
+	if (gtk_widget_get_parent (GTK_WIDGET (tree_view)))
+		gtk_widget_queue_draw (gtk_widget_get_parent (GTK_WIDGET (tree_view)));
 }
 
 void

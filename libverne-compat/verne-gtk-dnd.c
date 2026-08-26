@@ -1021,24 +1021,37 @@ verne_find_xdnd_in_tree (Display *dpy, Window w)
 }
 
 static void
+verne_skip_add_native (GHashTable *skip, GtkWidget *widget)
+{
+	GtkNative *native;
+	GdkSurface *surf;
+
+	if (widget == NULL)
+		return;
+	native = gtk_widget_get_native (widget);
+	surf = native ? gtk_native_get_surface (native) : NULL;
+	if (surf)
+		g_hash_table_add (skip, GUINT_TO_POINTER (gdk_x11_surface_get_xid (surf)));
+}
+
+static void
 verne_xdnd_collect_skip (GHashTable *skip, VerneLocalDrag *local)
 {
 	GList *toplevels, *l;
 
 	if (local->xdnd_source)
 		g_hash_table_add (skip, GUINT_TO_POINTER (local->xdnd_source));
-	if (local->icon_window) {
-		GtkNative *native = gtk_widget_get_native (local->icon_window);
-		GdkSurface *surf = native ? gtk_native_get_surface (native) : NULL;
-		if (surf)
-			g_hash_table_add (skip, GUINT_TO_POINTER (gdk_x11_surface_get_xid (surf)));
-	}
+	verne_skip_add_native (skip, local->icon_window);
+	verne_skip_add_native (skip, local->source);
+	/* Skip dummy 1×1 natives only. Other same-process windows (a second
+	 * file window) must remain XDND targets; skipping every toplevel
+	 * sent those drops through to nemo-desktop underneath. */
 	toplevels = gtk_window_list_toplevels ();
 	for (l = toplevels; l; l = l->next) {
-		GtkNative *native = GTK_NATIVE (l->data);
-		GdkSurface *surf = native ? gtk_native_get_surface (native) : NULL;
-		if (surf)
-			g_hash_table_add (skip, GUINT_TO_POINTER (gdk_x11_surface_get_xid (surf)));
+		GtkWidget *win = l->data;
+
+		if (gtk_widget_get_width (win) <= 1 || gtk_widget_get_height (win) <= 1)
+			verne_skip_add_native (skip, win);
 	}
 	g_list_free (toplevels);
 }
@@ -1634,22 +1647,30 @@ verne_local_poll (gpointer data)
 	}
 	if (local->handed_over) {
 		verne_local_move_icon (local);
-		verne_xdnd_pump (local);
-		if (local->xdnd_finished) {
-			local->poll_id = 0;
-			local->drop_emitted = TRUE;
-			g_signal_emit_by_name (source, "drag-end", local);
-			verne_local_cleanup (local);
-			return G_SOURCE_REMOVE;
-		}
-		if (!local->xdnd_dropped) {
-			if (!verne_local_button1_down ()) {
-				verne_xdnd_send_drop (local);
-			} else {
-				verne_xdnd_send_position (local);
+		if (!verne_pointer_over_own_toplevel (local)) {
+			verne_xdnd_pump (local);
+			if (local->xdnd_finished) {
+				local->poll_id = 0;
+				local->drop_emitted = TRUE;
+				g_signal_emit_by_name (source, "drag-end", local);
+				verne_local_cleanup (local);
+				return G_SOURCE_REMOVE;
 			}
+			if (!local->xdnd_dropped) {
+				if (!verne_local_button1_down ()) {
+					verne_xdnd_send_drop (local);
+				} else {
+					verne_xdnd_send_position (local);
+				}
+			}
+			return G_SOURCE_CONTINUE;
 		}
-		return G_SOURCE_CONTINUE;
+		if (local->xdnd_target != None) {
+			g_warning ("reclaiming local drag from XDND target=0x%lx",
+				   (unsigned long) local->xdnd_target);
+			verne_xdnd_send_leave (local);
+		}
+		local->handed_over = FALSE;
 	}
 	verne_local_move_icon (local);
 	verne_local_update_dest (local);
