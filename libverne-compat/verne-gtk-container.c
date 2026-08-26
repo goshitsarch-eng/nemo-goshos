@@ -399,8 +399,16 @@ static GMainLoop *dialog_loop;
 static void
 dialog_response_cb (GtkDialog *dialog, gint response, gpointer data)
 {
-	(void) dialog;
 	(void) data;
+	if (response == GTK_RESPONSE_ACCEPT && GTK_IS_FILE_CHOOSER (dialog)) {
+		GtkFileFilter *filter = gtk_file_chooser_get_filter (GTK_FILE_CHOOSER (dialog));
+		GFile *file = gtk_file_chooser_get_file (GTK_FILE_CHOOSER (dialog));
+		gboolean ok = verne_file_filter_accepts_file (filter, file);
+		if (file)
+			g_object_unref (file);
+		if (!ok)
+			return;
+	}
 	dialog_response = response;
 	if (dialog_loop)
 		g_main_loop_quit (dialog_loop);

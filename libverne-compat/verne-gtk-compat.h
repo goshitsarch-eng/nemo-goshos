@@ -1635,6 +1635,7 @@ typedef struct {
 } GtkFileFilterInfo;
 typedef gboolean (*GtkFileFilterFunc) (const GtkFileFilterInfo *info, gpointer data);
 void gtk_file_filter_add_custom (GtkFileFilter *filter, GtkFileFilterFlags needed, GtkFileFilterFunc func, gpointer data, GDestroyNotify notify);
+gboolean verne_file_filter_accepts_file (GtkFileFilter *filter, GFile *file);
 gchar *gtk_file_chooser_get_filename (GtkFileChooser *chooser);
 GdkSurface *gdk_device_get_window_at_position (GdkDevice *device, gint *x, gint *y);
 void gdk_window_set_background_rgba (GdkSurface *window, const GdkRGBA *rgba);

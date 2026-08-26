@@ -1581,13 +1581,96 @@ gtk_icon_info_get_filename (gpointer info)
 }
 GtkIconSize gtk_icon_size_from_name (const gchar *name) { (void) name; return GTK_ICON_SIZE_NORMAL; }
 
+typedef struct {
+	GtkFileFilterFunc func;
+	gpointer data;
+	GDestroyNotify notify;
+	GtkFileFilterFlags needed;
+} VerneCustomFilter;
+
+static void
+verne_custom_filter_free (gpointer p)
+{
+	VerneCustomFilter *c = p;
+	if (c->notify)
+		c->notify (c->data);
+	g_free (c);
+}
+
+static GQuark
+verne_custom_filter_quark (void)
+{
+	static GQuark q;
+	if (q == 0)
+		q = g_quark_from_static_string ("verne-custom-file-filter");
+	return q;
+}
+
 void
 gtk_file_filter_add_custom (GtkFileFilter *filter, GtkFileFilterFlags needed, GtkFileFilterFunc func, gpointer data, GDestroyNotify notify)
 {
-	(void) needed; (void) func;
-	if (notify && data)
-		notify (data);
+	VerneCustomFilter *c;
+
+	if (filter == NULL)
+		return;
+	c = g_new0 (VerneCustomFilter, 1);
+	c->func = func;
+	c->data = data;
+	c->notify = notify;
+	c->needed = needed;
+	g_object_set_qdata_full (G_OBJECT (filter), verne_custom_filter_quark (), c, verne_custom_filter_free);
+	/* GTK4 GtkFileFilter has no custom hook for the listing; keep files visible
+	 * and enforce the callback when the chooser accepts a selection. */
 	gtk_file_filter_add_pattern (filter, "*");
+}
+
+gboolean
+verne_file_filter_accepts_file (GtkFileFilter *filter, GFile *file)
+{
+	VerneCustomFilter *c;
+	GtkFileFilterInfo info = { 0 };
+	gchar *filename = NULL;
+	gchar *uri = NULL;
+	gchar *display = NULL;
+	gchar *mime = NULL;
+	gboolean ok = TRUE;
+
+	if (filter == NULL || file == NULL)
+		return TRUE;
+	c = g_object_get_qdata (G_OBJECT (filter), verne_custom_filter_quark ());
+	if (c == NULL || c->func == NULL)
+		return TRUE;
+	if (c->needed & GTK_FILE_FILTER_FILENAME) {
+		filename = g_file_get_path (file);
+		info.filename = filename;
+		info.contains |= GTK_FILE_FILTER_FILENAME;
+	}
+	if (c->needed & GTK_FILE_FILTER_URI) {
+		uri = g_file_get_uri (file);
+		info.uri = uri;
+		info.contains |= GTK_FILE_FILTER_URI;
+	}
+	if (c->needed & GTK_FILE_FILTER_DISPLAY_NAME) {
+		display = g_file_get_basename (file);
+		info.display_name = display;
+		info.contains |= GTK_FILE_FILTER_DISPLAY_NAME;
+	}
+	if (c->needed & GTK_FILE_FILTER_MIME_TYPE) {
+		GFileInfo *fi = g_file_query_info (file, G_FILE_ATTRIBUTE_STANDARD_CONTENT_TYPE,
+						     G_FILE_QUERY_INFO_NONE, NULL, NULL);
+		if (fi) {
+			mime = g_strdup (g_file_info_get_content_type (fi));
+			g_object_unref (fi);
+		}
+		info.mime_type = mime;
+		info.contains |= GTK_FILE_FILTER_MIME_TYPE;
+	}
+	ok = c->func (&info, c->data);
+	g_free (filename);
+	g_free (uri);
+	g_free (display);
+	g_free (mime);
+	return ok;
 }
 
 gchar *
