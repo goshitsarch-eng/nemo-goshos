@@ -11,6 +11,7 @@
 #include <graphene.h>
 #include <X11/Xlib.h>
 #include <X11/Xatom.h>
+#include <X11/Xutil.h>
 
 static GQuark
 dest_quark (void)
@@ -271,6 +272,7 @@ typedef struct _VerneLocalDrag {
 	gboolean xdnd_finished;
 	gboolean xdnd_created_window;
 	gboolean dest_finished;
+	gboolean xdnd_served_data;
 } VerneLocalDrag;
 
 typedef struct _VerneLocalDragClass {
@@ -871,10 +873,77 @@ verne_xdnd_collect_skip (GHashTable *skip, VerneLocalDrag *local)
 	g_list_free (toplevels);
 }
 
+static gchar *
+verne_xid_wm_class (Display *dpy, Window w)
+{
+	XClassHint hint = { 0 };
+	Window root = None, parent = None, cur = w, *children = NULL;
+	unsigned int nchild = 0;
+	gchar *out = NULL;
+	int hops;
+
+	gdk_x11_display_error_trap_push (gdk_display_get_default ());
+	for (hops = 0; hops < 16 && cur != None; hops++) {
+		if (XGetClassHint (dpy, cur, &hint)) {
+			const char *a = hint.res_class ? hint.res_class : "";
+			const char *b = hint.res_name ? hint.res_name : "";
+			out = g_strdup_printf ("%s %s", a, b);
+			if (hint.res_name)
+				XFree (hint.res_name);
+			if (hint.res_class)
+				XFree (hint.res_class);
+			break;
+		}
+		children = NULL;
+		nchild = 0;
+		if (!XQueryTree (dpy, cur, &root, &parent, &children, &nchild))
+			break;
+		if (children)
+			XFree (children);
+		if (parent == None || parent == cur || parent == root)
+			break;
+		cur = parent;
+	}
+	gdk_x11_display_error_trap_pop_ignored (gdk_display_get_default ());
+	return out;
+}
+
+static gboolean
+verne_wm_class_is_verne_desktop (const gchar *wmclass)
+{
+	gchar *folded;
+	gboolean match;
+
+	if (wmclass == NULL || wmclass[0] == '\0')
+		return FALSE;
+	folded = g_ascii_strdown (wmclass, -1);
+	match = strstr (folded, "nemo-desktop") != NULL ||
+		strstr (folded, "verne-desktop") != NULL;
+	g_free (folded);
+	return match;
+}
+
+static gboolean
+verne_wm_class_is_foreign_desktop (const gchar *wmclass)
+{
+	gchar *folded;
+	gboolean match;
+
+	if (wmclass == NULL || wmclass[0] == '\0')
+		return FALSE;
+	folded = g_ascii_strdown (wmclass, -1);
+	match = strstr (folded, "xfdesktop") != NULL ||
+		strstr (folded, "nautilus-desktop") != NULL ||
+		strstr (folded, "pcmanfm") != NULL;
+	g_free (folded);
+	return match;
+}
+
 static Window
 verne_xdnd_target_at_pointer (Display *dpy, VerneLocalDrag *local, int *root_x, int *root_y)
 {
-	Window root, root_ret, parent, *children = NULL, target = None;
+	Window root, root_ret, parent, *children = NULL;
+	Window target = None, fallback = None, desktop = None;
 	int rx = 0, ry = 0, wx = 0, wy = 0;
 	unsigned int mask = 0, nchild = 0, i;
 	GHashTable *skip;
@@ -894,7 +963,9 @@ verne_xdnd_target_at_pointer (Display *dpy, VerneLocalDrag *local, int *root_x, 
 	}
 	for (i = nchild; i > 0; i--) {
 		Window w = children[i - 1];
+		Window found;
 		XWindowAttributes attr;
+		gchar *wmclass;
 
 		if (!XGetWindowAttributes (dpy, w, &attr) || attr.map_state != IsViewable)
 			continue;
@@ -902,13 +973,32 @@ verne_xdnd_target_at_pointer (Display *dpy, VerneLocalDrag *local, int *root_x, 
 			continue;
 		if (verne_tree_contains_xid (dpy, w, skip))
 			continue;
-		target = verne_find_xdnd_in_tree (dpy, w);
-		if (target != None)
+		found = verne_find_xdnd_in_tree (dpy, w);
+		if (found == None)
+			continue;
+		wmclass = verne_xid_wm_class (dpy, found);
+		if (verne_wm_class_is_verne_desktop (wmclass)) {
+			desktop = found;
+			g_free (wmclass);
+			break;
+		}
+		if (target == None) {
+			if (verne_wm_class_is_foreign_desktop (wmclass))
+				fallback = found;
+			else
+				target = found;
+		}
+		g_free (wmclass);
+		if (target != None && desktop != None)
 			break;
 	}
 	XFree (children);
 	g_hash_table_destroy (skip);
-	return target;
+	if (desktop != None)
+		return desktop;
+	if (target != None)
+		return target;
+	return fallback;
 }
 
 static void
@@ -1048,6 +1138,8 @@ verne_xdnd_handle_selection_request (VerneLocalDrag *local, const XSelectionRequ
 					 sel.format ? sel.format : 8, PropModeReplace,
 					 sel.data, sel.length);
 			success = TRUE;
+			local->xdnd_served_data = TRUE;
+			local->xdnd_accepted = TRUE;
 		}
 		g_free (sel.data);
 	}
@@ -1128,14 +1220,30 @@ verne_xdnd_finish_timeout (gpointer data)
 	if (local->drop_emitted)
 		return G_SOURCE_REMOVE;
 	local->drop_emitted = TRUE;
-	g_warning ("xdnd finish timeout, accepted=%d", local->xdnd_accepted);
+	g_warning ("xdnd finish timeout, accepted=%d served=%d",
+		   local->xdnd_accepted, local->xdnd_served_data);
 	if (source) {
-		if (!local->xdnd_accepted)
+		if (!local->xdnd_accepted && !local->xdnd_served_data)
 			g_signal_emit_by_name (source, "drag-failed", local, 0, &handled);
 		g_signal_emit_by_name (source, "drag-end", local);
 	}
 	verne_local_cleanup (local);
 	return G_SOURCE_REMOVE;
+}
+
+static void
+verne_xdnd_wait_status (VerneLocalDrag *local, int timeout_ms)
+{
+	gint64 deadline;
+
+	deadline = g_get_monotonic_time () + (gint64) timeout_ms * 1000;
+	while (g_get_monotonic_time () < deadline) {
+		verne_xdnd_pump (local);
+		if (local->xdnd_accepted || local->xdnd_finished)
+			return;
+		g_usleep (2000);
+	}
+	verne_xdnd_pump (local);
 }
 
 static void
@@ -1147,6 +1255,7 @@ verne_xdnd_send_drop (VerneLocalDrag *local)
 	if (local->xdnd_target == None)
 		verne_xdnd_send_position (local);
 	verne_xdnd_pump (local);
+	verne_xdnd_wait_status (local, 350);
 	if (local->xdnd_target == None || local->xdnd_source == None) {
 		g_warning ("XdndDrop skipped, no target");
 		return;
@@ -1156,9 +1265,13 @@ verne_xdnd_send_drop (VerneLocalDrag *local)
 				   XInternAtom (dpy, "XdndDrop", False),
 				   (long) local->xdnd_source, 0, (long) time, 0, 0);
 	local->xdnd_dropped = TRUE;
-	g_warning ("sent XdndDrop to 0x%lx from 0x%lx accepted=%d",
-		   (unsigned long) local->xdnd_target, (unsigned long) local->xdnd_source,
-		   local->xdnd_accepted);
+	{
+		gchar *wmclass = verne_xid_wm_class (dpy, local->xdnd_target);
+		g_warning ("sent XdndDrop to 0x%lx from 0x%lx accepted=%d class=%s",
+			   (unsigned long) local->xdnd_target, (unsigned long) local->xdnd_source,
+			   local->xdnd_accepted, wmclass ? wmclass : "?");
+		g_free (wmclass);
+	}
 	if (local->xdnd_finish_timeout)
 		g_source_remove (local->xdnd_finish_timeout);
 	local->xdnd_finish_timeout = g_timeout_add_seconds (3, verne_xdnd_finish_timeout, local);

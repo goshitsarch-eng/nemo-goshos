@@ -244,6 +244,13 @@ progress_ui_handler_ensure_window (NemoProgressUIHandler *self)
     gtk_widget_show_all (main_box);
     gtk_widget_set_visible (progress_window, TRUE);
 
+	{
+		GtkApplication *app = GTK_APPLICATION (g_application_get_default ());
+		if (app != NULL)
+			gtk_application_add_window (app, GTK_WINDOW (progress_window));
+	}
+	gtk_window_present (GTK_WINDOW (progress_window));
+
 	gtk_window_set_hide_on_close (GTK_WINDOW (progress_window), TRUE);
 	g_signal_connect (progress_window,
 			  "delete-event",
