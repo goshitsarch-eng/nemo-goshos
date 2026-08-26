@@ -1168,7 +1168,7 @@ static inline GtkWidget *
 verne_gtk_button_new_from_icon_name (const char *name, int size)
 {
 	(void) size;
-	return (gtk_button_new_from_icon_name) (name);
+	return (gtk_button_new_from_icon_name) (verne_map_icon_name (name));
 }
 #define gtk_button_new_from_icon_name(name, size) verne_gtk_button_new_from_icon_name (name, size)
 
