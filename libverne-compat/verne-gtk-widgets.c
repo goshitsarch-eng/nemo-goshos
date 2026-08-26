@@ -1182,6 +1182,7 @@ typedef struct {
 	guint key;
 	GdkModifierType mods;
 	GtkAction *action;
+	GtkAccelGroup *group;
 } VerneAccelEntry;
 
 typedef struct _GtkAccelGroupClass { GObjectClass parent_class; } GtkAccelGroupClass;
@@ -1191,11 +1192,31 @@ struct _GtkAccelGroup {
 };
 
 static void
+verne_accel_entry_on_action_gone (gpointer data, GObject *dead)
+{
+	GtkAccelGroup *group = data;
+	guint i;
+
+	if (group == NULL || group->entries == NULL)
+		return;
+	for (i = group->entries->len; i-- > 0; ) {
+		VerneAccelEntry *e = g_ptr_array_index (group->entries, i);
+		if ((GObject *) e->action == dead) {
+			e->action = NULL;
+			g_ptr_array_remove_index (group->entries, i);
+		}
+	}
+}
+
+static void
 verne_accel_entry_free (gpointer data)
 {
 	VerneAccelEntry *e = data;
-	if (e->action)
-		g_object_unref (e->action);
+
+	if (e->action) {
+		g_object_weak_unref (G_OBJECT (e->action), verne_accel_entry_on_action_gone, e->group);
+		e->action = NULL;
+	}
 	g_free (e);
 }
 
@@ -1240,8 +1261,24 @@ verne_accel_group_connect_action (GtkAccelGroup *group, GtkAction *action, const
 	e = g_new0 (VerneAccelEntry, 1);
 	e->key = key;
 	e->mods = mods;
-	e->action = g_object_ref (action);
+	e->action = action;
+	e->group = group;
+	g_object_weak_ref (G_OBJECT (action), verne_accel_entry_on_action_gone, group);
 	g_ptr_array_add (group->entries, e);
+}
+
+void
+verne_accel_group_disconnect_action (GtkAccelGroup *group, GtkAction *action)
+{
+	guint i;
+
+	if (group == NULL || group->entries == NULL || action == NULL)
+		return;
+	for (i = group->entries->len; i-- > 0; ) {
+		VerneAccelEntry *e = g_ptr_array_index (group->entries, i);
+		if (e->action == action)
+			g_ptr_array_remove_index (group->entries, i);
+	}
 }
 
 static gboolean
@@ -1251,18 +1288,21 @@ verne_accel_key_pressed (GtkEventControllerKey *self, guint keyval, guint keycod
 	GtkAccelGroup *group = data;
 	guint key = gdk_keyval_to_lower (keyval);
 	GdkModifierType mods = state & (GDK_CONTROL_MASK | GDK_ALT_MASK | GDK_SHIFT_MASK | GDK_SUPER_MASK);
-	guint i;
+	gint i;
 
 	(void) self;
 	(void) keycode;
 	if (group == NULL || group->entries == NULL)
 		return FALSE;
-	for (i = 0; i < group->entries->len; i++) {
+	/* Newest bindings first so a live view wins over a stale one. */
+	for (i = (gint) group->entries->len - 1; i >= 0; i--) {
 		VerneAccelEntry *e = g_ptr_array_index (group->entries, i);
-		if (e->key == key && e->mods == mods && e->action && gtk_action_get_sensitive (e->action)) {
-			gtk_action_activate (e->action);
-			return TRUE;
-		}
+		if (e->action == NULL || e->key != key || e->mods != mods)
+			continue;
+		if (!gtk_action_get_sensitive (e->action) || !gtk_action_get_visible (e->action))
+			continue;
+		gtk_action_activate (e->action);
+		return TRUE;
 	}
 	return FALSE;
 }

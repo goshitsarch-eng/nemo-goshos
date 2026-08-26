@@ -1645,7 +1645,9 @@ void verne_paint_desktop_wallpaper_cairo (GtkWidget *widget, cairo_t *cr, int wi
 #define gtk_builder_add_from_file(b, f, err) verne_gtk_builder_add_from_file ((b), (f), (err))
 #define gtk_builder_add_from_resource(b, p, err) verne_gtk_builder_add_from_resource ((b), (p), (err))
 void verne_accel_group_connect_action (GtkAccelGroup *group, GtkAction *action, const gchar *accelerator);
+void verne_accel_group_disconnect_action (GtkAccelGroup *group, GtkAction *action);
 void verne_action_group_bind_accels (GtkActionGroup *group, GtkAccelGroup *accel);
+void verne_action_group_unbind_accels (GtkActionGroup *group, GtkAccelGroup *accel);
 void gtk_style_context_get_border_color (GtkStyleContext *context, GtkStateFlags state, GdkRGBA *color);
 void gtk_style_context_get_style (GtkStyleContext *context, ...) G_GNUC_NULL_TERMINATED;
 

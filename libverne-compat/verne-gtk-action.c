@@ -524,6 +524,22 @@ verne_action_group_bind_accels (GtkActionGroup *group, GtkAccelGroup *accel)
 }
 
 void
+verne_action_group_unbind_accels (GtkActionGroup *group, GtkAccelGroup *accel)
+{
+	GList *actions, *l;
+
+	if (group == NULL || accel == NULL)
+		return;
+	actions = gtk_action_group_list_actions (group);
+	for (l = actions; l; l = l->next) {
+		GtkAction *a = l->data;
+		if (a)
+			verne_accel_group_disconnect_action (accel, a);
+	}
+	g_list_free (actions);
+}
+
+void
 gtk_action_group_remove_action (GtkActionGroup *group, GtkAction *action)
 {
 	if (action->name)

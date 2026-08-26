@@ -378,6 +378,8 @@ gtk_ui_manager_insert_action_group (GtkUIManager *self, GtkActionGroup *group, g
 void
 gtk_ui_manager_remove_action_group (GtkUIManager *self, GtkActionGroup *group)
 {
+	if (self->accel)
+		verne_action_group_unbind_accels (group, self->accel);
 	self->action_groups = g_list_remove (self->action_groups, group);
 	g_object_unref (group);
 }
