@@ -321,6 +321,9 @@ gtk_widget_destroy (GtkWidget *widget)
 	/* Hold a ref across unparent so dispose matches GTK3 gtk_widget_destroy. */
 	g_object_ref (widget);
 
+	if (!GTK_IS_WINDOW (widget))
+		verne_widget_invoke_destroy (widget);
+
 	parent = gtk_widget_get_parent (widget);
 	if (parent != NULL)
 		gtk_container_remove (parent, widget);

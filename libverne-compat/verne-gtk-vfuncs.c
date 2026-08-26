@@ -928,6 +928,18 @@ verne_widget_chain_destroy (gpointer parent_class, GtkWidget *widget)
 }
 
 void
+verne_widget_invoke_destroy (GtkWidget *widget)
+{
+	VerneVfuncs *v;
+
+	if (widget == NULL)
+		return;
+	v = lookup_vfuncs_type (G_OBJECT_TYPE (widget));
+	if (v && v->destroy)
+		v->destroy (widget);
+}
+
+void
 verne_widget_chain_show (gpointer parent_class, GtkWidget *widget)
 {
 	VerneVfuncs *v = lookup_vfuncs_type (G_TYPE_FROM_CLASS (parent_class));

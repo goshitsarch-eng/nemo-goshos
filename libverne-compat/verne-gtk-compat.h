@@ -1056,6 +1056,7 @@ gboolean verne_widget_chain_scroll (gpointer parent_class, GtkWidget *widget, Gd
 gboolean verne_widget_chain_draw (gpointer parent_class, GtkWidget *widget, cairo_t *cr);
 void verne_widget_chain_size_allocate (gpointer parent_class, GtkWidget *widget, GtkAllocation *allocation);
 void verne_widget_chain_destroy (gpointer parent_class, GtkWidget *widget);
+void verne_widget_invoke_destroy (GtkWidget *widget);
 void verne_widget_chain_show (gpointer parent_class, GtkWidget *widget);
 gboolean verne_widget_chain_focus_in (gpointer parent_class, GtkWidget *widget, GdkEventFocus *event);
 
