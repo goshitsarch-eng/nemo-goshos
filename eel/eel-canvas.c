@@ -2439,6 +2439,15 @@ eel_canvas_destroy (GtkWidget *object)
 
 	canvas = EEL_CANVAS (object);
 
+	/* Drop item pointers before tearing down the tree so in-flight
+	 * motion/button handlers cannot touch disposed items. */
+	canvas->current_item = NULL;
+	canvas->new_current_item = NULL;
+	canvas->focused_item = NULL;
+	if (canvas->grabbed_item) {
+		canvas->grabbed_item = NULL;
+	}
+
 	if (canvas->root_destroy_id) {
 		g_signal_handler_disconnect (G_OBJECT (canvas->root), canvas->root_destroy_id);
 		canvas->root_destroy_id = 0;
@@ -2706,25 +2715,6 @@ eel_canvas_size_allocate (GtkWidget *widget, GtkAllocation *allocation)
  * item, or focused item, as appropriate.
  */
 
-static gboolean
-canvas_item_is_live (EelCanvasItem *item)
-{
-	return item != NULL && EEL_IS_CANVAS_ITEM (item);
-}
-
-static void
-canvas_forget_dead_items (EelCanvas *canvas)
-{
-	if (canvas->current_item && !canvas_item_is_live (canvas->current_item))
-		canvas->current_item = NULL;
-	if (canvas->new_current_item && !canvas_item_is_live (canvas->new_current_item))
-		canvas->new_current_item = NULL;
-	if (canvas->focused_item && !canvas_item_is_live (canvas->focused_item))
-		canvas->focused_item = NULL;
-	if (canvas->grabbed_item && !canvas_item_is_live (canvas->grabbed_item))
-		canvas->grabbed_item = NULL;
-}
-
 static int
 emit_event (EelCanvas *canvas, VerneGdkEvent *event)
 {
@@ -2735,11 +2725,9 @@ emit_event (EelCanvas *canvas, VerneGdkEvent *event)
 	guint mask;
 
 	/* Could be an old pick event */
-	if (!gtk_widget_get_realized (GTK_WIDGET (canvas))) {
+	if (!gtk_widget_get_realized (GTK_WIDGET (canvas)) || canvas->root == NULL) {
 		return FALSE;
 	}
-
-	canvas_forget_dead_items (canvas);
 
 	/* Perform checks for grabbed items */
 
@@ -2831,10 +2819,8 @@ emit_event (EelCanvas *canvas, VerneGdkEvent *event)
 	/* Choose where we send the event */
 
 	item = canvas->current_item;
-	if (!canvas_item_is_live (item))
-		item = NULL;
 
-	if (canvas_item_is_live (canvas->focused_item)
+	if (canvas->focused_item
 	    && ((event->type == GDK_KEY_PRESS) ||
 		(event->type == GDK_KEY_RELEASE) ||
 		(event->type == GDK_FOCUS_CHANGE)))
@@ -2848,8 +2834,6 @@ emit_event (EelCanvas *canvas, VerneGdkEvent *event)
 	finished = FALSE;
 
 	while (item && !finished) {
-		if (!canvas_item_is_live (item))
-			break;
 		g_object_ref (item);
 
 		g_signal_emit (
@@ -2878,7 +2862,8 @@ pick_current_item (EelCanvas *canvas, VerneGdkEvent *event)
 
 	retval = FALSE;
 
-	canvas_forget_dead_items (canvas);
+	if (canvas->root == NULL)
+		return retval;
 
 	/* If a button is down, we'll perform enter and leave events on the
 	 * current item, but not enter on any other item.  This is more or less
@@ -2952,7 +2937,7 @@ pick_current_item (EelCanvas *canvas, VerneGdkEvent *event)
 		eel_canvas_c2w (canvas, cx, cy, &x, &y);
 
 		/* find the closest item */
-		if (canvas->root->flags & EEL_CANVAS_ITEM_MAPPED)
+		if (canvas->root && (canvas->root->flags & EEL_CANVAS_ITEM_MAPPED))
 			eel_canvas_item_invoke_point (canvas->root, x, y, cx, cy,
 							&canvas->new_current_item);
 		else
@@ -3023,6 +3008,9 @@ eel_canvas_button (GtkWidget *widget, GdkEventButton *event)
 	retval = FALSE;
 
 	canvas = EEL_CANVAS (widget);
+
+	if (canvas->root == NULL)
+		return FALSE;
 
 	/*
 	 * dispatch normally regardless of the event's window if an item has
@@ -3095,6 +3083,9 @@ eel_canvas_motion (GtkWidget *widget, GdkEventMotion *event)
 	g_return_val_if_fail (event != NULL, FALSE);
 
 	canvas = EEL_CANVAS (widget);
+
+	if (canvas->root == NULL)
+		return FALSE;
 
 	if (event->window != gtk_layout_get_bin_window (GTK_LAYOUT (canvas)))
 		return FALSE;
