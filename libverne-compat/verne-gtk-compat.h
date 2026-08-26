@@ -1455,14 +1455,27 @@ static inline GtkInfoBar *
 verne_to_gtk_ib (gpointer widget)
 {
 	if (widget != NULL && VERNE_IS_INFO_BAR (widget))
-		return GTK_INFO_BAR (VERNE_INFO_BAR (widget)->inner);
-	return GTK_INFO_BAR (widget);
+		return (GtkInfoBar *) VERNE_INFO_BAR (widget)->inner;
+	return (GtkInfoBar *) widget;
 }
+
+/* NemoTrashBar and siblings are VerneInfoBar (GtkBox) wrappers. The GTK4
+ * GTK_INFO_BAR() cast must not type-check them as GtkInfoBar, and
+ * get_content_area must still see the wrapper, so this is a plain cast —
+ * native GtkInfoBar methods go through verne_to_gtk_ib(). */
+#undef GTK_INFO_BAR
+#define GTK_INFO_BAR(w) ((GtkInfoBar *)(gpointer)(w))
+#undef GTK_IS_INFO_BAR
+#define GTK_IS_INFO_BAR(w) ((w) != NULL && (VERNE_IS_INFO_BAR (w) || G_TYPE_CHECK_INSTANCE_TYPE ((w), (gtk_info_bar_get_type) ())))
+
+GtkWidget *verne_info_bar_new (void);
+#define gtk_info_bar_new() verne_info_bar_new ()
 
 #define gtk_info_bar_add_button(b, t, r) (gtk_info_bar_add_button) (verne_to_gtk_ib (b), t, r)
 #define gtk_info_bar_set_message_type(b, t) (gtk_info_bar_set_message_type) (verne_to_gtk_ib (b), t)
 #define gtk_info_bar_set_response_sensitive(b, r, s) (gtk_info_bar_set_response_sensitive) (verne_to_gtk_ib (b), r, s)
 #define gtk_info_bar_add_child(b, w) (gtk_info_bar_add_child) (verne_to_gtk_ib (b), w)
+#define gtk_info_bar_add_action_widget(b, w, r) (gtk_info_bar_add_action_widget) (verne_to_gtk_ib (b), w, r)
 
 /* VerneInfoBar is a GtkBox, so the GTK3 GtkInfoBarClass stub must be at least
  * GtkBoxClass-sized. Subclassing it with GtkWidgetClass made NemoTrashBar

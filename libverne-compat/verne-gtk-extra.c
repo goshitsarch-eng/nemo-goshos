@@ -850,7 +850,7 @@ gtk_info_bar_get_action_area (GtkInfoBar *bar)
 	box = g_object_get_data (G_OBJECT (bar), "verne-action");
 	if (box == NULL) {
 		box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 6);
-		(gtk_info_bar_add_action_widget) (bar, box, 0);
+		(gtk_info_bar_add_child) (bar, box);
 		g_object_set_data (G_OBJECT (bar), "verne-action", box);
 	}
 	return box;

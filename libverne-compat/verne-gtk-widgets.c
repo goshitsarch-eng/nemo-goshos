@@ -1427,23 +1427,57 @@ verne_scrolled_window_get_inner (gpointer widget)
 
 G_DEFINE_TYPE (VerneInfoBar, verne_info_bar, GTK_TYPE_BOX)
 
+enum {
+	VERNE_INFO_BAR_RESPONSE,
+	VERNE_INFO_BAR_N_SIGNALS
+};
+
+static guint verne_info_bar_signals[VERNE_INFO_BAR_N_SIGNALS];
+
+static void
+verne_info_bar_inner_response (GtkInfoBar *inner,
+			       gint response_id,
+			       VerneInfoBar *bar)
+{
+	(void) inner;
+	g_signal_emit (bar, verne_info_bar_signals[VERNE_INFO_BAR_RESPONSE], 0, response_id);
+}
+
 static void
 verne_info_bar_class_init (VerneInfoBarClass *klass)
 {
-	(void) klass;
+	verne_info_bar_signals[VERNE_INFO_BAR_RESPONSE] =
+		g_signal_new ("response",
+			      G_TYPE_FROM_CLASS (klass),
+			      G_SIGNAL_RUN_LAST,
+			      0, NULL, NULL, NULL,
+			      G_TYPE_NONE, 1, G_TYPE_INT);
 }
 
 static void
 verne_info_bar_init (VerneInfoBar *bar)
 {
 	gtk_orientable_set_orientation (GTK_ORIENTABLE (bar), GTK_ORIENTATION_VERTICAL);
-	bar->inner = gtk_info_bar_new ();
+	/* Parentheses bypass gtk_info_bar_new() → verne_info_bar_new(). */
+	bar->inner = (gtk_info_bar_new) ();
 	bar->content_area = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 6);
 	bar->action_area = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 6);
-	(gtk_info_bar_add_child) (GTK_INFO_BAR (bar->inner), bar->content_area);
-	(gtk_info_bar_add_action_widget) (GTK_INFO_BAR (bar->inner), bar->action_area, 0);
+	gtk_widget_set_hexpand (bar->content_area, TRUE);
+	/* GTK4 only accepts GtkActionable widgets in the action area, so keep
+	 * both custom boxes as content children. add_button() still targets
+	 * the native action area via verne_to_gtk_ib(). */
+	(gtk_info_bar_add_child) ((GtkInfoBar *) bar->inner, bar->content_area);
+	(gtk_info_bar_add_child) ((GtkInfoBar *) bar->inner, bar->action_area);
 	gtk_widget_set_hexpand (bar->inner, TRUE);
 	gtk_box_append (GTK_BOX (bar), bar->inner);
+	g_signal_connect (bar->inner, "response",
+			  G_CALLBACK (verne_info_bar_inner_response), bar);
+}
+
+GtkWidget *
+verne_info_bar_new (void)
+{
+	return g_object_new (VERNE_TYPE_INFO_BAR, NULL);
 }
 
 GtkWidget *
