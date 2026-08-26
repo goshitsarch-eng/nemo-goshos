@@ -451,6 +451,19 @@ void verne_gtk_tree_view_enable_model_drag_source (GtkTreeView *tree_view, GdkMo
 #define gtk_tree_view_enable_model_drag_source(tv, mask, targets, n, actions) \
 	verne_gtk_tree_view_enable_model_drag_source (tv, mask, targets, n, actions)
 
+/* GTK4's dest-row highlight freeze_notify's a missing bin window. Store the
+ * path ourselves so list/sidebar drop hit-testing still works. */
+void verne_gtk_tree_view_set_drag_dest_row (GtkTreeView *tree_view, GtkTreePath *path, GtkTreeViewDropPosition pos);
+void verne_gtk_tree_view_get_drag_dest_row (GtkTreeView *tree_view, GtkTreePath **path, GtkTreeViewDropPosition *pos);
+#if defined(gtk_tree_view_set_drag_dest_row)
+#undef gtk_tree_view_set_drag_dest_row
+#endif
+#if defined(gtk_tree_view_get_drag_dest_row)
+#undef gtk_tree_view_get_drag_dest_row
+#endif
+#define gtk_tree_view_set_drag_dest_row(tv, path, pos) verne_gtk_tree_view_set_drag_dest_row ((tv), (path), (pos))
+#define gtk_tree_view_get_drag_dest_row(tv, path, pos) verne_gtk_tree_view_get_drag_dest_row ((tv), (path), (pos))
+
 GtkWidget *gtk_image_new_from_stock (const gchar *stock_id, int size);
 void gtk_image_set_from_stock (GtkImage *image, const gchar *stock_id, int size);
 void gtk_button_set_image (GtkButton *button, GtkWidget *image);

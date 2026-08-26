@@ -1125,6 +1125,71 @@ verne_gtk_tree_view_enable_model_drag_source (GtkTreeView *tree_view, GdkModifie
 	g_free (mimes);
 }
 
+typedef struct {
+	GtkTreePath *path;
+	GtkTreeViewDropPosition pos;
+} VerneTreeDestRow;
+
+static GQuark
+verne_tree_dest_quark (void)
+{
+	static GQuark q;
+	if (!q)
+		q = g_quark_from_static_string ("verne-tree-dest-row");
+	return q;
+}
+
+static void
+verne_tree_dest_free (gpointer data)
+{
+	VerneTreeDestRow *row = data;
+
+	if (row == NULL)
+		return;
+	if (row->path)
+		gtk_tree_path_free (row->path);
+	g_free (row);
+}
+
+void
+verne_gtk_tree_view_set_drag_dest_row (GtkTreeView *tree_view, GtkTreePath *path, GtkTreeViewDropPosition pos)
+{
+	VerneTreeDestRow *row;
+
+	if (!GTK_IS_TREE_VIEW (tree_view))
+		return;
+	if (path == NULL) {
+		g_object_set_qdata (G_OBJECT (tree_view), verne_tree_dest_quark (), NULL);
+		gtk_widget_queue_draw (GTK_WIDGET (tree_view));
+		return;
+	}
+	row = g_new0 (VerneTreeDestRow, 1);
+	row->path = gtk_tree_path_copy (path);
+	row->pos = pos;
+	g_object_set_qdata_full (G_OBJECT (tree_view), verne_tree_dest_quark (), row, verne_tree_dest_free);
+	gtk_widget_queue_draw (GTK_WIDGET (tree_view));
+}
+
+void
+verne_gtk_tree_view_get_drag_dest_row (GtkTreeView *tree_view, GtkTreePath **path, GtkTreeViewDropPosition *pos)
+{
+	VerneTreeDestRow *row;
+
+	if (path)
+		*path = NULL;
+	if (pos)
+		*pos = 0;
+	if (!GTK_IS_TREE_VIEW (tree_view))
+		return;
+	row = g_object_get_qdata (G_OBJECT (tree_view), verne_tree_dest_quark ());
+	if (row == NULL)
+		return;
+	if (path && row->path)
+		*path = gtk_tree_path_copy (row->path);
+	if (pos)
+		*pos = row->pos;
+}
+
 static GQuark
 verne_cell_render_quark (void)
 {

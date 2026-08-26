@@ -717,6 +717,8 @@ verne_local_emit_drop (VerneLocalDrag *local)
 	if (local->drop_emitted)
 		return;
 	local->drop_emitted = TRUE;
+	if (local->icon_window)
+		gtk_widget_set_visible (local->icon_window, FALSE);
 	if (local->current_dest == NULL)
 		verne_local_update_dest (local);
 	source = local->source;
@@ -728,6 +730,7 @@ verne_local_emit_drop (VerneLocalDrag *local)
 		g_signal_emit_by_name (dest, "drag-drop", local,
 				       (int) local->dest_x, (int) local->dest_y, GDK_CURRENT_TIME, &handled);
 		g_warning ("local drag-drop handled=%d", handled);
+		g_signal_emit_by_name (dest, "drag-leave", local, GDK_CURRENT_TIME);
 	} else {
 		g_warning ("local drop with no dest, cancelling");
 		if (source)
@@ -1880,7 +1883,6 @@ static void
 verne_local_ensure_icon (VerneLocalDrag *local, GdkPixbuf *pixbuf, int hot_x, int hot_y)
 {
 	GdkTexture *texture;
-	GtkWidget *parent;
 
 	local->hot_x = hot_x;
 	local->hot_y = hot_y;
@@ -1895,9 +1897,6 @@ verne_local_ensure_icon (VerneLocalDrag *local, GdkPixbuf *pixbuf, int hot_x, in
 		gtk_widget_set_can_focus (local->icon_window, FALSE);
 		g_object_set_data (G_OBJECT (local->icon_window), "verne-skip-taskbar", GINT_TO_POINTER (1));
 		g_object_set_data (G_OBJECT (local->icon_window), "verne-skip-pager", GINT_TO_POINTER (1));
-		parent = GTK_WIDGET (gtk_widget_get_root (local->source));
-		if (GTK_IS_WINDOW (parent))
-			gtk_window_set_transient_for (GTK_WINDOW (local->icon_window), GTK_WINDOW (parent));
 		local->picture = gtk_picture_new_for_paintable (GDK_PAINTABLE (texture));
 		gtk_picture_set_can_shrink (GTK_PICTURE (local->picture), FALSE);
 		gtk_window_set_child (GTK_WINDOW (local->icon_window), local->picture);
