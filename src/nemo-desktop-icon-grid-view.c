@@ -640,6 +640,8 @@ desktop_dir_monitor_changed (GFileMonitor *monitor,
 	switch (event) {
 	case G_FILE_MONITOR_EVENT_CREATED:
 	case G_FILE_MONITOR_EVENT_MOVED_IN:
+		g_warning ("desktop dir monitor event=%d file=%s",
+			   (int) event, file ? g_file_peek_path (file) : "(null)");
 		list = g_list_prepend (NULL, g_object_ref (file));
 		nemo_directory_notify_files_added (list);
 		g_list_free_full (list, g_object_unref);

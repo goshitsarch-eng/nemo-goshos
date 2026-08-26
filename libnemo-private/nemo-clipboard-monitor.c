@@ -293,7 +293,9 @@ nemo_get_clipboard_callback (GtkClipboard     *clipboard,
 
 		for (l = clipboard_info->files; l != NULL; l = l->next) {
 			uris[i] = nemo_file_get_local_uri (l->data);
-			i++;
+			if (uris[i] != NULL) {
+				i++;
+			}
 		}
 
 		uris[i] = NULL;
