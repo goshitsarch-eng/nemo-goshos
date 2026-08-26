@@ -671,45 +671,131 @@ verne_local_handover_native (VerneLocalDrag *local)
 	g_warning ("handed local drag over to native XDND");
 }
 
-static Window
-verne_xdnd_find_aware (Display *dpy, Window w)
+static gboolean
+verne_window_is_xdnd_aware (Display *dpy, Window w)
 {
 	Atom xdnd_aware = XInternAtom (dpy, "XdndAware", False);
+	Atom actual = None;
+	int format = 0;
+	unsigned long n = 0, bytes = 0;
+	unsigned char *prop = NULL;
+	gboolean aware = FALSE;
 
-	while (w && w != DefaultRootWindow (dpy)) {
-		Atom actual = None;
-		int format = 0;
-		unsigned long n = 0, bytes = 0;
-		unsigned char *prop = NULL;
-		Window root = None, parent = None, *children = NULL;
-		unsigned int nchild = 0;
+	if (XGetWindowProperty (dpy, w, xdnd_aware, 0, 1, False, AnyPropertyType,
+				&actual, &format, &n, &bytes, &prop) == Success && n > 0)
+		aware = TRUE;
+	if (prop)
+		XFree (prop);
+	return aware;
+}
 
-		if (XGetWindowProperty (dpy, w, xdnd_aware, 0, 1, False, AnyPropertyType,
-					&actual, &format, &n, &bytes, &prop) == Success && n > 0) {
-			if (prop)
-				XFree (prop);
-			return w;
-		}
-		if (prop)
-			XFree (prop);
-		if (!XQueryTree (dpy, w, &root, &parent, &children, &nchild))
-			break;
-		if (children)
+static gboolean
+verne_tree_contains_xid (Display *dpy, Window w, GHashTable *skip)
+{
+	Window root = None, parent = None, *children = NULL;
+	unsigned int nchild = 0, i;
+
+	if (g_hash_table_contains (skip, GUINT_TO_POINTER (w)))
+		return TRUE;
+	if (!XQueryTree (dpy, w, &root, &parent, &children, &nchild))
+		return FALSE;
+	for (i = 0; i < nchild; i++) {
+		if (verne_tree_contains_xid (dpy, children[i], skip)) {
 			XFree (children);
-		if (parent == None || parent == root)
-			break;
-		w = parent;
+			return TRUE;
+		}
 	}
-	return None;
+	if (children)
+		XFree (children);
+	return FALSE;
+}
+
+static Window
+verne_find_xdnd_in_tree (Display *dpy, Window w)
+{
+	Window root = None, parent = None, *children = NULL;
+	unsigned int nchild = 0, i;
+	Window found = None;
+
+	if (verne_window_is_xdnd_aware (dpy, w))
+		return w;
+	if (!XQueryTree (dpy, w, &root, &parent, &children, &nchild))
+		return None;
+	for (i = nchild; i > 0; i--) {
+		found = verne_find_xdnd_in_tree (dpy, children[i - 1]);
+		if (found != None)
+			break;
+	}
+	if (children)
+		XFree (children);
+	return found;
+}
+
+static void
+verne_xdnd_collect_skip (GHashTable *skip, GdkDrag *drag)
+{
+	GdkSurface *surface, *icon;
+	GList *toplevels, *l;
+
+	if (drag) {
+		surface = gdk_drag_get_surface (drag);
+		icon = gdk_drag_get_drag_surface (drag);
+		if (surface)
+			g_hash_table_add (skip, GUINT_TO_POINTER (gdk_x11_surface_get_xid (surface)));
+		if (icon)
+			g_hash_table_add (skip, GUINT_TO_POINTER (gdk_x11_surface_get_xid (icon)));
+	}
+	toplevels = gtk_window_list_toplevels ();
+	for (l = toplevels; l; l = l->next) {
+		GtkNative *native = GTK_NATIVE (l->data);
+		GdkSurface *surf = native ? gtk_native_get_surface (native) : NULL;
+		if (surf)
+			g_hash_table_add (skip, GUINT_TO_POINTER (gdk_x11_surface_get_xid (surf)));
+	}
+	g_list_free (toplevels);
+}
+
+static Window
+verne_xdnd_target_at_pointer (Display *dpy, GdkDrag *drag)
+{
+	Window root, root_ret, parent, *children = NULL, target = None;
+	int rx = 0, ry = 0, wx = 0, wy = 0;
+	unsigned int mask = 0, nchild = 0, i;
+	GHashTable *skip;
+
+	root = DefaultRootWindow (dpy);
+	if (!XQueryPointer (dpy, root, &root_ret, &parent, &rx, &ry, &wx, &wy, &mask))
+		return None;
+	skip = g_hash_table_new (g_direct_hash, g_direct_equal);
+	verne_xdnd_collect_skip (skip, drag);
+	if (!XQueryTree (dpy, root, &root_ret, &parent, &children, &nchild) || children == NULL) {
+		g_hash_table_destroy (skip);
+		return None;
+	}
+	for (i = nchild; i > 0; i--) {
+		Window w = children[i - 1];
+		XWindowAttributes attr;
+
+		if (!XGetWindowAttributes (dpy, w, &attr) || attr.map_state != IsViewable)
+			continue;
+		if (rx < attr.x || ry < attr.y || rx >= attr.x + attr.width || ry >= attr.y + attr.height)
+			continue;
+		if (verne_tree_contains_xid (dpy, w, skip))
+			continue;
+		target = verne_find_xdnd_in_tree (dpy, w);
+		if (target != None)
+			break;
+	}
+	XFree (children);
+	g_hash_table_destroy (skip);
+	return target;
 }
 
 static void
 verne_xdnd_send_drop (GdkDrag *drag)
 {
 	Display *dpy;
-	Window root_ret, child = None, target, source = None;
-	int rx = 0, ry = 0, wx = 0, wy = 0;
-	unsigned int mask = 0;
+	Window target, source = None;
 	GdkSurface *surface;
 	XClientMessageEvent ev = { 0 };
 
@@ -718,9 +804,7 @@ verne_xdnd_send_drop (GdkDrag *drag)
 	dpy = GDK_DISPLAY_XDISPLAY (gdk_display_get_default ());
 	if (dpy == NULL)
 		return;
-	if (!XQueryPointer (dpy, DefaultRootWindow (dpy), &root_ret, &child, &rx, &ry, &wx, &wy, &mask))
-		return;
-	target = verne_xdnd_find_aware (dpy, child);
+	target = verne_xdnd_target_at_pointer (dpy, drag);
 	surface = gdk_drag_get_surface (drag);
 	if (surface)
 		source = gdk_x11_surface_get_xid (surface);
