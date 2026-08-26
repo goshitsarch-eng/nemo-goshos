@@ -4554,7 +4554,7 @@ nemo_icon_container_class_init (NemoIconContainerClass *class)
 		                NULL, NULL,
 		                g_cclosure_marshal_generic,
 		                G_TYPE_BOOLEAN, 1,
-				GDK_TYPE_EVENT);
+				G_TYPE_POINTER);
 	signals[ACTIVATE]
 		= g_signal_new ("activate",
 		                G_TYPE_FROM_CLASS (class),
@@ -4876,7 +4876,7 @@ nemo_icon_container_class_init (NemoIconContainerClass *class)
                         g_signal_accumulator_true_handled, NULL,
                         g_cclosure_marshal_generic,
                         G_TYPE_BOOLEAN, 1,
-                        GDK_TYPE_EVENT);
+                        G_TYPE_POINTER);
 
 	/* GtkWidget class.  */
 
@@ -6616,6 +6616,10 @@ nemo_icon_container_update_tooltip_text (NemoIconContainer  *container,
     }
 
     icon = item->user_data;
+    if (icon == NULL || icon->data == NULL) {
+        gtk_widget_set_tooltip_text (GTK_WIDGET (container), "");
+        return;
+    }
     file = NEMO_FILE (icon->data);
 
     text = NULL;

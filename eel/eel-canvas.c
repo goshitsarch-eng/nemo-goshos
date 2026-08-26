@@ -4329,7 +4329,7 @@ eel_canvas_item_class_init (EelCanvasItemClass *klass)
 			      boolean_handled_accumulator, NULL,
 			      g_cclosure_marshal_generic,
 			      G_TYPE_BOOLEAN, 1,
-			      GDK_TYPE_EVENT | G_SIGNAL_TYPE_STATIC_SCOPE);
+			      G_TYPE_POINTER);
 
         item_signals[ITEM_DESTROY] =
 		g_signal_new ("destroy",

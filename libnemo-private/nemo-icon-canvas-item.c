@@ -1566,10 +1566,11 @@ nemo_icon_canvas_item_event (EelCanvasItem *item, VerneGdkEvent *event)
 			if (in_single_click_mode ()) {
 				cursor = gdk_cursor_new_for_display (gdk_display_get_default(),
 								     GDK_HAND2);
-				gdk_window_set_cursor (cursor_window, cursor);
+				if (cursor_window != NULL) {
+					gdk_window_set_cursor (cursor_window, cursor);
+					icon_item->details->cursor_window = g_object_ref (cursor_window);
+				}
 				g_object_unref (cursor);
-
-				icon_item->details->cursor_window = g_object_ref (cursor_window);
 			}
 		}
 		return TRUE;
@@ -1587,7 +1588,8 @@ nemo_icon_canvas_item_event (EelCanvasItem *item, VerneGdkEvent *event)
 			eel_canvas_item_request_update (item);
 
 			/* show default cursor */
-			gdk_window_set_cursor (cursor_window, NULL);
+			if (cursor_window != NULL)
+				gdk_window_set_cursor (cursor_window, NULL);
 			g_clear_object (&icon_item->details->cursor_window);
 		}
 		return TRUE;
