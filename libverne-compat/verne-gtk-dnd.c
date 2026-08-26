@@ -7,8 +7,8 @@
 #include <gio/gio.h>
 #include <gtk/gtk.h>
 #include <gdk/x11/gdkx.h>
+#include <graphene.h>
 #include <X11/Xlib.h>
-#include <X11/extensions/XInput2.h>
 
 static GQuark
 dest_quark (void)
@@ -206,6 +206,65 @@ verne_content_provider_new_for_clipboard (GtkClipboard *clipboard)
 	return GDK_CONTENT_PROVIDER (p);
 }
 
+/* ---------- in-process DnD (avoids gdk_drag_begin's X11 nested grab) ---------- */
+typedef struct _VerneLocalDrag {
+	GObject parent_instance;
+	GtkWidget *source;
+	GtkTargetList *targets;
+	GdkDragAction actions;
+	GdkDragAction selected;
+	GtkWidget *icon_window;
+	GtkWidget *picture;
+	GtkWidget *current_dest;
+	double dest_x;
+	double dest_y;
+	int hot_x;
+	int hot_y;
+	guint poll_id;
+	gboolean drop_emitted;
+} VerneLocalDrag;
+
+typedef struct _VerneLocalDragClass {
+	GObjectClass parent_class;
+} VerneLocalDragClass;
+
+G_DEFINE_TYPE (VerneLocalDrag, verne_local_drag, G_TYPE_OBJECT)
+
+#define VERNE_IS_LOCAL_DRAG(o) (G_TYPE_CHECK_INSTANCE_TYPE ((o), verne_local_drag_get_type ()))
+
+static void
+verne_local_drag_finalize (GObject *object)
+{
+	VerneLocalDrag *self = (VerneLocalDrag *) object;
+
+	if (self->poll_id) {
+		g_source_remove (self->poll_id);
+		self->poll_id = 0;
+	}
+	if (self->icon_window) {
+		gtk_window_destroy (GTK_WINDOW (self->icon_window));
+		self->icon_window = NULL;
+		self->picture = NULL;
+	}
+	if (self->targets) {
+		gtk_target_list_unref (self->targets);
+		self->targets = NULL;
+	}
+	G_OBJECT_CLASS (verne_local_drag_parent_class)->finalize (object);
+}
+
+static void
+verne_local_drag_class_init (VerneLocalDragClass *klass)
+{
+	G_OBJECT_CLASS (klass)->finalize = verne_local_drag_finalize;
+}
+
+static void
+verne_local_drag_init (VerneLocalDrag *self)
+{
+	(void) self;
+}
+
 /* ---------- destination: GtkDropTargetAsync -> GTK3 drag-* signals ---------- */
 static GtkWidget *pending_drop_widget;
 static GdkDrop *pending_drop;
@@ -213,7 +272,10 @@ static double pending_drop_x, pending_drop_y;
 static gboolean drop_already_emitted;
 
 static gboolean on_async_drop (GtkDropTargetAsync *self, GdkDrop *drop, double x, double y, gpointer data);
-static gboolean verne_dnd_try_complete (GtkWidget *widget);
+static void verne_local_cleanup (VerneLocalDrag *local);
+static void verne_local_update_dest (VerneLocalDrag *local);
+static void verne_local_move_icon (VerneLocalDrag *local);
+static void verne_local_emit_drop (VerneLocalDrag *local);
 
 static void
 clear_pending_drop (void)
@@ -226,6 +288,13 @@ clear_pending_drop (void)
 	drop_already_emitted = FALSE;
 }
 
+static void
+pack_drop_xy (gpointer context, double x, double y)
+{
+	g_object_set_qdata (G_OBJECT (context), drop_xy_quark (),
+			    GINT_TO_POINTER (((int) x & 0xffff) | (((int) y & 0xffff) << 16)));
+}
+
 static GdkDragAction
 on_async_motion (GtkDropTargetAsync *self, GdkDrop *drop, double x, double y, gpointer data)
 {
@@ -236,8 +305,7 @@ on_async_motion (GtkDropTargetAsync *self, GdkDrop *drop, double x, double y, gp
 
 	(void) self;
 	g_debug ("drop dest motion at %.0f,%.0f on %s", x, y, G_OBJECT_TYPE_NAME (widget));
-	g_object_set_qdata (G_OBJECT (drop), drop_xy_quark (),
-			    GINT_TO_POINTER (((int) x & 0xffff) | (((int) y & 0xffff) << 16)));
+	pack_drop_xy (drop, x, y);
 	g_signal_emit_by_name (widget, "drag-motion", drop, (int) x, (int) y, time, &handled);
 	selected = (GdkDragAction) GPOINTER_TO_INT (g_object_get_qdata (G_OBJECT (drop), selected_action_quark ()));
 	if (selected == 0 && handled)
@@ -260,16 +328,6 @@ on_async_motion (GtkDropTargetAsync *self, GdkDrop *drop, double x, double y, gp
 	pending_drop_widget = widget;
 	pending_drop_x = x;
 	pending_drop_y = y;
-	{
-		GtkWidget *source = g_object_get_qdata (G_OBJECT (drop), source_widget_quark ());
-		if (source == NULL) {
-			GdkDrag *src_drag = gdk_drop_get_drag (drop);
-			if (src_drag)
-				source = g_object_get_qdata (G_OBJECT (src_drag), source_widget_quark ());
-		}
-		if (source)
-			verne_dnd_try_complete (source);
-	}
 	return selected;
 }
 
@@ -290,23 +348,246 @@ on_async_drop (GtkDropTargetAsync *self, GdkDrop *drop, double x, double y, gpoi
 	if (drop_already_emitted && drop == pending_drop)
 		return TRUE;
 	drop_already_emitted = TRUE;
-	g_object_set_qdata (G_OBJECT (drop), drop_xy_quark (),
-			    GINT_TO_POINTER (((int) x & 0xffff) | (((int) y & 0xffff) << 16)));
+	pack_drop_xy (drop, x, y);
 	g_debug ("drop at %.0f,%.0f on %s", x, y, G_OBJECT_TYPE_NAME (widget));
 	g_signal_emit_by_name (widget, "drag-drop", drop, (int) x, (int) y, GDK_CURRENT_TIME, &handled);
 	g_debug ("drag-drop handled=%d", handled);
 	return handled;
 }
 
+static GtkWidget *
+verne_local_find_dest (VerneLocalDrag *local, double *x, double *y)
+{
+	GdkSeat *seat;
+	GdkDevice *device;
+	GList *toplevels, *l;
+
+	seat = gdk_display_get_default_seat (gdk_display_get_default ());
+	device = seat ? gdk_seat_get_pointer (seat) : NULL;
+	if (device == NULL)
+		return NULL;
+
+	toplevels = gtk_window_list_toplevels ();
+	for (l = toplevels; l; l = l->next) {
+		GtkWidget *win = l->data;
+		GtkNative *native;
+		GdkSurface *surface;
+		GtkWidget *root, *picked, *w;
+		double sx = 0, sy = 0, tx = 0, ty = 0, px, py;
+		int sw, sh;
+
+		if (win == local->icon_window)
+			continue;
+		native = GTK_NATIVE (win);
+		surface = gtk_native_get_surface (native);
+		if (surface == NULL)
+			continue;
+		gdk_surface_get_device_position (surface, device, &sx, &sy, NULL);
+		sw = gdk_surface_get_width (surface);
+		sh = gdk_surface_get_height (surface);
+		if (sx < 0 || sy < 0 || sx >= sw || sy >= sh)
+			continue;
+		gtk_native_get_surface_transform (native, &tx, &ty);
+		px = sx - tx;
+		py = sy - ty;
+		root = GTK_WIDGET (gtk_widget_get_root (win));
+		picked = gtk_widget_pick (root, px, py, GTK_PICK_DEFAULT);
+		for (w = picked; w; w = gtk_widget_get_parent (w)) {
+			if (g_object_get_qdata (G_OBJECT (w), dest_quark ())) {
+				graphene_point_t p;
+				if (gtk_widget_compute_point (root, w, &GRAPHENE_POINT_INIT ((float) px, (float) py), &p)) {
+					*x = p.x;
+					*y = p.y;
+				} else {
+					*x = px;
+					*y = py;
+				}
+				g_list_free (toplevels);
+				return w;
+			}
+		}
+		if (local->source && gtk_widget_get_native (local->source) == native &&
+		    g_object_get_qdata (G_OBJECT (local->source), dest_quark ())) {
+			graphene_point_t p;
+			if (gtk_widget_compute_point (root, local->source,
+						      &GRAPHENE_POINT_INIT ((float) px, (float) py), &p)) {
+				*x = p.x;
+				*y = p.y;
+			} else {
+				*x = px;
+				*y = py;
+			}
+			g_list_free (toplevels);
+			return local->source;
+		}
+	}
+	g_list_free (toplevels);
+	return NULL;
+}
+
+static void
+verne_local_move_icon (VerneLocalDrag *local)
+{
+	Display *dpy;
+	Window root, child;
+	int rx = 0, ry = 0, wx, wy;
+	unsigned int mask = 0;
+
+	if (local->icon_window == NULL)
+		return;
+	dpy = GDK_DISPLAY_XDISPLAY (gdk_display_get_default ());
+	if (dpy == NULL)
+		return;
+	if (XQueryPointer (dpy, DefaultRootWindow (dpy), &root, &child, &rx, &ry, &wx, &wy, &mask))
+		gtk_window_move (GTK_WINDOW (local->icon_window), rx - local->hot_x, ry - local->hot_y);
+}
+
+static gboolean
+verne_local_button1_down (void)
+{
+	Display *dpy;
+	Window root, child;
+	int rx, ry, wx, wy;
+	unsigned int mask = 0;
+
+	dpy = GDK_DISPLAY_XDISPLAY (gdk_display_get_default ());
+	if (dpy == NULL)
+		return TRUE;
+	if (!XQueryPointer (dpy, DefaultRootWindow (dpy), &root, &child, &rx, &ry, &wx, &wy, &mask))
+		return TRUE;
+	return (mask & Button1Mask) != 0;
+}
+
+static void
+verne_local_update_dest (VerneLocalDrag *local)
+{
+	double x = 0, y = 0;
+	GtkWidget *dest;
+	gboolean handled = FALSE;
+	GdkDragAction selected;
+
+	dest = verne_local_find_dest (local, &x, &y);
+	if (local->current_dest && local->current_dest != dest)
+		g_signal_emit_by_name (local->current_dest, "drag-leave", local, GDK_CURRENT_TIME);
+	local->current_dest = dest;
+	local->dest_x = x;
+	local->dest_y = y;
+	if (dest == NULL)
+		return;
+	g_debug ("local dest motion at %.0f,%.0f on %s", x, y, G_OBJECT_TYPE_NAME (dest));
+	pack_drop_xy (local, x, y);
+	g_signal_emit_by_name (dest, "drag-motion", local, (int) x, (int) y, GDK_CURRENT_TIME, &handled);
+	selected = (GdkDragAction) GPOINTER_TO_INT (g_object_get_qdata (G_OBJECT (local), selected_action_quark ()));
+	if (selected == 0 && handled)
+		selected = GDK_ACTION_COPY;
+	if (selected)
+		local->selected = selected;
+}
+
+static void
+verne_local_cleanup (VerneLocalDrag *local)
+{
+	GtkWidget *source;
+
+	if (local == NULL)
+		return;
+	source = local->source;
+	if (local->poll_id) {
+		g_source_remove (local->poll_id);
+		local->poll_id = 0;
+	}
+	if (local->icon_window) {
+		gtk_window_destroy (GTK_WINDOW (local->icon_window));
+		local->icon_window = NULL;
+		local->picture = NULL;
+	}
+	if (source)
+		g_object_set_data (G_OBJECT (source), "verne-active-drag", NULL);
+	g_object_unref (local);
+}
+
+static void
+verne_local_emit_drop (VerneLocalDrag *local)
+{
+	gboolean handled = FALSE;
+
+	if (local->drop_emitted)
+		return;
+	local->drop_emitted = TRUE;
+	if (local->current_dest == NULL)
+		verne_local_update_dest (local);
+	if (local->current_dest) {
+		GtkWidget *source = local->source;
+
+		g_warning ("completing local drop on %s at %.0f,%.0f",
+			   G_OBJECT_TYPE_NAME (local->current_dest), local->dest_x, local->dest_y);
+		pack_drop_xy (local, local->dest_x, local->dest_y);
+		g_signal_emit_by_name (local->current_dest, "drag-drop", local,
+				       (int) local->dest_x, (int) local->dest_y, GDK_CURRENT_TIME, &handled);
+		g_warning ("local drag-drop handled=%d", handled);
+		if (source && g_object_get_data (G_OBJECT (source), "verne-active-drag") == (gpointer) local) {
+			g_signal_emit_by_name (source, "drag-end", local);
+			verne_local_cleanup (local);
+		}
+	} else {
+		g_warning ("local drop with no dest, cancelling");
+		g_signal_emit_by_name (local->source, "drag-failed", local, 0, &handled);
+		g_signal_emit_by_name (local->source, "drag-end", local);
+		verne_local_cleanup (local);
+	}
+}
+
+static gboolean
+verne_local_poll (gpointer data)
+{
+	GtkWidget *source = data;
+	VerneLocalDrag *local;
+
+	if (!GTK_IS_WIDGET (source))
+		return G_SOURCE_REMOVE;
+	local = g_object_get_data (G_OBJECT (source), "verne-active-drag");
+	if (local == NULL || !VERNE_IS_LOCAL_DRAG (local) || local->drop_emitted)
+		return G_SOURCE_REMOVE;
+	verne_local_move_icon (local);
+	verne_local_update_dest (local);
+	if (!verne_local_button1_down ()) {
+		local->poll_id = 0;
+		g_warning ("local DnD poll saw button1 up, dropping");
+		verne_local_emit_drop (local);
+		return G_SOURCE_REMOVE;
+	}
+	return G_SOURCE_CONTINUE;
+}
+
+void
+verne_dnd_local_motion (GtkWidget *widget)
+{
+	VerneLocalDrag *local;
+
+	if (widget == NULL)
+		return;
+	local = g_object_get_data (G_OBJECT (widget), "verne-active-drag");
+	if (local == NULL || !VERNE_IS_LOCAL_DRAG (local) || local->drop_emitted)
+		return;
+	verne_local_move_icon (local);
+	verne_local_update_dest (local);
+}
+
 void
 verne_dnd_gesture_end (GtkWidget *widget)
 {
-	GdkDrag *drag;
+	gpointer drag;
 
 	if (widget == NULL)
 		return;
 	drag = g_object_get_data (G_OBJECT (widget), "verne-active-drag");
-	if (drag == NULL || drop_already_emitted)
+	if (drag == NULL)
+		return;
+	if (VERNE_IS_LOCAL_DRAG (drag)) {
+		verne_local_emit_drop (drag);
+		return;
+	}
+	if (drop_already_emitted)
 		return;
 	if (pending_drop == NULL || pending_drop_widget == NULL)
 		return;
@@ -315,111 +596,19 @@ verne_dnd_gesture_end (GtkWidget *widget)
 	on_async_drop (NULL, pending_drop, pending_drop_x, pending_drop_y, pending_drop_widget);
 }
 
-static GQuark
-tick_quark (void)
-{
-	static GQuark q;
-	if (!q)
-		q = g_quark_from_static_string ("verne-dnd-tick");
-	return q;
-}
-
-static Bool
-raw_button1_release_pred (Display *dpy, XEvent *event, XPointer arg)
-{
-	Bool match = False;
-
-	(void) arg;
-	if (event->type != GenericEvent)
-		return False;
-	if (!XGetEventData (dpy, &event->xcookie))
-		return False;
-	if (event->xcookie.evtype == XI_RawButtonRelease) {
-		XIRawEvent *raw = (XIRawEvent *) event->xcookie.data;
-		match = (raw != NULL && raw->detail == 1);
-	}
-	XFreeEventData (dpy, &event->xcookie);
-	return match;
-}
-
-static gboolean
-verne_check_raw_button1_release (void)
-{
-	Display *dpy;
-	XEvent ev;
-
-	dpy = GDK_DISPLAY_XDISPLAY (gdk_display_get_default ());
-	if (dpy == NULL)
-		return FALSE;
-	if (XCheckIfEvent (dpy, &ev, raw_button1_release_pred, NULL))
-		return TRUE;
-	return FALSE;
-}
-
-static void
-verne_select_raw_button_release (gboolean enable)
-{
-	Display *dpy;
-	XIEventMask em;
-	unsigned char mask[(XIMaskLen (XI_RawButtonRelease) + 3) & ~3];
-
-	dpy = GDK_DISPLAY_XDISPLAY (gdk_display_get_default ());
-	if (dpy == NULL)
-		return;
-	memset (mask, 0, sizeof (mask));
-	em.deviceid = XIAllMasterDevices;
-	em.mask_len = sizeof (mask);
-	em.mask = mask;
-	if (enable)
-		XISetMask (em.mask, XI_RawButtonRelease);
-	XISelectEvents (dpy, DefaultRootWindow (dpy), &em, 1);
-}
-
 static void
 verne_dnd_cleanup_source (GtkWidget *widget)
 {
-	guint tick_id;
-	GdkFrameClock *clock;
+	gpointer drag;
 
 	if (widget == NULL)
 		return;
-	tick_id = GPOINTER_TO_UINT (g_object_get_qdata (G_OBJECT (widget), tick_quark ()));
-	if (tick_id) {
-		gtk_widget_remove_tick_callback (widget, tick_id);
-		g_object_set_qdata (G_OBJECT (widget), tick_quark (), NULL);
+	drag = g_object_get_data (G_OBJECT (widget), "verne-active-drag");
+	if (drag && VERNE_IS_LOCAL_DRAG (drag)) {
+		verne_local_cleanup (drag);
+		return;
 	}
-	clock = gtk_widget_get_frame_clock (widget);
-	if (clock)
-		gdk_frame_clock_end_updating (clock);
 	g_object_set_data (G_OBJECT (widget), "verne-active-drag", NULL);
-	verne_select_raw_button_release (FALSE);
-}
-
-static gboolean
-verne_dnd_try_complete (GtkWidget *widget)
-{
-	if (widget == NULL || drop_already_emitted)
-		return FALSE;
-	if (!verne_check_raw_button1_release ())
-		return FALSE;
-	if (pending_drop == NULL)
-		return FALSE;
-	g_debug ("raw button1 release, completing drop");
-	verne_dnd_gesture_end (widget);
-	return TRUE;
-}
-
-static gboolean
-verne_dnd_tick (GtkWidget *widget, GdkFrameClock *clock, gpointer data)
-{
-	(void) clock;
-	(void) data;
-	if (g_object_get_data (G_OBJECT (widget), "verne-active-drag") == NULL)
-		return G_SOURCE_REMOVE;
-	verne_dnd_try_complete (widget);
-	if (g_object_get_data (G_OBJECT (widget), "verne-active-drag") == NULL)
-		return G_SOURCE_REMOVE;
-	return G_SOURCE_CONTINUE;
 }
 
 static gboolean
@@ -503,22 +692,34 @@ GdkAtom
 gtk_drag_dest_find_target (GtkWidget *widget, GdkDragContext *context, GtkTargetList *list)
 {
 	GdkContentFormats *formats = NULL;
+	gboolean free_formats = FALSE;
+	GdkAtom result = NULL;
 	guint i;
 
 	if (list == NULL)
 		list = gtk_drag_dest_get_target_list (widget);
-	if (context && GDK_IS_DROP (context))
+	if (context && VERNE_IS_LOCAL_DRAG (context)) {
+		formats = formats_from_list (((VerneLocalDrag *) context)->targets);
+		free_formats = TRUE;
+	} else if (context && GDK_IS_DROP (context))
 		formats = gdk_drop_get_formats (GDK_DROP (context));
 	else if (context && GDK_IS_DRAG (context))
 		formats = gdk_drag_get_formats (GDK_DRAG (context));
-	if (list == NULL || list->entries == NULL)
+	if (list == NULL || list->entries == NULL) {
+		if (free_formats && formats)
+			gdk_content_formats_unref (formats);
 		return gdk_atom_intern ("text/uri-list", FALSE);
+	}
 	for (i = 0; i < list->entries->len; i++) {
 		GtkTargetEntry *e = &g_array_index (list->entries, GtkTargetEntry, i);
-		if (formats == NULL || gdk_content_formats_contain_mime_type (formats, e->target))
-			return (GdkAtom) e->target;
+		if (formats == NULL || gdk_content_formats_contain_mime_type (formats, e->target)) {
+			result = (GdkAtom) e->target;
+			break;
+		}
 	}
-	return NULL;
+	if (free_formats && formats)
+		gdk_content_formats_unref (formats);
+	return result;
 }
 
 typedef struct {
@@ -564,7 +765,30 @@ gtk_drag_get_data (GtkWidget *widget, GdkDragContext *context, GdkAtom target, g
 	const char *mimes[2];
 	gpointer packed;
 
-	if (!context || !GDK_IS_DROP (context))
+	if (!context)
+		return;
+	if (VERNE_IS_LOCAL_DRAG (context)) {
+		VerneLocalDrag *local = (VerneLocalDrag *) context;
+		GtkSelectionData sel = { 0 };
+		guint src_info, dst_info;
+		gint x, y;
+
+		packed = g_object_get_qdata (G_OBJECT (context), drop_xy_quark ());
+		x = GPOINTER_TO_INT (packed) & 0xffff;
+		y = (GPOINTER_TO_INT (packed) >> 16) & 0xffff;
+		sel.target = target ? target : (GdkAtom) "text/uri-list";
+		sel.type = sel.target;
+		sel.format = 8;
+		src_info = info_for_target (local->targets, sel.target);
+		dst_info = info_for_target (gtk_drag_dest_get_target_list (widget), sel.target);
+		g_signal_emit_by_name (local->source, "drag-data-get", local, &sel, src_info, time);
+		g_warning ("local drag-data-get target=%s len=%d src_info=%u dst_info=%u",
+			   sel.target ? (const char *) sel.target : "(null)", sel.length, src_info, dst_info);
+		g_signal_emit_by_name (widget, "drag-data-received", local, x, y, &sel, dst_info, time);
+		g_free (sel.data);
+		return;
+	}
+	if (!GDK_IS_DROP (context))
 		return;
 	rd = g_new0 (VerneDropRead, 1);
 	rd->widget = widget;
@@ -589,6 +813,16 @@ gtk_drag_finish (gpointer context, gboolean success, gboolean del, guint32 time)
 	(void) time;
 	if (!context)
 		return;
+	if (VERNE_IS_LOCAL_DRAG (context)) {
+		VerneLocalDrag *local = (VerneLocalDrag *) context;
+		g_warning ("gtk_drag_finish local success=%d del=%d", success, del);
+		if (del && local->source)
+			g_signal_emit_by_name (local->source, "drag-data-delete", local);
+		if (local->source)
+			g_signal_emit_by_name (local->source, "drag-end", local);
+		verne_local_cleanup (local);
+		return;
+	}
 	action = (GdkDragAction) GPOINTER_TO_INT (g_object_get_qdata (G_OBJECT (context), selected_action_quark ()));
 	if (success && action == 0)
 		action = GDK_ACTION_COPY;
@@ -617,7 +851,9 @@ gdk_drag_status (GdkDragContext *context, GdkDragAction action, guint32 time)
 	if (!context)
 		return;
 	g_object_set_qdata (G_OBJECT (context), selected_action_quark (), GINT_TO_POINTER ((int) action));
-	if (GDK_IS_DROP (context))
+	if (VERNE_IS_LOCAL_DRAG (context))
+		((VerneLocalDrag *) context)->selected = action;
+	else if (GDK_IS_DROP (context))
 		gdk_drop_status (GDK_DROP (context), gdk_drop_get_actions (GDK_DROP (context)), action);
 }
 
@@ -631,6 +867,8 @@ gdk_drag_context_get_selected_action (GdkDragContext *context)
 	stored = (GdkDragAction) GPOINTER_TO_INT (g_object_get_qdata (G_OBJECT (context), selected_action_quark ()));
 	if (stored)
 		return stored;
+	if (VERNE_IS_LOCAL_DRAG (context))
+		return ((VerneLocalDrag *) context)->selected;
 	if (GDK_IS_DRAG (context))
 		return gdk_drag_get_selected_action (GDK_DRAG (context));
 	return 0;
@@ -639,6 +877,14 @@ gdk_drag_context_get_selected_action (GdkDragContext *context)
 GdkDragAction
 gdk_drag_context_get_suggested_action (GdkDragContext *context)
 {
+	if (context && VERNE_IS_LOCAL_DRAG (context)) {
+		GdkDragAction a = ((VerneLocalDrag *) context)->actions;
+		if (a & GDK_ACTION_MOVE)
+			return GDK_ACTION_MOVE;
+		if (a & GDK_ACTION_COPY)
+			return GDK_ACTION_COPY;
+		return a;
+	}
 	if (context && GDK_IS_DROP (context)) {
 		GdkDragAction a = gdk_drop_get_actions (GDK_DROP (context));
 		if (a & GDK_ACTION_COPY)
@@ -653,6 +899,8 @@ gdk_drag_context_get_suggested_action (GdkDragContext *context)
 GdkDragAction
 gdk_drag_context_get_actions (GdkDragContext *context)
 {
+	if (context && VERNE_IS_LOCAL_DRAG (context))
+		return ((VerneLocalDrag *) context)->actions;
 	if (context && GDK_IS_DROP (context))
 		return gdk_drop_get_actions (GDK_DROP (context));
 	if (context && GDK_IS_DRAG (context))
@@ -663,6 +911,11 @@ gdk_drag_context_get_actions (GdkDragContext *context)
 GdkSurface *
 gdk_drag_context_get_source_window (GdkDragContext *context)
 {
+	if (context && VERNE_IS_LOCAL_DRAG (context)) {
+		GtkWidget *source = ((VerneLocalDrag *) context)->source;
+		GtkNative *native = source ? gtk_widget_get_native (source) : NULL;
+		return native ? gtk_native_get_surface (native) : NULL;
+	}
 	if (context && GDK_IS_DROP (context)) {
 		GdkDrag *drag = gdk_drop_get_drag (GDK_DROP (context));
 		if (drag)
@@ -679,6 +932,8 @@ gtk_drag_get_source_widget (GdkDragContext *context)
 {
 	if (!context)
 		return NULL;
+	if (VERNE_IS_LOCAL_DRAG (context))
+		return ((VerneLocalDrag *) context)->source;
 	return g_object_get_qdata (G_OBJECT (context), source_widget_quark ());
 }
 
@@ -824,99 +1079,101 @@ gtk_drag_source_get_target_list (GtkWidget *widget)
 	return g_object_get_qdata (G_OBJECT (widget), source_targets_quark ());
 }
 
-static void
-on_dnd_finished (GdkDrag *drag, gpointer widget)
-{
-	g_debug ("dnd-finished on %s", widget ? G_OBJECT_TYPE_NAME (widget) : "?");
-	verne_dnd_cleanup_source (widget);
-	clear_pending_drop ();
-	g_signal_emit_by_name (widget, "drag-end", drag);
-}
-
-static void
-on_drag_cancel (GdkDrag *drag, GdkDragCancelReason reason, gpointer widget)
-{
-	gboolean handled = FALSE;
-	g_debug ("drag cancel reason=%d on %s", (int) reason, widget ? G_OBJECT_TYPE_NAME (widget) : "?");
-	verne_dnd_cleanup_source (widget);
-	clear_pending_drop ();
-	g_signal_emit_by_name (widget, "drag-failed", drag, (int) reason, &handled);
-	g_signal_emit_by_name (widget, "drag-end", drag);
-}
-
-static void
-on_drop_performed (GdkDrag *drag, gpointer widget)
-{
-	(void) drag;
-	g_debug ("drop-performed on %s", widget ? G_OBJECT_TYPE_NAME (widget) : "?");
-}
-
 GdkDragContext *
 gtk_drag_begin_with_coordinates (GtkWidget *widget, GtkTargetList *targets, GdkDragAction actions, gint button, GdkEvent *event, gint x, gint y)
 {
-	GdkSurface *surface;
-	GdkDevice *device = NULL;
-	GdkSeat *seat;
-	GdkContentProvider *provider;
-	GdkDrag *drag;
-	GtkNative *native;
+	VerneLocalDrag *local;
 
 	(void) button;
 	(void) event;
-	if (targets == NULL)
-		targets = gtk_drag_source_get_target_list (widget);
-	native = gtk_widget_get_native (widget);
-	surface = native ? gtk_native_get_surface (native) : NULL;
-	seat = gdk_display_get_default_seat (gtk_widget_get_display (widget));
-	if (seat)
-		device = gdk_seat_get_pointer (seat);
-	if (surface == NULL || device == NULL)
-		return NULL;
-	provider = verne_content_provider_new_for_widget (widget, targets);
-	/* gdk_drag_begin dx/dy are offsets from the current pointer, not
-	 * widget coordinates. Passing event x/y as offsets put the hotspot
-	 * hundreds of pixels away and GTK4 cancelled the drag immediately.
-	 */
 	(void) x;
 	(void) y;
-	drag = gdk_drag_begin (surface, device, provider,
-			       actions ? actions : (GDK_ACTION_COPY | GDK_ACTION_MOVE | GDK_ACTION_LINK),
-			       0.0, 0.0);
-	if (drag)
-		((VerneContentProvider *) provider)->drag = drag;
-	g_object_unref (provider);
-	if (drag) {
-		g_object_set_qdata (G_OBJECT (drag), source_widget_quark (), widget);
-		g_object_set_data (G_OBJECT (widget), "verne-active-drag", drag);
-		verne_select_raw_button_release (TRUE);
-		{
-			GdkFrameClock *clock = gtk_widget_get_frame_clock (widget);
-			guint tick_id;
-			if (clock)
-				gdk_frame_clock_begin_updating (clock);
-			tick_id = gtk_widget_add_tick_callback (widget, verne_dnd_tick, NULL, NULL);
-			g_object_set_qdata (G_OBJECT (widget), tick_quark (), GUINT_TO_POINTER (tick_id));
-		}
-		g_signal_connect (drag, "dnd-finished", G_CALLBACK (on_dnd_finished), widget);
-		g_signal_connect (drag, "cancel", G_CALLBACK (on_drag_cancel), widget);
-		g_signal_connect (drag, "drop-performed", G_CALLBACK (on_drop_performed), widget);
-		g_signal_emit_by_name (widget, "drag-begin", drag);
-		g_debug ("gdk_drag_begin started from %s", G_OBJECT_TYPE_NAME (widget));
-	} else {
-		g_warning ("gdk_drag_begin failed on %s", G_OBJECT_TYPE_NAME (widget));
-	}
-	return (GdkDragContext *) drag;
+	if (targets == NULL)
+		targets = gtk_drag_source_get_target_list (widget);
+	if (widget == NULL)
+		return NULL;
+
+	local = g_object_new (verne_local_drag_get_type (), NULL);
+	local->source = widget;
+	local->targets = targets;
+	if (targets)
+		targets->ref++;
+	local->actions = actions ? actions : (GDK_ACTION_COPY | GDK_ACTION_MOVE | GDK_ACTION_LINK);
+	if (local->actions & GDK_ACTION_MOVE)
+		local->selected = GDK_ACTION_MOVE;
+	else
+		local->selected = GDK_ACTION_COPY;
+	g_object_set_qdata (G_OBJECT (local), source_widget_quark (), widget);
+	g_object_set_data (G_OBJECT (widget), "verne-active-drag", local);
+	local->poll_id = g_timeout_add (16, verne_local_poll, widget);
+	g_signal_emit_by_name (widget, "drag-begin", local);
+	verne_dnd_local_motion (widget);
+	g_warning ("local drag started from %s", G_OBJECT_TYPE_NAME (widget));
+	return (GdkDragContext *) local;
 }
 
 gpointer
 gtk_drag_begin (GtkWidget *widget, GtkTargetList *targets, GdkDragAction actions, gint button, GdkEvent *event)
 {
-	gint x = 0, y = 0;
+	gint bx = 0, by = 0;
 	if (event) {
-		x = (gint) event->button.x;
-		y = (gint) event->button.y;
+		bx = (gint) event->button.x;
+		by = (gint) event->button.y;
 	}
-	return gtk_drag_begin_with_coordinates (widget, targets, actions, button, event, x, y);
+	return gtk_drag_begin_with_coordinates (widget, targets, actions, button, event, bx, by);
+}
+
+static void
+verne_local_icon_realize (GtkWidget *widget, gpointer data)
+{
+	GdkSurface *surface;
+	cairo_region_t *empty;
+
+	(void) data;
+	surface = gtk_native_get_surface (GTK_NATIVE (widget));
+	if (surface == NULL)
+		return;
+	empty = cairo_region_create ();
+	gdk_surface_set_input_region (surface, empty);
+	cairo_region_destroy (empty);
+}
+
+static void
+verne_local_ensure_icon (VerneLocalDrag *local, GdkPixbuf *pixbuf, int hot_x, int hot_y)
+{
+	GdkTexture *texture;
+	GtkWidget *parent;
+
+	local->hot_x = hot_x;
+	local->hot_y = hot_y;
+	texture = gdk_texture_new_for_pixbuf (pixbuf);
+	if (local->icon_window == NULL) {
+		local->icon_window = gtk_window_new ();
+		gtk_window_set_decorated (GTK_WINDOW (local->icon_window), FALSE);
+		gtk_window_set_resizable (GTK_WINDOW (local->icon_window), FALSE);
+		gtk_window_set_title (GTK_WINDOW (local->icon_window), "verne-dnd-icon");
+		gtk_window_set_type_hint (GTK_WINDOW (local->icon_window), GDK_WINDOW_TYPE_HINT_DND);
+		gtk_widget_set_can_target (local->icon_window, FALSE);
+		gtk_widget_set_can_focus (local->icon_window, FALSE);
+		g_object_set_data (G_OBJECT (local->icon_window), "verne-skip-taskbar", GINT_TO_POINTER (1));
+		g_object_set_data (G_OBJECT (local->icon_window), "verne-skip-pager", GINT_TO_POINTER (1));
+		parent = GTK_WIDGET (gtk_widget_get_root (local->source));
+		if (GTK_IS_WINDOW (parent))
+			gtk_window_set_transient_for (GTK_WINDOW (local->icon_window), GTK_WINDOW (parent));
+		local->picture = gtk_picture_new_for_paintable (GDK_PAINTABLE (texture));
+		gtk_picture_set_can_shrink (GTK_PICTURE (local->picture), FALSE);
+		gtk_window_set_child (GTK_WINDOW (local->icon_window), local->picture);
+		g_signal_connect (local->icon_window, "realize", G_CALLBACK (verne_local_icon_realize), NULL);
+		gtk_window_set_default_size (GTK_WINDOW (local->icon_window),
+					     gdk_pixbuf_get_width (pixbuf),
+					     gdk_pixbuf_get_height (pixbuf));
+		verne_local_move_icon (local);
+		gtk_window_present (GTK_WINDOW (local->icon_window));
+	} else if (local->picture) {
+		gtk_picture_set_paintable (GTK_PICTURE (local->picture), GDK_PAINTABLE (texture));
+	}
+	g_object_unref (texture);
+	verne_local_move_icon (local);
 }
 
 void
@@ -924,7 +1181,13 @@ gtk_drag_set_icon_pixbuf (GdkDragContext *context, GdkPixbuf *pixbuf, gint hot_x
 {
 	GdkTexture *texture;
 
-	if (!context || !pixbuf || !GDK_IS_DRAG (context))
+	if (!context || !pixbuf)
+		return;
+	if (VERNE_IS_LOCAL_DRAG (context)) {
+		verne_local_ensure_icon ((VerneLocalDrag *) context, pixbuf, hot_x, hot_y);
+		return;
+	}
+	if (!GDK_IS_DRAG (context))
 		return;
 	texture = gdk_texture_new_for_pixbuf (pixbuf);
 	gtk_drag_icon_set_from_paintable (GDK_DRAG (context), GDK_PAINTABLE (texture), hot_x, hot_y);
@@ -934,17 +1197,27 @@ gtk_drag_set_icon_pixbuf (GdkDragContext *context, GdkPixbuf *pixbuf, gint hot_x
 void
 gtk_drag_set_icon_name (GdkDragContext *context, const gchar *name, gint hot_x, gint hot_y)
 {
-	GtkIconPaintable *icon;
 	GtkIconTheme *theme;
+	GdkPixbuf *pixbuf;
 
-	if (!context || !GDK_IS_DRAG (context))
+	if (!context)
 		return;
 	theme = gtk_icon_theme_get_for_display (gdk_display_get_default ());
-	icon = gtk_icon_theme_lookup_icon (theme, name ? name : "text-x-generic", NULL, 48, 1, GTK_TEXT_DIR_NONE, 0);
-	if (icon) {
-		gtk_drag_icon_set_from_paintable (GDK_DRAG (context), GDK_PAINTABLE (icon), hot_x, hot_y);
-		g_object_unref (icon);
+	pixbuf = gtk_icon_theme_load_icon (theme, name ? name : "text-x-generic", 48, 0, NULL);
+	if (pixbuf && VERNE_IS_LOCAL_DRAG (context)) {
+		verne_local_ensure_icon ((VerneLocalDrag *) context, pixbuf, hot_x, hot_y);
+		g_object_unref (pixbuf);
+		return;
 	}
+	if (pixbuf && GDK_IS_DRAG (context)) {
+		GdkTexture *texture = gdk_texture_new_for_pixbuf (pixbuf);
+		gtk_drag_icon_set_from_paintable (GDK_DRAG (context), GDK_PAINTABLE (texture), hot_x, hot_y);
+		g_object_unref (texture);
+		g_object_unref (pixbuf);
+		return;
+	}
+	if (pixbuf)
+		g_object_unref (pixbuf);
 }
 
 void
@@ -958,7 +1231,10 @@ gtk_drag_set_icon_widget (GdkDragContext *context, GtkWidget *widget, gint hot_x
 {
 	(void) widget;
 	gtk_drag_set_icon_default (context);
-	if (context && GDK_IS_DRAG (context))
+	if (context && VERNE_IS_LOCAL_DRAG (context)) {
+		((VerneLocalDrag *) context)->hot_x = hot_x;
+		((VerneLocalDrag *) context)->hot_y = hot_y;
+	} else if (context && GDK_IS_DRAG (context))
 		gdk_drag_set_hotspot (GDK_DRAG (context), hot_x, hot_y);
 }
 
@@ -966,14 +1242,16 @@ void
 gtk_drag_set_icon_surface (GdkDragContext *context, cairo_surface_t *surface)
 {
 	GdkPixbuf *pixbuf;
+	double dx = 0, dy = 0;
 
 	if (!surface)
 		return;
+	cairo_surface_get_device_offset (surface, &dx, &dy);
 	pixbuf = gdk_pixbuf_get_from_surface (surface, 0, 0,
 					      cairo_image_surface_get_width (surface),
 					      cairo_image_surface_get_height (surface));
 	if (pixbuf) {
-		gtk_drag_set_icon_pixbuf (context, pixbuf, 0, 0);
+		gtk_drag_set_icon_pixbuf (context, pixbuf, (gint) (-dx), (gint) (-dy));
 		g_object_unref (pixbuf);
 	}
 }

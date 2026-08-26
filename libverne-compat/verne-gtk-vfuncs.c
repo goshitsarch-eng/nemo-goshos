@@ -231,6 +231,8 @@ on_drag_update (GtkGestureDrag *drag, gdouble offset_x, gdouble offset_y, gpoint
 		time = gdk_event_get_time (ge);
 	}
 	emit_motion (widget, sx + offset_x, sy + offset_y, state, time);
+	if (g_object_get_data (G_OBJECT (widget), "verne-active-drag"))
+		verne_dnd_local_motion (widget);
 }
 
 static void
