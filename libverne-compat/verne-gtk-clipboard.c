@@ -289,8 +289,17 @@ gtk_selection_data_set (GtkSelectionData *s, GdkAtom type, gint format, const gu
 	s->type = type;
 	s->format = format;
 	g_free (s->data);
-	s->data = (length >= 0) ? g_memdup2 (data, length) : NULL;
-	s->length = length;
+	/* GTK3 always NUL-terminates; callers such as g_uri_list_extract_uris
+	 * treat get_data() as a C string. */
+	if (length >= 0 && data != NULL) {
+		s->data = g_malloc ((gsize) length + 1);
+		memcpy (s->data, data, (gsize) length);
+		s->data[length] = 0;
+		s->length = length;
+	} else {
+		s->data = NULL;
+		s->length = length;
+	}
 }
 
 void
@@ -327,24 +336,48 @@ gtk_target_table_free (GtkTargetEntry *targets, gint n_targets)
 void
 gtk_selection_data_set_uris (GtkSelectionData *s, gchar **uris)
 {
-	gchar *joined = uris ? g_strjoinv ("\r\n", uris) : g_strdup ("");
-	gtk_selection_data_set (s, gdk_atom_intern ("text/uri-list", FALSE), 8, (guchar *) joined, strlen (joined));
-	g_free (joined);
+	GString *joined = g_string_new (NULL);
+	guint i;
+
+	if (uris) {
+		for (i = 0; uris[i]; i++) {
+			g_string_append (joined, uris[i]);
+			g_string_append (joined, "\r\n");
+		}
+	}
+	gtk_selection_data_set (s, gdk_atom_intern ("text/uri-list", FALSE), 8,
+				(guchar *) joined->str, (gint) joined->len);
+	g_string_free (joined, TRUE);
 }
 
 gchar **
 gtk_selection_data_get_uris (const GtkSelectionData *s)
 {
-	if (!s || !s->data)
+	gchar *text;
+	gchar **uris;
+
+	if (!s || !s->data || s->length <= 0)
 		return NULL;
-	return g_strsplit ((char *) s->data, "\r\n", -1);
+	text = g_strndup ((const gchar *) s->data, (gsize) s->length);
+	uris = g_uri_list_extract_uris (text);
+	g_free (text);
+	return uris;
 }
 
 gboolean gtk_selection_data_targets_include_text (const GtkSelectionData *s) { (void) s; return TRUE; }
 gboolean gtk_selection_data_targets_include_uri (const GtkSelectionData *s) { (void) s; return TRUE; }
 GtkSelectionData *gtk_selection_data_copy (const GtkSelectionData *s) {
-	GtkSelectionData *n = g_memdup2 (s, sizeof (*s));
-	n->data = s->data ? g_memdup2 (s->data, s->length) : NULL;
+	GtkSelectionData *n;
+	if (!s)
+		return NULL;
+	n = g_memdup2 (s, sizeof (*s));
+	if (s->data && s->length >= 0) {
+		n->data = g_malloc ((gsize) s->length + 1);
+		memcpy (n->data, s->data, (gsize) s->length);
+		n->data[s->length] = 0;
+	} else {
+		n->data = NULL;
+	}
 	return n;
 }
 void gtk_selection_data_free (GtkSelectionData *s) { if (!s) return; g_free (s->data); g_free (s); }
