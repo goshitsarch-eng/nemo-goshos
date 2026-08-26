@@ -2462,6 +2462,9 @@ on_size_allocation_changed (GtkWidget    *widget,
     GtkAdjustment *adjustment;
     gdouble page_size, upper;
 
+    (void) widget;
+    (void) allocation;
+
     adjustment = gtk_scrollable_get_hadjustment (GTK_SCROLLABLE (view->details->tree_view));
     g_object_get (adjustment, "page-size", &page_size, "upper", &upper, NULL);
 
@@ -2475,8 +2478,6 @@ on_size_allocation_changed (GtkWidget    *widget,
     else {
         gtk_widget_set_margin_bottom (GTK_WIDGET (view->details->tree_view), 0);
     }
-
-    gtk_widget_queue_allocate (widget);
 }
 
 static void
@@ -4157,6 +4158,31 @@ nemo_list_view_using_manual_layout (NemoView *view)
 }
 
 static void
+nemo_list_view_destroy (GtkWidget *object)
+{
+	NemoListView *list_view;
+
+	list_view = NEMO_LIST_VIEW (object);
+
+	/* Detach the tree before NemoView unrefs the directory. Otherwise
+	 * overlay unparent snapshots the list against freed NemoFile rows
+	 * and compact-view creation aborts in the allocator. */
+	g_signal_handlers_disconnect_by_func (gtk_settings_get_default (), update_date_fonts, list_view);
+	g_signal_handlers_disconnect_by_func (nemo_preferences, update_date_fonts, list_view);
+	g_signal_handlers_disconnect_by_func (gnome_interface_preferences, update_date_fonts, list_view);
+
+	if (list_view->details->tree_view != NULL) {
+		g_signal_handlers_disconnect_matched (list_view->details->tree_view,
+						      G_SIGNAL_MATCH_DATA, 0, 0, NULL, NULL, list_view);
+		gtk_tree_view_set_model (list_view->details->tree_view, NULL);
+	}
+	if (list_view->details->model != NULL)
+		nemo_list_model_set_drag_view (list_view->details->model, NULL, 0, 0);
+
+	verne_widget_chain_destroy (nemo_list_view_parent_class, object);
+}
+
+static void
 nemo_list_view_dispose (GObject *object)
 {
 	NemoListView *list_view;
@@ -4165,6 +4191,10 @@ nemo_list_view_dispose (GObject *object)
 
     g_signal_handlers_disconnect_by_func (gtk_settings_get_default (), update_date_fonts, list_view);
     g_signal_handlers_disconnect_by_func (nemo_preferences, update_date_fonts, list_view);
+    g_signal_handlers_disconnect_by_func (gnome_interface_preferences, update_date_fonts, list_view);
+
+	if (list_view->details->tree_view && GTK_IS_TREE_VIEW (list_view->details->tree_view))
+		gtk_tree_view_set_model (list_view->details->tree_view, NULL);
 
 	if (list_view->details->model) {
 		stop_cell_editing (list_view);
@@ -4393,6 +4423,7 @@ nemo_list_view_class_init (NemoListViewClass *class)
 
 	G_OBJECT_CLASS (class)->dispose = nemo_list_view_dispose;
 	G_OBJECT_CLASS (class)->finalize = nemo_list_view_finalize;
+	verne_widget_class_set_destroy (GTK_WIDGET_CLASS (class), nemo_list_view_destroy);
 
 	nemo_view_class->add_file = nemo_list_view_add_file;
 	nemo_view_class->begin_loading = nemo_list_view_begin_loading;

@@ -676,9 +676,14 @@ wrapped_dispose (GObject *object)
 		return;
 	g_object_set_data (object, "verne-disposing", GINT_TO_POINTER (1));
 
-	v = lookup_vfuncs_type (G_OBJECT_TYPE (object));
-	if (v && v->destroy)
-		v->destroy (GTK_WIDGET (object));
+	if (!g_object_get_data (object, "verne-destroyed")) {
+		g_object_set_data (object, "verne-destroyed", GINT_TO_POINTER (1));
+		v = lookup_vfuncs_type (G_OBJECT_TYPE (object));
+		if (v && v->destroy)
+			v->destroy (GTK_WIDGET (object));
+	} else {
+		v = lookup_vfuncs_type (G_OBJECT_TYPE (object));
+	}
 
 	/* orig_dispose on a subclass is often wrapped_dispose itself (parent
 	 * class already wrapped). Walk to the first real GObject dispose. */
@@ -934,6 +939,9 @@ verne_widget_invoke_destroy (GtkWidget *widget)
 
 	if (widget == NULL)
 		return;
+	if (g_object_get_data (G_OBJECT (widget), "verne-destroyed"))
+		return;
+	g_object_set_data (G_OBJECT (widget), "verne-destroyed", GINT_TO_POINTER (1));
 	v = lookup_vfuncs_type (G_OBJECT_TYPE (widget));
 	if (v && v->destroy)
 		v->destroy (widget);

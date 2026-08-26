@@ -129,6 +129,18 @@ gtk_container_remove (gpointer container_ptr, GtkWidget *child)
 	g_return_if_fail (GTK_IS_WIDGET (container));
 	g_return_if_fail (GTK_IS_WIDGET (child));
 
+	if (VERNE_IS_SCROLLED_WINDOW (container)) {
+		GtkWidget *inner = verne_scrolled_window_get_inner (container);
+		GtkWidget *sw_child;
+
+		sw_child = (gtk_scrolled_window_get_child) (GTK_SCROLLED_WINDOW (inner));
+		if (sw_child == child)
+			(gtk_scrolled_window_set_child) (GTK_SCROLLED_WINDOW (inner), NULL);
+		else if (child == inner)
+			gtk_box_remove (GTK_BOX (container), child);
+		return;
+	}
+
 	if (G_TYPE_CHECK_INSTANCE_TYPE (container, gtk_container_get_type ()) &&
 	    !GTK_IS_WINDOW (container) && !GTK_IS_BOX (container) &&
 	    !GTK_IS_GRID (container) && !GTK_IS_NOTEBOOK (container) &&

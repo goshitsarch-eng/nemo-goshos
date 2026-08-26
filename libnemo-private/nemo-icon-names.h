@@ -34,7 +34,7 @@
 
 #define NEMO_ICON_SYMBOLIC_COMPUTER      "xsi-computer-symbolic"
 #define NEMO_ICON_SYMBOLIC_DESKTOP       "xsi-user-desktop-symbolic"
-#define NEMO_ICON_SYMBOLIC_FILESYSTEM    "xsi-drive-harddisk-symbolic"
+#define NEMO_ICON_SYMBOLIC_FILESYSTEM    "computer-symbolic"
 #define NEMO_ICON_SYMBOLIC_FOLDER        "xsi-folder-symbolic"
 #define NEMO_ICON_SYMBOLIC_FOLDER_REMOTE "xsi-folder-remote-symbolic"
 #define NEMO_ICON_SYMBOLIC_HOME      "xsi-user-home-symbolic"

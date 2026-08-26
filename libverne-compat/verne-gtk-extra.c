@@ -1158,21 +1158,37 @@ GtkAction *gtk_activatable_get_related_action (gpointer activatable) {
 	return g_object_get_data (G_OBJECT (activatable), "verne-action");
 }
 
+static void
+verne_cell_renderer_apply_image (GtkCellRenderer *cell, GdkPixbuf *pixbuf, GdkTexture *texture)
+{
+	GObjectClass *klass;
+
+	if (cell == NULL)
+		return;
+	klass = G_OBJECT_GET_CLASS (cell);
+	/* g_object_set() stops at the first unknown property. GTK 4.14's
+	 * GtkCellRendererPixbuf has pixbuf/texture, not paintable. */
+	if (g_object_class_find_property (klass, "gicon"))
+		g_object_set (cell, "gicon", NULL, NULL);
+	if (g_object_class_find_property (klass, "icon-name"))
+		g_object_set (cell, "icon-name", NULL, NULL);
+	if (g_object_class_find_property (klass, "pixbuf"))
+		g_object_set (cell, "pixbuf", pixbuf, NULL);
+	if (g_object_class_find_property (klass, "texture"))
+		g_object_set (cell, "texture", texture, NULL);
+	if (g_object_class_find_property (klass, "paintable"))
+		g_object_set (cell, "paintable",
+			      texture ? GDK_PAINTABLE (texture) : NULL, NULL);
+}
+
 void
 verne_cell_renderer_set_pixbuf (GtkCellRenderer *cell, GdkPixbuf *pixbuf)
 {
 	GdkTexture *texture = NULL;
 
-	if (cell == NULL)
-		return;
 	if (pixbuf)
 		texture = gdk_texture_new_for_pixbuf (pixbuf);
-	g_object_set (cell,
-		      "gicon", NULL,
-		      "icon-name", NULL,
-		      "pixbuf", pixbuf,
-		      "texture", texture,
-		      NULL);
+	verne_cell_renderer_apply_image (cell, pixbuf, texture);
 	g_clear_object (&texture);
 }
 
@@ -1211,7 +1227,7 @@ verne_cell_surface_data_func (GtkCellLayout *layout,
 	(void) layout;
 	gtk_tree_model_get (model, iter, GPOINTER_TO_INT (data), &surface, -1);
 	texture = verne_texture_from_surface (surface);
-	g_object_set (cell, "gicon", NULL, "icon-name", NULL, "pixbuf", NULL, "texture", texture, NULL);
+	verne_cell_renderer_apply_image (cell, NULL, texture);
 	g_clear_object (&texture);
 	if (surface)
 		cairo_surface_destroy (surface);
