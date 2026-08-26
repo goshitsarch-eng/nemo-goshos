@@ -142,6 +142,8 @@ verne_content_provider_write_mime_type_async (GdkContentProvider *provider,
 
 	if (sel.data && sel.length > 0)
 		g_output_stream_write_all (stream, sel.data, (gsize) sel.length, NULL, cancellable, NULL);
+	g_warning ("content write mime=%s len=%d widget=%s", mime_type, sel.length,
+		   self->widget ? G_OBJECT_TYPE_NAME (self->widget) : "none");
 	g_free (sel.data);
 	g_task_return_boolean (task, TRUE);
 	g_object_unref (task);
@@ -808,6 +810,12 @@ verne_xdnd_send_drop (GdkDrag *drag)
 	surface = gdk_drag_get_surface (drag);
 	if (surface)
 		source = gdk_x11_surface_get_xid (surface);
+	{
+		Atom xdnd_sel = XInternAtom (dpy, "XdndSelection", False);
+		Window owner = XGetSelectionOwner (dpy, xdnd_sel);
+		if (owner != None)
+			source = owner;
+	}
 	if (target == None || source == None) {
 		g_warning ("XdndDrop skipped target=0x%lx source=0x%lx", (unsigned long) target, (unsigned long) source);
 		return;
@@ -818,7 +826,7 @@ verne_xdnd_send_drop (GdkDrag *drag)
 	ev.format = 32;
 	ev.data.l[0] = (long) source;
 	ev.data.l[1] = 0;
-	ev.data.l[2] = CurrentTime;
+	ev.data.l[2] = (long) gdk_x11_display_get_user_time (gdk_display_get_default ());
 	XSendEvent (dpy, target, False, NoEventMask, (XEvent *) &ev);
 	XFlush (dpy);
 	g_warning ("sent XdndDrop to 0x%lx from 0x%lx", (unsigned long) target, (unsigned long) source);
