@@ -1699,6 +1699,10 @@ verne_gtk_init (int *argc, char ***argv)
 #define gtk_init(argc, argv) verne_gtk_init (argc, argv)
 
 #define gtk_container_add_with_properties(c, child, ...) gtk_container_add (c, child)
+gboolean verne_toggle_button_get_active (gpointer button);
+void verne_toggle_button_set_active (gpointer button, gboolean active);
+#define gtk_toggle_button_get_active(b) verne_toggle_button_get_active (b)
+#define gtk_toggle_button_set_active(b, v) verne_toggle_button_set_active ((b), (v))
 #define gtk_toggle_button_get_inconsistent(b) FALSE
 #define gtk_toggle_button_set_inconsistent(b, v) ((void)0)
 #define gtk_window_propagate_key_event(w, e) FALSE

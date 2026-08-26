@@ -350,6 +350,60 @@ rewrite_packing_blocks (GString *s)
 			obj_open = find_object_open_for_close (s, obj_close);
 		}
 
+		{
+			gchar *page_name = xml_prop_in_block (block, "name");
+			gchar *page_title = xml_prop_in_block (block, "title");
+			gchar *page_icon = xml_prop_in_block (block, "icon-name");
+
+			if (page_name && page_title && obj_open >= 0) {
+				GString *header = g_string_new ("<object class=\"GtkStackPage\">");
+				gsize header_len;
+				gsize footer_at;
+
+				g_string_append_printf (header, "<property name=\"name\">%s</property>", page_name);
+				g_string_append_printf (header,
+							"<property name=\"title\" translatable=\"yes\">%s</property>",
+							page_title);
+				if (page_icon && *page_icon)
+					g_string_append_printf (header,
+								"<property name=\"icon-name\">%s</property>",
+								page_icon);
+				g_string_append (header, "<property name=\"child\">");
+				g_string_insert (s, (gsize) obj_open, header->str);
+				header_len = header->len;
+				g_string_free (header, TRUE);
+				footer_at = obj_close + 9 + header_len;
+				g_string_insert (s, footer_at, "</property></object>");
+
+				g_free (page_name);
+				g_free (page_title);
+				g_free (page_icon);
+				g_free (left);
+				g_free (top);
+				g_free (width);
+				g_free (height);
+				g_free (expand);
+				g_free (block);
+
+				found = strstr (s->str, "<packing>");
+				if (found) {
+					end = strstr (found, "</packing>");
+					if (end) {
+						end += strlen ("</packing>");
+						while (*end == '\n' || *end == '\r')
+							end++;
+						pos = (gsize) (found - s->str);
+						n = (gsize) (end - found);
+						g_string_erase (s, pos, (gssize) n);
+					}
+				}
+				continue;
+			}
+			g_free (page_name);
+			g_free (page_title);
+			g_free (page_icon);
+		}
+
 		insert = g_string_new (NULL);
 		if (obj_open >= 0) {
 			if (left != NULL || top != NULL) {
@@ -584,12 +638,9 @@ verne_restore_builder_stacks (GtkBuilder *builder, const gchar *xml)
 		st = gtk_stack_sidebar_get_stack (GTK_STACK_SIDEBAR (l->data));
 		gtk_widget_set_vexpand (GTK_WIDGET (l->data), TRUE);
 		gtk_widget_set_hexpand (GTK_WIDGET (l->data), FALSE);
-		if (st != NULL) {
-			g_object_ref (st);
-			gtk_stack_sidebar_set_stack (GTK_STACK_SIDEBAR (l->data), NULL);
+		gtk_widget_set_visible (GTK_WIDGET (l->data), TRUE);
+		if (st != NULL)
 			gtk_stack_sidebar_set_stack (GTK_STACK_SIDEBAR (l->data), st);
-			g_object_unref (st);
-		}
 	}
 	g_slist_free (objects);
 	g_ptr_array_unref (stacks);

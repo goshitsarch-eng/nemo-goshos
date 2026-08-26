@@ -16,6 +16,36 @@
 #include <X11/Xatom.h>
 #endif
 
+#ifdef gtk_toggle_button_get_active
+#undef gtk_toggle_button_get_active
+#endif
+#ifdef gtk_toggle_button_set_active
+#undef gtk_toggle_button_set_active
+#endif
+
+gboolean
+verne_toggle_button_get_active (gpointer button)
+{
+	if (button == NULL)
+		return FALSE;
+	if (GTK_IS_CHECK_BUTTON (button))
+		return gtk_check_button_get_active (GTK_CHECK_BUTTON (button));
+	if (GTK_IS_TOGGLE_BUTTON (button))
+		return gtk_toggle_button_get_active (GTK_TOGGLE_BUTTON (button));
+	return FALSE;
+}
+
+void
+verne_toggle_button_set_active (gpointer button, gboolean active)
+{
+	if (button == NULL)
+		return;
+	if (GTK_IS_CHECK_BUTTON (button))
+		gtk_check_button_set_active (GTK_CHECK_BUTTON (button), active);
+	else if (GTK_IS_TOGGLE_BUTTON (button))
+		gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (button), active);
+}
+
 /* ---------- GdkColor boxed type (removed in GTK4) ---------- */
 static GdkColor *
 gdk_color_copy_impl (const GdkColor *color)
