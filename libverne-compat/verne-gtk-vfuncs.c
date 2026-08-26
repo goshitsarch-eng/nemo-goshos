@@ -161,9 +161,13 @@ static void
 on_motion (GtkEventControllerMotion *motion, gdouble x, gdouble y, gpointer data)
 {
 	GtkWidget *widget = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (motion));
-	VerneVfuncs *v = lookup_vfuncs_type (G_OBJECT_TYPE (widget));
+	VerneVfuncs *v;
 	GdkEventMotion ev;
 	GdkEvent *ge;
+
+	if (!GTK_IS_WIDGET (widget) || !gtk_widget_get_realized (widget))
+		return;
+	v = lookup_vfuncs_type (G_OBJECT_TYPE (widget));
 
 	memset (&ev, 0, sizeof (ev));
 	ge = gtk_event_controller_get_current_event (GTK_EVENT_CONTROLLER (motion));
@@ -1154,10 +1158,37 @@ verne_install_crash_handler (void)
 	sigaction (SIGBUS, &sa, NULL);
 }
 
+static gboolean verne_forcing_icon_theme;
+
+static void
+verne_force_adwaita_icon_theme (GtkSettings *settings)
+{
+	gchar *name = NULL;
+
+	if (settings == NULL || verne_forcing_icon_theme)
+		return;
+	g_object_get (settings, "gtk-icon-theme-name", &name, NULL);
+	if (g_strcmp0 (name, "Adwaita") != 0) {
+		verne_forcing_icon_theme = TRUE;
+		g_object_set (settings, "gtk-icon-theme-name", "Adwaita", NULL);
+		verne_forcing_icon_theme = FALSE;
+	}
+	g_free (name);
+}
+
+static void
+verne_on_icon_theme_changed (GObject *settings, GParamSpec *pspec, gpointer data)
+{
+	(void) pspec;
+	(void) data;
+	verne_force_adwaita_icon_theme (GTK_SETTINGS (settings));
+}
+
 void
 verne_compat_init (void)
 {
 	static gboolean inited;
+	GtkSettings *settings;
 
 	verne_set_uninstalled_schema_dir ();
 	if (inited)
@@ -1168,6 +1199,17 @@ verne_compat_init (void)
 	if (vfunc_table == NULL)
 		vfunc_table = g_hash_table_new (g_direct_hash, g_direct_equal);
 	register_event_signals ();
+
+	settings = gtk_settings_get_default ();
+	if (settings) {
+		g_object_set (settings,
+			      "gtk-theme-name", "Adwaita",
+			      "gtk-icon-theme-name", "Adwaita",
+			      NULL);
+		g_signal_connect (settings, "notify::gtk-icon-theme-name",
+				  G_CALLBACK (verne_on_icon_theme_changed), NULL);
+		verne_force_adwaita_icon_theme (settings);
+	}
 }
 
 GdkSurface *

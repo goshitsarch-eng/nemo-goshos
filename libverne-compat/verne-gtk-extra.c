@@ -1444,7 +1444,9 @@ verne_pixbuf_from_paintable (GdkPaintable *paintable, int size, GError **error)
 
 	if (GTK_IS_ICON_PAINTABLE (paintable)) {
 		GFile *file = gtk_icon_paintable_get_file (GTK_ICON_PAINTABLE (paintable));
-		if (file) {
+		/* Symbolic SVGs use currentColor; gdk-pixbuf draws them as a
+		 * generic filled page. Snapshot recolors through GTK. */
+		if (file && !gtk_icon_paintable_is_symbolic (GTK_ICON_PAINTABLE (paintable))) {
 			char *path = g_file_get_path (file);
 			int load_size = size > 0 ? size : 48;
 			if (path)
@@ -1455,6 +1457,8 @@ verne_pixbuf_from_paintable (GdkPaintable *paintable, int size, GError **error)
 				return pixbuf;
 			if (error)
 				g_clear_error (error);
+		} else if (file) {
+			g_object_unref (file);
 		}
 	}
 
