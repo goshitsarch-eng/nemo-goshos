@@ -1179,6 +1179,7 @@ nemo_file_management_properties_dialog_setup (GtkBuilder  *builder,
     }
 
 	gtk_widget_show (dialog);
+	gtk_window_present (GTK_WINDOW (dialog));
 }
 
 void
@@ -1194,12 +1195,21 @@ nemo_file_management_properties_dialog_show (GtkWindow   *window,
 
 	builder = gtk_builder_new ();
     gtk_builder_set_translation_domain (builder, GETTEXT_PACKAGE);
-	gtk_builder_add_from_resource (builder,
-				       "/org/nemo/nemo-file-management-properties.glade",
-				       NULL);
+	{
+		GError *error = NULL;
+		if (!gtk_builder_add_from_resource (builder,
+						    "/org/nemo/nemo-file-management-properties.glade",
+						    &error)) {
+			g_warning ("Verne: failed to load File Management Preferences UI: %s",
+				   error ? error->message : "unknown");
+			g_clear_error (&error);
+			g_object_unref (builder);
+			return;
+		}
+	}
 
 	if (gtk_builder_get_object (builder, "file_management_dialog") == NULL) {
-		g_warning ("Verne: failed to load File Management Preferences UI");
+		g_warning ("Verne: File Management Preferences UI is missing file_management_dialog");
 		g_object_unref (builder);
 		return;
 	}

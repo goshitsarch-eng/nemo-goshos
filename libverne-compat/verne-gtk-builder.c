@@ -194,6 +194,407 @@ rewrite_image_properties (GString *s, GHashTable *icons)
 	}
 }
 
+static gchar *
+xml_prop_in_block (const char *block, const char *prop)
+{
+	gchar *pat = g_strdup_printf ("<property name=\"%s\"", prop);
+	const char *found = strstr (block, pat);
+	const char *gt;
+	const char *end;
+	gchar *value;
+
+	g_free (pat);
+	if (found == NULL)
+		return NULL;
+	gt = strchr (found, '>');
+	if (gt == NULL)
+		return NULL;
+	end = strstr (gt + 1, "</property>");
+	if (end == NULL)
+		return NULL;
+	value = g_strndup (gt + 1, (gsize) (end - (gt + 1)));
+	g_strstrip (value);
+	return value;
+}
+
+static gssize
+find_object_open_for_close (const GString *s, gsize close_pos)
+{
+	int depth = 1;
+	gsize i = close_pos;
+
+	while (i > 0) {
+		i--;
+		if (i + 9 <= s->len && memcmp (s->str + i, "</object>", 9) == 0)
+			depth++;
+		else if (i + 7 <= s->len && memcmp (s->str + i, "<object", 7) == 0) {
+			char next = s->str[i + 7];
+			if (next == ' ' || next == '\t' || next == '\n' || next == '>') {
+				depth--;
+				if (depth == 0)
+					return (gssize) i;
+			}
+		}
+	}
+	return -1;
+}
+
+static void
+convert_numeric_align (GString *s, const char *from_name, const char *to_name)
+{
+	gchar *start_pat = g_strdup_printf ("<property name=\"%s\">", from_name);
+
+	for (;;) {
+		const char *found = strstr (s->str, start_pat);
+		const char *end;
+		gchar *raw;
+		const char *align;
+		gchar *repl;
+		double v;
+		gsize pos, n;
+
+		if (found == NULL)
+			break;
+		end = strstr (found, "</property>");
+		if (end == NULL)
+			break;
+		raw = g_strndup (found + strlen (start_pat),
+				 (gsize) (end - (found + strlen (start_pat))));
+		g_strstrip (raw);
+		v = g_ascii_strtod (raw, NULL);
+		align = (v < 0.25) ? "start" : ((v > 0.75) ? "end" : "center");
+		repl = g_strdup_printf ("<property name=\"%s\">%s</property>", to_name, align);
+		pos = (gsize) (found - s->str);
+		n = (gsize) (end + strlen ("</property>") - found);
+		g_string_erase (s, pos, (gssize) n);
+		g_string_insert (s, pos, repl);
+		g_free (repl);
+		g_free (raw);
+	}
+	g_free (start_pat);
+}
+
+static void
+convert_border_width (GString *s)
+{
+	const char *pat = "<property name=\"border-width\">";
+
+	for (;;) {
+		const char *found = strstr (s->str, pat);
+		const char *end;
+		gchar *raw;
+		gchar *repl;
+		gsize pos, n;
+
+		if (found == NULL)
+			break;
+		end = strstr (found, "</property>");
+		if (end == NULL)
+			break;
+		raw = g_strndup (found + strlen (pat),
+				 (gsize) (end - (found + strlen (pat))));
+		g_strstrip (raw);
+		repl = g_strdup_printf ("<property name=\"margin-start\">%s</property>"
+					"<property name=\"margin-end\">%s</property>"
+					"<property name=\"margin-top\">%s</property>"
+					"<property name=\"margin-bottom\">%s</property>",
+					raw, raw, raw, raw);
+		pos = (gsize) (found - s->str);
+		n = (gsize) (end + strlen ("</property>") - found);
+		g_string_erase (s, pos, (gssize) n);
+		g_string_insert (s, pos, repl);
+		g_free (repl);
+		g_free (raw);
+	}
+}
+
+static void
+rewrite_packing_blocks (GString *s)
+{
+	for (;;) {
+		const char *found = strstr (s->str, "<packing>");
+		const char *end;
+		gchar *block;
+		gchar *left, *top, *width, *height, *expand;
+		gsize pos, n, close_search;
+		gboolean have_close;
+		gssize obj_open = -1;
+		gsize obj_close = 0;
+		GString *insert;
+
+		if (found == NULL)
+			break;
+		end = strstr (found, "</packing>");
+		if (end == NULL)
+			break;
+		end += strlen ("</packing>");
+		while (*end == '\n' || *end == '\r')
+			end++;
+		pos = (gsize) (found - s->str);
+		n = (gsize) (end - found);
+		block = g_strndup (found, n);
+
+		left = xml_prop_in_block (block, "left-attach");
+		top = xml_prop_in_block (block, "top-attach");
+		width = xml_prop_in_block (block, "width");
+		height = xml_prop_in_block (block, "height");
+		expand = xml_prop_in_block (block, "expand");
+
+		close_search = pos;
+		while (close_search > 0 && g_ascii_isspace (s->str[close_search - 1]))
+			close_search--;
+		have_close = (close_search >= 9 &&
+			      memcmp (s->str + close_search - 9, "</object>", 9) == 0);
+		if (have_close) {
+			obj_close = close_search - 9;
+			obj_open = find_object_open_for_close (s, obj_close);
+		}
+
+		insert = g_string_new (NULL);
+		if (obj_open >= 0) {
+			if (left != NULL || top != NULL) {
+				g_string_append (insert, "<layout>");
+				g_string_append_printf (insert, "<property name=\"column\">%s</property>",
+							left ? left : "0");
+				g_string_append_printf (insert, "<property name=\"row\">%s</property>",
+							top ? top : "0");
+				if (width)
+					g_string_append_printf (insert, "<property name=\"column-span\">%s</property>", width);
+				if (height)
+					g_string_append_printf (insert, "<property name=\"row-span\">%s</property>", height);
+				g_string_append (insert, "</layout>");
+			}
+			if (expand != NULL && g_ascii_strcasecmp (expand, "True") == 0) {
+				g_string_append (insert, "<property name=\"hexpand\">True</property>");
+				g_string_append (insert, "<property name=\"vexpand\">True</property>");
+			}
+			if (insert->len > 0)
+				g_string_insert (s, obj_close, insert->str);
+		}
+
+		found = strstr (s->str, "<packing>");
+		if (found) {
+			end = strstr (found, "</packing>");
+			if (end) {
+				end += strlen ("</packing>");
+				while (*end == '\n' || *end == '\r')
+					end++;
+				pos = (gsize) (found - s->str);
+				n = (gsize) (end - found);
+				g_string_erase (s, pos, (gssize) n);
+			} else {
+				g_string_erase (s, pos, 1);
+			}
+		}
+
+		g_string_free (insert, TRUE);
+		g_free (left);
+		g_free (top);
+		g_free (width);
+		g_free (height);
+		g_free (expand);
+		g_free (block);
+	}
+}
+
+typedef struct {
+	gchar *name;
+	gchar *title;
+	gchar *icon;
+} VerneStackPageInfo;
+
+typedef struct {
+	gchar *stack_id;
+	GPtrArray *pages;
+} VerneStackInfo;
+
+static void
+stack_page_info_free (gpointer data)
+{
+	VerneStackPageInfo *page = data;
+	g_free (page->name);
+	g_free (page->title);
+	g_free (page->icon);
+	g_free (page);
+}
+
+static void
+stack_info_free (gpointer data)
+{
+	VerneStackInfo *info = data;
+	g_free (info->stack_id);
+	g_ptr_array_unref (info->pages);
+	g_free (info);
+}
+
+static const char *
+find_matching_object_end (const char *start, const char *limit)
+{
+	int depth = 0;
+	const char *p = start;
+
+	while (p < limit && *p) {
+		if (memcmp (p, "<object", 7) == 0) {
+			char next = p[7];
+			if (next == ' ' || next == '\t' || next == '\n' || next == '>')
+				depth++;
+		} else if (memcmp (p, "</object>", 9) == 0) {
+			depth--;
+			if (depth == 0)
+				return p + 9;
+			p += 8;
+		}
+		p++;
+	}
+	return NULL;
+}
+
+static GPtrArray *
+collect_stacks_from_xml (const char *xml)
+{
+	GPtrArray *stacks = g_ptr_array_new_with_free_func (stack_info_free);
+	const char *p = xml;
+
+	while ((p = strstr (p, "class=\"GtkStack\"")) != NULL) {
+		const char *obj = p;
+		const char *gt;
+		const char *end;
+		const char *id_attr;
+		const char *q;
+		VerneStackInfo *info;
+
+		while (obj > xml && memcmp (obj, "<object", 7) != 0)
+			obj--;
+		if (memcmp (obj, "<object", 7) != 0) {
+			p += 10;
+			continue;
+		}
+		gt = strchr (obj, '>');
+		if (gt == NULL)
+			break;
+		end = find_matching_object_end (obj, xml + strlen (xml));
+		if (end == NULL) {
+			p = gt + 1;
+			continue;
+		}
+
+		info = g_new0 (VerneStackInfo, 1);
+		info->pages = g_ptr_array_new_with_free_func (stack_page_info_free);
+		id_attr = strstr (obj, "id=\"");
+		if (id_attr && id_attr < gt) {
+			const char *id_end = strchr (id_attr + 4, '"');
+			if (id_end)
+				info->stack_id = g_strndup (id_attr + 4, (gsize) (id_end - (id_attr + 4)));
+		}
+
+		q = obj;
+		while (q < end) {
+			const char *pack = strstr (q, "<packing>");
+			const char *pack_end;
+			gchar *block;
+			gchar *name;
+			gchar *title;
+
+			if (pack == NULL || pack >= end)
+				break;
+			pack_end = strstr (pack, "</packing>");
+			if (pack_end == NULL || pack_end >= end)
+				break;
+			pack_end += strlen ("</packing>");
+			block = g_strndup (pack, (gsize) (pack_end - pack));
+			name = xml_prop_in_block (block, "name");
+			title = xml_prop_in_block (block, "title");
+			if (name && title) {
+				VerneStackPageInfo *page = g_new0 (VerneStackPageInfo, 1);
+				gchar *icon = xml_prop_in_block (block, "icon-name");
+				page->name = name;
+				page->title = title;
+				if (icon && g_str_has_prefix (icon, "xsi-")) {
+					page->icon = g_strdup (icon + 4);
+					g_free (icon);
+				} else {
+					page->icon = icon;
+				}
+				g_ptr_array_add (info->pages, page);
+			} else {
+				g_free (name);
+				g_free (title);
+			}
+			g_free (block);
+			q = pack_end;
+		}
+
+		if (info->pages->len > 0)
+			g_ptr_array_add (stacks, info);
+		else
+			stack_info_free (info);
+
+		p = end;
+	}
+
+	return stacks;
+}
+
+static void
+verne_restore_builder_stacks (GtkBuilder *builder, const gchar *xml)
+{
+	GPtrArray *stacks;
+	GSList *objects, *l;
+	guint i;
+
+	stacks = collect_stacks_from_xml (xml);
+	for (i = 0; i < stacks->len; i++) {
+		VerneStackInfo *info = g_ptr_array_index (stacks, i);
+		GObject *obj;
+		GtkStack *stack;
+		GtkSelectionModel *model;
+		guint n, j;
+
+		if (info->stack_id == NULL)
+			continue;
+		obj = gtk_builder_get_object (builder, info->stack_id);
+		if (!GTK_IS_STACK (obj))
+			continue;
+		stack = GTK_STACK (obj);
+		gtk_widget_set_hexpand (GTK_WIDGET (stack), TRUE);
+		gtk_widget_set_vexpand (GTK_WIDGET (stack), TRUE);
+		model = gtk_stack_get_pages (stack);
+		n = g_list_model_get_n_items (G_LIST_MODEL (model));
+		for (j = 0; j < n && j < info->pages->len; j++) {
+			VerneStackPageInfo *pg = g_ptr_array_index (info->pages, j);
+			GtkStackPage *page = g_list_model_get_item (G_LIST_MODEL (model), j);
+			if (page == NULL)
+				continue;
+			if (pg->name)
+				gtk_stack_page_set_name (page, pg->name);
+			if (pg->title)
+				gtk_stack_page_set_title (page, pg->title);
+			if (pg->icon)
+				gtk_stack_page_set_icon_name (page, pg->icon);
+			g_object_unref (page);
+		}
+	}
+
+	objects = gtk_builder_get_objects (builder);
+	for (l = objects; l != NULL; l = l->next) {
+		GtkStack *st;
+
+		if (!GTK_IS_STACK_SIDEBAR (l->data))
+			continue;
+		st = gtk_stack_sidebar_get_stack (GTK_STACK_SIDEBAR (l->data));
+		gtk_widget_set_vexpand (GTK_WIDGET (l->data), TRUE);
+		gtk_widget_set_hexpand (GTK_WIDGET (l->data), FALSE);
+		if (st != NULL) {
+			g_object_ref (st);
+			gtk_stack_sidebar_set_stack (GTK_STACK_SIDEBAR (l->data), NULL);
+			gtk_stack_sidebar_set_stack (GTK_STACK_SIDEBAR (l->data), st);
+			g_object_unref (st);
+		}
+	}
+	g_slist_free (objects);
+	g_ptr_array_unref (stacks);
+}
+
 static void
 rewrite_stock_labels (GString *s)
 {
@@ -303,7 +704,10 @@ verne_transform_gtk3_ui (const gchar *xml, gssize len)
 	replace_all (s, " internal-child=\"action_area\"", "");
 
 	rewrite_stock_labels (s);
-	strip_packing_blocks (s);
+	convert_numeric_align (s, "xalign", "halign");
+	convert_numeric_align (s, "yalign", "valign");
+	convert_border_width (s);
+	rewrite_packing_blocks (s);
 	strip_xml_block (s, "<action-widgets>", "</action-widgets>");
 	strip_xml_block (s, "<accel-groups>", "</accel-groups>");
 	strip_placeholders (s);
@@ -322,15 +726,10 @@ verne_transform_gtk3_ui (const gchar *xml, gssize len)
 	remove_property (s, "primary-icon-sensitive");
 	remove_property (s, "secondary-icon-sensitive");
 	remove_property (s, "focus-on-click");
-	remove_property (s, "xalign");
-	remove_property (s, "yalign");
 	remove_property (s, "xpad");
 	remove_property (s, "ypad");
 	remove_property (s, "n-rows");
 	remove_property (s, "n-columns");
-	remove_property (s, "row-homogeneous");
-	remove_property (s, "column-homogeneous");
-	remove_property (s, "border-width");
 	remove_property (s, "draw-indicator");
 
 	strip_empty_child_tags (s);
@@ -348,13 +747,16 @@ verne_gtk_builder_add_from_string (GtkBuilder *builder, const gchar *buffer, gss
 	ok = gtk_builder_add_from_string (builder, transformed, -1, &local);
 	if (!ok) {
 		g_warning ("Verne GTK3 UI transform failed to load: %s", local ? local->message : "unknown");
+		g_file_set_contents ("/tmp/verne-transformed.ui", transformed, -1, NULL);
 		g_clear_error (&local);
 		ok = gtk_builder_add_from_string (builder, buffer, length, error);
 	} else if (error) {
 		*error = NULL;
 	}
-	if (ok)
+	if (ok) {
 		verne_bind_action_widgets (builder, buffer);
+		verne_restore_builder_stacks (builder, buffer);
+	}
 	g_free (transformed);
 	return ok;
 }
