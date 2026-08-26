@@ -81,6 +81,8 @@ struct NemoDesktopIconGridViewDetails
 	 */
 	gulong delayed_init_signal;
 	guint reload_desktop_timeout;
+	guint ensure_icons_timeout;
+	guint ensure_icons_timeout2;
 	gboolean pending_rescan;
     gboolean updating_menus;
 	GFileMonitor *dir_monitor;
@@ -290,6 +292,11 @@ nemo_desktop_icon_grid_view_file_changed (NemoView *view, NemoFile *file, NemoDi
 
     if (!should_show_file_on_current_monitor (view, file)) {
         nemo_desktop_icon_grid_view_remove_file (view, file, directory);
+    } else if (nemo_icon_container_add (get_icon_container (icon_view),
+                                        NEMO_ICON_CONTAINER_ICON_DATA (file))) {
+        nemo_file_ref (file);
+        nemo_icon_container_layout_now (get_icon_container (icon_view));
+        gtk_widget_queue_draw (GTK_WIDGET (get_icon_container (icon_view)));
     } else {
         nemo_icon_container_request_update (get_icon_container (icon_view),
                                             NEMO_ICON_CONTAINER_ICON_DATA (file));
@@ -343,6 +350,14 @@ nemo_desktop_icon_grid_view_dispose (GObject *object)
 	if (icon_view->details->reload_desktop_timeout != 0) {
 		g_source_remove (icon_view->details->reload_desktop_timeout);
 		icon_view->details->reload_desktop_timeout = 0;
+	}
+	if (icon_view->details->ensure_icons_timeout != 0) {
+		g_source_remove (icon_view->details->ensure_icons_timeout);
+		icon_view->details->ensure_icons_timeout = 0;
+	}
+	if (icon_view->details->ensure_icons_timeout2 != 0) {
+		g_source_remove (icon_view->details->ensure_icons_timeout2);
+		icon_view->details->ensure_icons_timeout2 = 0;
 	}
 
 	if (icon_view->details->dir_monitor != NULL) {
@@ -484,12 +499,36 @@ desktop_ensure_icons_from_model (NemoView *view)
 {
 	NemoDirectory *model;
 	NemoIconContainer *container;
-	GList *files, *l;
+	GList *files, *l, *disk;
+	GFile *dir, *child;
+	GFileEnumerator *en;
+	GFileInfo *info;
+	char *path;
 
 	model = nemo_view_get_model (view);
 	if (model == NULL) {
 		return;
 	}
+
+	path = nemo_get_desktop_directory ();
+	dir = g_file_new_for_path (path);
+	disk = NULL;
+	en = g_file_enumerate_children (dir, G_FILE_ATTRIBUTE_STANDARD_NAME,
+					G_FILE_QUERY_INFO_NOFOLLOW_SYMLINKS, NULL, NULL);
+	if (en != NULL) {
+		while ((info = g_file_enumerator_next_file (en, NULL, NULL)) != NULL) {
+			child = g_file_get_child (dir, g_file_info_get_name (info));
+			disk = g_list_prepend (disk, child);
+			g_object_unref (info);
+		}
+		g_object_unref (en);
+	}
+	if (disk != NULL) {
+		nemo_directory_notify_files_added (disk);
+		g_list_free_full (disk, g_object_unref);
+	}
+	g_object_unref (dir);
+	g_free (path);
 
 	files = nemo_directory_get_file_list (model);
 	for (l = files; l != NULL; l = l->next) {
@@ -504,6 +543,46 @@ desktop_ensure_icons_from_model (NemoView *view)
 		nemo_icon_container_layout_now (container);
 		gtk_widget_queue_draw (GTK_WIDGET (container));
 	}
+}
+
+static gboolean
+desktop_ensure_icons_timeout_cb (gpointer data)
+{
+	NemoDesktopIconGridView *grid = NEMO_DESKTOP_ICON_GRID_VIEW (data);
+
+	grid->details->ensure_icons_timeout = 0;
+	desktop_ensure_icons_from_model (NEMO_VIEW (grid));
+	return FALSE;
+}
+
+static gboolean
+desktop_ensure_icons_timeout2_cb (gpointer data)
+{
+	NemoDesktopIconGridView *grid = NEMO_DESKTOP_ICON_GRID_VIEW (data);
+
+	grid->details->ensure_icons_timeout2 = 0;
+	desktop_ensure_icons_from_model (NEMO_VIEW (grid));
+	return FALSE;
+}
+
+static void
+desktop_schedule_ensure_icons (NemoView *view)
+{
+	NemoDesktopIconGridView *grid = NEMO_DESKTOP_ICON_GRID_VIEW (view);
+
+	desktop_ensure_icons_from_model (view);
+	if (grid->details->ensure_icons_timeout != 0) {
+		g_source_remove (grid->details->ensure_icons_timeout);
+	}
+	if (grid->details->ensure_icons_timeout2 != 0) {
+		g_source_remove (grid->details->ensure_icons_timeout2);
+	}
+	/* Dest XDND leave can mark a just-copied file gone after CREATED.
+	 * Re-scan after teardown so the icon sticks without restarting. */
+	grid->details->ensure_icons_timeout =
+		g_timeout_add (400, desktop_ensure_icons_timeout_cb, grid);
+	grid->details->ensure_icons_timeout2 =
+		g_timeout_add (1500, desktop_ensure_icons_timeout2_cb, grid);
 }
 
 static void
@@ -537,7 +616,7 @@ on_real_dir_files_added (NemoDirectory *real_directory,
 			NEMO_VIEW_GET_CLASS (view)->add_file (view, l->data, model);
 		}
 	}
-	desktop_ensure_icons_from_model (view);
+	desktop_schedule_ensure_icons (view);
 }
 
 static void
@@ -559,17 +638,31 @@ desktop_dir_monitor_changed (GFileMonitor *monitor,
 		list = g_list_prepend (NULL, g_object_ref (file));
 		nemo_directory_notify_files_added (list);
 		g_list_free_full (list, g_object_unref);
-		desktop_ensure_icons_from_model (view);
+		desktop_schedule_ensure_icons (view);
 		break;
 	case G_FILE_MONITOR_EVENT_DELETED:
 	case G_FILE_MONITOR_EVENT_MOVED_OUT:
+		/* Dest DnD teardown can emit DELETED while the copied file
+		 * is still on disk. Treating that as gone hides the icon. */
+		if (file != NULL && g_file_query_exists (file, NULL)) {
+			list = g_list_prepend (NULL, g_object_ref (file));
+			nemo_directory_notify_files_added (list);
+			g_list_free_full (list, g_object_unref);
+			desktop_schedule_ensure_icons (view);
+			break;
+		}
 		list = g_list_prepend (NULL, g_object_ref (file));
 		nemo_directory_notify_files_removed (list);
 		g_list_free_full (list, g_object_unref);
 		break;
+	case G_FILE_MONITOR_EVENT_CHANGES_DONE_HINT:
+	case G_FILE_MONITOR_EVENT_ATTRIBUTE_CHANGED:
+		desktop_schedule_ensure_icons (view);
+		break;
 	case G_FILE_MONITOR_EVENT_MOVED:
 	case G_FILE_MONITOR_EVENT_RENAMED:
 		desktop_reload_from_disk (view);
+		desktop_schedule_ensure_icons (view);
 		break;
 	default:
 		break;
@@ -583,22 +676,21 @@ do_desktop_rescan (gpointer data)
 	struct stat buf;
 
 	desktop_icon_grid_view = NEMO_DESKTOP_ICON_GRID_VIEW (data);
-	if (desktop_icon_grid_view->details->pending_rescan) {
-		return TRUE;
-	}
 
 	if (stat (desktop_directory, &buf) == -1) {
 		return TRUE;
 	}
 
-	if (buf.st_mtime == desktop_dir_modify_time) {
-		return TRUE;
+	if (buf.st_mtime != desktop_dir_modify_time) {
+		if (!desktop_icon_grid_view->details->pending_rescan) {
+			desktop_icon_grid_view->details->pending_rescan = TRUE;
+			desktop_reload_from_disk (NEMO_VIEW (desktop_icon_grid_view));
+		}
+		desktop_ensure_icons_from_model (NEMO_VIEW (desktop_icon_grid_view));
+	} else if (desktop_icon_grid_view->details->pending_rescan) {
+		/* Reload may not have finished; still resurrect missing icons. */
+		desktop_ensure_icons_from_model (NEMO_VIEW (desktop_icon_grid_view));
 	}
-
-	desktop_icon_grid_view->details->pending_rescan = TRUE;
-
-	desktop_reload_from_disk (NEMO_VIEW (desktop_icon_grid_view));
-	desktop_ensure_icons_from_model (NEMO_VIEW (desktop_icon_grid_view));
 
 	return TRUE;
 }

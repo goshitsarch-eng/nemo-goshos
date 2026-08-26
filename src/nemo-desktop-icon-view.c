@@ -425,12 +425,36 @@ desktop_ensure_icons_from_model (NemoView *view)
 {
 	NemoDirectory *model;
 	NemoIconContainer *container;
-	GList *files, *l;
+	GList *files, *l, *disk;
+	GFile *dir, *child;
+	GFileEnumerator *en;
+	GFileInfo *info;
+	char *path;
 
 	model = nemo_view_get_model (view);
 	if (model == NULL) {
 		return;
 	}
+
+	path = nemo_get_desktop_directory ();
+	dir = g_file_new_for_path (path);
+	disk = NULL;
+	en = g_file_enumerate_children (dir, G_FILE_ATTRIBUTE_STANDARD_NAME,
+					G_FILE_QUERY_INFO_NOFOLLOW_SYMLINKS, NULL, NULL);
+	if (en != NULL) {
+		while ((info = g_file_enumerator_next_file (en, NULL, NULL)) != NULL) {
+			child = g_file_get_child (dir, g_file_info_get_name (info));
+			disk = g_list_prepend (disk, child);
+			g_object_unref (info);
+		}
+		g_object_unref (en);
+	}
+	if (disk != NULL) {
+		nemo_directory_notify_files_added (disk);
+		g_list_free_full (disk, g_object_unref);
+	}
+	g_object_unref (dir);
+	g_free (path);
 
 	files = nemo_directory_get_file_list (model);
 	for (l = files; l != NULL; l = l->next) {
@@ -504,9 +528,20 @@ desktop_dir_monitor_changed (GFileMonitor *monitor,
 		break;
 	case G_FILE_MONITOR_EVENT_DELETED:
 	case G_FILE_MONITOR_EVENT_MOVED_OUT:
+		if (file != NULL && g_file_query_exists (file, NULL)) {
+			list = g_list_prepend (NULL, g_object_ref (file));
+			nemo_directory_notify_files_added (list);
+			g_list_free_full (list, g_object_unref);
+			desktop_ensure_icons_from_model (view);
+			break;
+		}
 		list = g_list_prepend (NULL, g_object_ref (file));
 		nemo_directory_notify_files_removed (list);
 		g_list_free_full (list, g_object_unref);
+		break;
+	case G_FILE_MONITOR_EVENT_CHANGES_DONE_HINT:
+	case G_FILE_MONITOR_EVENT_ATTRIBUTE_CHANGED:
+		desktop_ensure_icons_from_model (view);
 		break;
 	case G_FILE_MONITOR_EVENT_MOVED:
 	case G_FILE_MONITOR_EVENT_RENAMED:
@@ -524,22 +559,20 @@ do_desktop_rescan (gpointer data)
 	struct stat buf;
 
 	desktop_icon_view = NEMO_DESKTOP_ICON_VIEW (data);
-	if (desktop_icon_view->details->pending_rescan) {
-		return TRUE;
-	}
 
 	if (stat (desktop_directory, &buf) == -1) {
 		return TRUE;
 	}
 
-	if (buf.st_mtime == desktop_dir_modify_time) {
-		return TRUE;
+	if (buf.st_mtime != desktop_dir_modify_time) {
+		if (!desktop_icon_view->details->pending_rescan) {
+			desktop_icon_view->details->pending_rescan = TRUE;
+			desktop_reload_from_disk (NEMO_VIEW (desktop_icon_view));
+		}
+		desktop_ensure_icons_from_model (NEMO_VIEW (desktop_icon_view));
+	} else if (desktop_icon_view->details->pending_rescan) {
+		desktop_ensure_icons_from_model (NEMO_VIEW (desktop_icon_view));
 	}
-
-	desktop_icon_view->details->pending_rescan = TRUE;
-
-	desktop_reload_from_disk (NEMO_VIEW (desktop_icon_view));
-	desktop_ensure_icons_from_model (NEMO_VIEW (desktop_icon_view));
 
 	return TRUE;
 }

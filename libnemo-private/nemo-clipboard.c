@@ -578,26 +578,60 @@ nemo_clipboard_get_uri_list_from_selection_data (GtkSelectionData *selection_dat
 						     gboolean *cut,
 						     GdkAtom copied_files_atom)
 {
-	GList *items;
+	GList *items = NULL;
 	char **lines;
+	const guchar *raw;
+	gint length;
+	GdkAtom type;
+	gchar *data;
 
-	if (gtk_selection_data_get_data_type (selection_data) != copied_files_atom
-	    || gtk_selection_data_get_length (selection_data) <= 0) {
-		items = NULL;
-	} else {
-		gchar *data;
-		/* Not sure why it's legal to assume there's an extra byte
-		 * past the end of the selection data that it's safe to write
-		 * to. But gtk_editable_selection_received does this, so I
-		 * think it is OK.
-		 */
-		data = (gchar *) gtk_selection_data_get_data (selection_data);
-		data[gtk_selection_data_get_length (selection_data)] = '\0';
+	if (cut) {
+		*cut = FALSE;
+	}
+
+	if (selection_data == NULL) {
+		return NULL;
+	}
+
+	length = gtk_selection_data_get_length (selection_data);
+	raw = gtk_selection_data_get_data (selection_data);
+	if (raw == NULL || length <= 0) {
+		return NULL;
+	}
+
+	type = gtk_selection_data_get_data_type (selection_data);
+	data = g_strndup ((const char *) raw, (gsize) length);
+
+	/* GTK4 clipboard compat may report a different type than the
+	 * requested x-special/gnome-copied-files atom. Parse that
+	 * format whenever the payload looks like copy/cut. */
+	if (type == copied_files_atom ||
+	    g_str_has_prefix (data, "copy\n") ||
+	    g_str_has_prefix (data, "cut\n") ||
+	    g_str_has_prefix (data, "copy\r") ||
+	    g_str_has_prefix (data, "cut\r")) {
 		lines = g_strsplit (data, "\n", 0);
 		items = convert_lines_to_str_list (lines, cut);
 		g_strfreev (lines);
 	}
-	
+
+	if (items == NULL) {
+		gchar **uris;
+		int i;
+
+		uris = gtk_selection_data_get_uris (selection_data);
+		if (uris != NULL) {
+			for (i = 0; uris[i] != NULL; i++) {
+				if (uris[i][0] != '\0') {
+					items = g_list_prepend (items, g_strdup (uris[i]));
+				}
+			}
+			g_strfreev (uris);
+			items = g_list_reverse (items);
+		}
+	}
+
+	g_free (data);
 	return items;
 }
 

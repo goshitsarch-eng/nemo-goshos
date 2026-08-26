@@ -6834,14 +6834,17 @@ copy_or_cut_files (NemoView *view,
 
     clipboard = nemo_clipboard_get (GTK_WIDGET (view));
 
+	/* Publish clipboard_info before gtk_clipboard_set_with_data so the
+	 * GTK4 content provider can serialize gnome-copied-files / uri-list
+	 * immediately (including remote ftp:// URIs). */
+	nemo_clipboard_monitor_set_clipboard_info (nemo_clipboard_monitor_get (), &info);
+
     gtk_clipboard_set_with_data (clipboard,
                                  targets, n_targets,
                                  nemo_get_clipboard_callback, nemo_clear_clipboard_callback,
                                  NULL);
     gtk_clipboard_set_can_store (clipboard, NULL, 0);
     gtk_target_table_free (targets, n_targets);
-
-	nemo_clipboard_monitor_set_clipboard_info (nemo_clipboard_monitor_get (), &info);
 
 	count = g_list_length (clipboard_contents);
 	if (count == 1) {
