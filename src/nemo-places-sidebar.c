@@ -4456,12 +4456,8 @@ nemo_places_sidebar_dispose (GObject *object)
 		g_signal_handlers_disconnect_by_data (selection, sidebar);
 		g_signal_handlers_disconnect_by_data (tree_view, sidebar);
 		gtk_tree_view_set_model (tree_view, NULL);
-		while (gtk_tree_view_get_n_columns (tree_view) > 0) {
-			GtkTreeViewColumn *column = gtk_tree_view_get_column (tree_view, 0);
-			gtk_tree_view_remove_column (tree_view, column);
-		}
-		if (gtk_widget_get_parent (GTK_WIDGET (tree_view)) != NULL)
-			gtk_widget_unparent (GTK_WIDGET (tree_view));
+		/* GTK4 child teardown finalizes this view unsafely. Keep it alive. */
+		g_object_ref (tree_view);
 	}
 	sidebar->window = NULL;
 	sidebar->tree_view = NULL;
