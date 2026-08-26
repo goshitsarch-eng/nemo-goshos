@@ -1282,17 +1282,59 @@ verne_accel_group_disconnect_action (GtkAccelGroup *group, GtkAction *action)
 }
 
 static gboolean
+verne_editable_wants_key (GtkWidget *focus, guint key, GdkModifierType mods)
+{
+	if (focus == NULL || !GTK_IS_EDITABLE (focus))
+		return FALSE;
+	if (!(mods & (GDK_CONTROL_MASK | GDK_ALT_MASK | GDK_SUPER_MASK)))
+		return TRUE;
+	if ((mods & GDK_CONTROL_MASK) && !(mods & GDK_ALT_MASK)) {
+		switch (key) {
+		case GDK_KEY_a:
+		case GDK_KEY_A:
+		case GDK_KEY_c:
+		case GDK_KEY_C:
+		case GDK_KEY_v:
+		case GDK_KEY_V:
+		case GDK_KEY_x:
+		case GDK_KEY_X:
+		case GDK_KEY_z:
+		case GDK_KEY_Z:
+		case GDK_KEY_Left:
+		case GDK_KEY_Right:
+		case GDK_KEY_Home:
+		case GDK_KEY_End:
+		case GDK_KEY_BackSpace:
+		case GDK_KEY_Delete:
+		case GDK_KEY_Return:
+		case GDK_KEY_KP_Enter:
+			return TRUE;
+		default:
+			break;
+		}
+	}
+	return FALSE;
+}
+
+static gboolean
 verne_accel_key_pressed (GtkEventControllerKey *self, guint keyval, guint keycode,
 			 GdkModifierType state, gpointer data)
 {
 	GtkAccelGroup *group = data;
+	GtkWidget *focus;
 	guint key = gdk_keyval_to_lower (keyval);
 	GdkModifierType mods = state & (GDK_CONTROL_MASK | GDK_ALT_MASK | GDK_SHIFT_MASK | GDK_SUPER_MASK);
 	gint i;
 
-	(void) self;
 	(void) keycode;
 	if (group == NULL || group->entries == NULL)
+		return FALSE;
+	focus = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (self));
+	if (focus) {
+		GtkRoot *root = gtk_widget_get_root (focus);
+		focus = root ? gtk_root_get_focus (root) : NULL;
+	}
+	if (verne_editable_wants_key (focus, keyval, mods))
 		return FALSE;
 	/* Newest bindings first so a live view wins over a stale one. */
 	for (i = (gint) group->entries->len - 1; i >= 0; i--) {
