@@ -1487,10 +1487,21 @@ verne_xdnd_send_drop (VerneLocalDrag *local)
 	if (verne_wm_class_is_verne_desktop (wmclass)) {
 		/* GTK4 does not deliver XDND on the transparent desktop
 		 * native to the icon canvas. Copy/move from the source so
-		 * nemo-desktop's directory monitor can show the icon. */
-		if (!(local->selected & GDK_ACTION_MOVE) && (local->actions & GDK_ACTION_COPY))
-			local->selected = GDK_ACTION_COPY;
+		 * nemo-desktop's directory monitor can show the icon.
+		 * Prefer COPY so dest is a created-file event; do not send
+		 * XdndDrop afterward or dest DnD teardown swallows the icon. */
+		local->selected = GDK_ACTION_COPY;
 		verne_copy_uris_to_desktop (local);
+		verne_xdnd_send_leave (local);
+		local->xdnd_dropped = TRUE;
+		local->xdnd_finished = TRUE;
+		g_warning ("desktop drop finished without XdndDrop class=%s",
+			   wmclass ? wmclass : "?");
+		g_free (wmclass);
+		if (local->xdnd_finish_timeout)
+			g_source_remove (local->xdnd_finish_timeout);
+		local->xdnd_finish_timeout = g_timeout_add (50, verne_xdnd_finish_timeout, local);
+		return;
 	}
 	time = gdk_x11_display_get_user_time (gdk_display_get_default ());
 	verne_xdnd_client_message (dpy, local->xdnd_target,
