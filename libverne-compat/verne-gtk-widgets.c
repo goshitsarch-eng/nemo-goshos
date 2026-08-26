@@ -851,17 +851,25 @@ verne_toplevel_dismiss_menus (GtkGestureClick *gesture, gint n_press, gdouble x,
 	GtkWidget *picked;
 
 	(void) n_press; (void) data;
+	/* Never claim the sequence: this is a click-outside dismiss, not a grab. */
+	gtk_gesture_set_state (GTK_GESTURE (gesture), GTK_EVENT_SEQUENCE_DENIED);
+
 	toplevel = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (gesture));
 	if (toplevel == NULL)
 		return;
 	picked = gtk_widget_pick (toplevel, x, y, GTK_PICK_DEFAULT);
 	if (picked != NULL &&
 	    (GTK_IS_MENU_ITEM (picked) || GTK_IS_MENU_BAR (picked) ||
+	     GTK_IS_NOTEBOOK (picked) ||
 	     gtk_widget_get_ancestor (picked, GTK_TYPE_MENU_ITEM) != NULL ||
-	     gtk_widget_get_ancestor (picked, GTK_TYPE_MENU_BAR) != NULL))
+	     gtk_widget_get_ancestor (picked, GTK_TYPE_MENU_BAR) != NULL ||
+	     gtk_widget_get_ancestor (picked, GTK_TYPE_NOTEBOOK) != NULL))
 		return;
 	verne_menu_hide_others (NULL);
 }
+
+static gboolean verne_toplevel_escape_menus (GtkEventControllerKey *controller, guint keyval, guint keycode,
+					     GdkModifierType state, gpointer data);
 
 static void
 verne_menu_attach_dismiss_on_toplevels (void)
@@ -873,17 +881,69 @@ verne_menu_attach_dismiss_on_toplevels (void)
 		if (w && GTK_IS_WINDOW (w) && !GTK_IS_MENU (w) &&
 		    g_object_get_data (w, "verne-menu-dismiss-hooked") == NULL) {
 			GtkGesture *click = gtk_gesture_click_new ();
-			gtk_gesture_single_set_button (GTK_GESTURE_SINGLE (click), 0);
+			gtk_gesture_single_set_button (GTK_GESTURE_SINGLE (click), GDK_BUTTON_PRIMARY);
 			gtk_event_controller_set_propagation_phase (GTK_EVENT_CONTROLLER (click),
 								    GTK_PHASE_CAPTURE);
 			g_signal_connect (click, "pressed",
 					  G_CALLBACK (verne_toplevel_dismiss_menus), NULL);
 			gtk_widget_add_controller (GTK_WIDGET (w), GTK_EVENT_CONTROLLER (click));
+			{
+				GtkEventController *keys = gtk_event_controller_key_new ();
+				gtk_event_controller_set_propagation_phase (keys, GTK_PHASE_CAPTURE);
+				g_signal_connect (keys, "key-pressed",
+						  G_CALLBACK (verne_toplevel_escape_menus), NULL);
+				gtk_widget_add_controller (GTK_WIDGET (w), keys);
+			}
 			g_object_set_data (w, "verne-menu-dismiss-hooked", GINT_TO_POINTER (1));
 		}
 		if (w)
 			g_object_unref (w);
 	}
+}
+
+static gboolean
+verne_menu_unmap_idle (gpointer data)
+{
+	GtkWidget *w = data;
+	if (GTK_IS_MENU (w) &&
+	    (g_object_get_data (G_OBJECT (w), "verne-dismissed") ||
+	     !gtk_widget_get_visible (w))) {
+		gtk_widget_set_visible (w, FALSE);
+		gtk_widget_set_opacity (w, 0.0);
+		verne_menu_unmap_surface (w);
+	}
+	g_object_unref (w);
+	return G_SOURCE_REMOVE;
+}
+
+static gboolean
+verne_any_menu_visible (void)
+{
+	GListModel *model = gtk_window_get_toplevels ();
+	guint i, n = g_list_model_get_n_items (model);
+	gboolean any = FALSE;
+	for (i = 0; i < n; i++) {
+		gpointer w = g_list_model_get_item (model, i);
+		if (GTK_IS_MENU (w) && gtk_widget_get_visible (GTK_WIDGET (w)) &&
+		    g_object_get_data (w, "verne-dismissed") == NULL)
+			any = TRUE;
+		if (w)
+			g_object_unref (w);
+	}
+	return any;
+}
+
+static gboolean
+verne_toplevel_escape_menus (GtkEventControllerKey *controller, guint keyval, guint keycode,
+			     GdkModifierType state, gpointer data)
+{
+	(void) controller; (void) keycode; (void) state; (void) data;
+	if (keyval != GDK_KEY_Escape)
+		return FALSE;
+	if (!verne_any_menu_visible ())
+		return FALSE;
+	verne_menu_hide_others (NULL);
+	return TRUE;
 }
 
 static gboolean
@@ -1003,6 +1063,8 @@ void gtk_menu_popdown (GtkMenu *menu) {
 		if (parent_menu && parent_menu != GTK_WIDGET (menu))
 			gtk_menu_popdown (GTK_MENU (parent_menu));
 	}
+	g_idle_add (verne_menu_unmap_idle, g_object_ref (menu));
+	g_timeout_add (50, verne_menu_unmap_idle, g_object_ref (menu));
 	g_object_set_data (G_OBJECT (menu), "verne-popping", NULL);
 }
 void gtk_menu_attach_to_widget (GtkMenu *menu, GtkWidget *attach, gpointer detacher) {
