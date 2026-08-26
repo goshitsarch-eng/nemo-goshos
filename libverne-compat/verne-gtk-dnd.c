@@ -727,7 +727,20 @@ verne_dnd_gesture_end (GtkWidget *widget)
 	if (drag == NULL)
 		return;
 	if (VERNE_IS_LOCAL_DRAG (drag)) {
-		verne_local_emit_drop (drag);
+		VerneLocalDrag *local = drag;
+
+		/* GtkGestureDrag can end when the pointer leaves the source
+		 * widget even while button1 is still down. Do not treat that
+		 * as a cancelled drop — hand over to native XDND instead. */
+		if (verne_local_button1_down () && !local->handed_over) {
+			verne_local_update_dest (local);
+			if (local->current_dest == NULL && !verne_pointer_over_own_toplevel (local))
+				verne_local_handover_native (local);
+			return;
+		}
+		if (local->handed_over)
+			return;
+		verne_local_emit_drop (local);
 		return;
 	}
 	if (drop_already_emitted)
