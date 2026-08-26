@@ -661,10 +661,6 @@ verne_local_handover_native (VerneLocalDrag *local)
 
 	local->native_drag = drag;
 	local->handed_over = TRUE;
-	if (local->poll_id) {
-		g_source_remove (local->poll_id);
-		local->poll_id = 0;
-	}
 	if (local->icon_window) {
 		gtk_window_destroy (GTK_WINDOW (local->icon_window));
 		local->icon_window = NULL;
@@ -673,6 +669,75 @@ verne_local_handover_native (VerneLocalDrag *local)
 	g_signal_connect (drag, "cancel", G_CALLBACK (verne_native_drag_cancel), local);
 	g_signal_connect (drag, "dnd-finished", G_CALLBACK (verne_native_drag_finished), local);
 	g_warning ("handed local drag over to native XDND");
+}
+
+static Window
+verne_xdnd_find_aware (Display *dpy, Window w)
+{
+	Atom xdnd_aware = XInternAtom (dpy, "XdndAware", False);
+
+	while (w && w != DefaultRootWindow (dpy)) {
+		Atom actual = None;
+		int format = 0;
+		unsigned long n = 0, bytes = 0;
+		unsigned char *prop = NULL;
+		Window root = None, parent = None, *children = NULL;
+		unsigned int nchild = 0;
+
+		if (XGetWindowProperty (dpy, w, xdnd_aware, 0, 1, False, AnyPropertyType,
+					&actual, &format, &n, &bytes, &prop) == Success && n > 0) {
+			if (prop)
+				XFree (prop);
+			return w;
+		}
+		if (prop)
+			XFree (prop);
+		if (!XQueryTree (dpy, w, &root, &parent, &children, &nchild))
+			break;
+		if (children)
+			XFree (children);
+		if (parent == None || parent == root)
+			break;
+		w = parent;
+	}
+	return None;
+}
+
+static void
+verne_xdnd_send_drop (GdkDrag *drag)
+{
+	Display *dpy;
+	Window root_ret, child = None, target, source = None;
+	int rx = 0, ry = 0, wx = 0, wy = 0;
+	unsigned int mask = 0;
+	GdkSurface *surface;
+	XClientMessageEvent ev = { 0 };
+
+	if (drag == NULL)
+		return;
+	dpy = GDK_DISPLAY_XDISPLAY (gdk_display_get_default ());
+	if (dpy == NULL)
+		return;
+	if (!XQueryPointer (dpy, DefaultRootWindow (dpy), &root_ret, &child, &rx, &ry, &wx, &wy, &mask))
+		return;
+	target = verne_xdnd_find_aware (dpy, child);
+	surface = gdk_drag_get_surface (drag);
+	if (surface)
+		source = gdk_x11_surface_get_xid (surface);
+	if (target == None || source == None) {
+		g_warning ("XdndDrop skipped target=0x%lx source=0x%lx", (unsigned long) target, (unsigned long) source);
+		return;
+	}
+	ev.type = ClientMessage;
+	ev.window = target;
+	ev.message_type = XInternAtom (dpy, "XdndDrop", False);
+	ev.format = 32;
+	ev.data.l[0] = (long) source;
+	ev.data.l[1] = 0;
+	ev.data.l[2] = CurrentTime;
+	XSendEvent (dpy, target, False, NoEventMask, (XEvent *) &ev);
+	XFlush (dpy);
+	g_warning ("sent XdndDrop to 0x%lx from 0x%lx", (unsigned long) target, (unsigned long) source);
 }
 
 static gboolean
@@ -684,15 +749,22 @@ verne_local_poll (gpointer data)
 	if (!GTK_IS_WIDGET (source))
 		return G_SOURCE_REMOVE;
 	local = g_object_get_data (G_OBJECT (source), "verne-active-drag");
-	if (local == NULL || !VERNE_IS_LOCAL_DRAG (local) || local->drop_emitted || local->handed_over)
+	if (local == NULL || !VERNE_IS_LOCAL_DRAG (local) || local->drop_emitted)
 		return G_SOURCE_REMOVE;
+	if (local->handed_over) {
+		if (!verne_local_button1_down ()) {
+			local->poll_id = 0;
+			verne_xdnd_send_drop (local->native_drag);
+			return G_SOURCE_REMOVE;
+		}
+		return G_SOURCE_CONTINUE;
+	}
 	verne_local_move_icon (local);
 	verne_local_update_dest (local);
-	if (local->current_dest == NULL && !verne_pointer_over_own_toplevel (local)) {
+	if (local->current_dest == NULL && !verne_pointer_over_own_toplevel (local))
 		verne_local_handover_native (local);
-		if (local->handed_over)
-			return G_SOURCE_REMOVE;
-	}
+	if (local->handed_over)
+		return G_SOURCE_CONTINUE;
 	if (!verne_local_button1_down ()) {
 		local->poll_id = 0;
 		g_warning ("local DnD poll saw button1 up, dropping");
