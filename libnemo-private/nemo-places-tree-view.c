@@ -22,6 +22,7 @@
 G_DEFINE_TYPE (NemoPlacesTreeView, nemo_places_tree_view,
                GTK_TYPE_TREE_VIEW);
 
+static void     nemo_places_tree_view_dispose  (GObject *gobject);
 static void     nemo_places_tree_view_finalize (GObject *gobject);
 
 static gpointer parent_class;
@@ -38,6 +39,7 @@ nemo_places_tree_view_class_init (NemoPlacesTreeViewClass *klass)
 	GtkWidgetClass *widget_class = GTK_WIDGET_CLASS (klass);
     GObjectClass         *object_class = G_OBJECT_CLASS(klass);
     parent_class           = g_type_class_peek_parent (klass);
+    object_class->dispose = nemo_places_tree_view_dispose;
     object_class->finalize = nemo_places_tree_view_finalize;
 
     gtk_widget_class_install_style_property (widget_class,
@@ -91,7 +93,16 @@ nemo_places_tree_view_new (void)
 }
 
 static void
+nemo_places_tree_view_dispose (GObject *object)
+{
+    gtk_tree_view_set_model (GTK_TREE_VIEW (object), NULL);
+    if (G_OBJECT_CLASS (parent_class)->dispose)
+        G_OBJECT_CLASS (parent_class)->dispose (object);
+}
+
+static void
 nemo_places_tree_view_finalize (GObject *object)
 {
-    G_OBJECT_CLASS (parent_class)->finalize (object);
+    if (G_OBJECT_CLASS (parent_class)->finalize)
+        G_OBJECT_CLASS (parent_class)->finalize (object);
 }

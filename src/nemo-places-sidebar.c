@@ -4465,6 +4465,9 @@ nemo_places_sidebar_dispose (GObject *object)
         sidebar->update_places_on_idle_id = 0;
     }
 
+	if (sidebar->tree_view != NULL)
+		gtk_tree_view_set_model (GTK_TREE_VIEW (sidebar->tree_view), NULL);
+
 	g_clear_object (&sidebar->store);
 
     g_clear_pointer (&sidebar->top_bookend_uri, g_free);
