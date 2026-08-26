@@ -5,10 +5,12 @@
 
 #include <string.h>
 #include <gio/gio.h>
+#include <glib-unix.h>
 #include <gtk/gtk.h>
 #include <gdk/x11/gdkx.h>
 #include <graphene.h>
 #include <X11/Xlib.h>
+#include <X11/Xatom.h>
 
 static GQuark
 dest_quark (void)
@@ -219,6 +221,12 @@ typedef struct _VerneLocalDrag {
 	GtkWidget *picture;
 	GtkWidget *current_dest;
 	GdkDrag *native_drag;
+	Window xdnd_source;
+	Window xdnd_target;
+	unsigned long *xdnd_atoms;
+	guint n_xdnd_atoms;
+	guint xdnd_fd_id;
+	guint xdnd_finish_timeout;
 	double dest_x;
 	double dest_y;
 	int hot_x;
@@ -226,6 +234,9 @@ typedef struct _VerneLocalDrag {
 	guint poll_id;
 	gboolean drop_emitted;
 	gboolean handed_over;
+	gboolean xdnd_accepted;
+	gboolean xdnd_dropped;
+	gboolean xdnd_finished;
 } VerneLocalDrag;
 
 typedef struct _VerneLocalDragClass {
@@ -235,6 +246,8 @@ typedef struct _VerneLocalDragClass {
 G_DEFINE_TYPE (VerneLocalDrag, verne_local_drag, G_TYPE_OBJECT)
 
 #define VERNE_IS_LOCAL_DRAG(o) (G_TYPE_CHECK_INSTANCE_TYPE ((o), verne_local_drag_get_type ()))
+
+static void verne_xdnd_teardown (VerneLocalDrag *local);
 
 static void
 verne_local_drag_finalize (GObject *object)
@@ -259,6 +272,7 @@ verne_local_drag_finalize (GObject *object)
 		g_object_unref (self->native_drag);
 		self->native_drag = NULL;
 	}
+	verne_xdnd_teardown (self);
 	G_OBJECT_CLASS (verne_local_drag_parent_class)->finalize (object);
 }
 
@@ -494,6 +508,35 @@ verne_local_update_dest (VerneLocalDrag *local)
 }
 
 static void
+verne_xdnd_teardown (VerneLocalDrag *local)
+{
+	Display *dpy;
+
+	if (local->xdnd_fd_id) {
+		g_source_remove (local->xdnd_fd_id);
+		local->xdnd_fd_id = 0;
+	}
+	if (local->xdnd_finish_timeout) {
+		g_source_remove (local->xdnd_finish_timeout);
+		local->xdnd_finish_timeout = 0;
+	}
+	dpy = GDK_DISPLAY_XDISPLAY (gdk_display_get_default ());
+	if (dpy && local->xdnd_source) {
+		gdk_x11_display_error_trap_push (gdk_display_get_default ());
+		if (XGetSelectionOwner (dpy, XInternAtom (dpy, "XdndSelection", False)) == local->xdnd_source)
+			XSetSelectionOwner (dpy, XInternAtom (dpy, "XdndSelection", False), None,
+					    gdk_x11_display_get_user_time (gdk_display_get_default ()));
+		XDestroyWindow (dpy, local->xdnd_source);
+		XFlush (dpy);
+		gdk_x11_display_error_trap_pop_ignored (gdk_display_get_default ());
+		local->xdnd_source = None;
+	}
+	g_clear_pointer (&local->xdnd_atoms, g_free);
+	local->n_xdnd_atoms = 0;
+	local->xdnd_target = None;
+}
+
+static void
 verne_local_cleanup (VerneLocalDrag *local)
 {
 	GtkWidget *source;
@@ -512,6 +555,7 @@ verne_local_cleanup (VerneLocalDrag *local)
 	}
 	if (source)
 		g_object_set_data (G_OBJECT (source), "verne-active-drag", NULL);
+	verne_xdnd_teardown (local);
 	if (local->native_drag) {
 		g_signal_handlers_disconnect_by_data (local->native_drag, local);
 		g_clear_object (&local->native_drag);
@@ -588,91 +632,6 @@ verne_pointer_over_own_toplevel (VerneLocalDrag *local)
 	return FALSE;
 }
 
-static void
-verne_native_drag_finished (GdkDrag *drag, gpointer data)
-{
-	VerneLocalDrag *local = data;
-	GtkWidget *source = local->source;
-
-	(void) drag;
-	if (local->drop_emitted)
-		return;
-	local->drop_emitted = TRUE;
-	g_warning ("native XDND finished");
-	if (source)
-		g_signal_emit_by_name (source, "drag-end", local);
-	verne_local_cleanup (local);
-}
-
-static void
-verne_native_drag_cancel (GdkDrag *drag, GdkDragCancelReason reason, gpointer data)
-{
-	VerneLocalDrag *local = data;
-	GtkWidget *source = local->source;
-	gboolean handled = FALSE;
-
-	(void) drag;
-	g_warning ("native XDND cancel reason=%d", (int) reason);
-	if (local->drop_emitted)
-		return;
-	local->drop_emitted = TRUE;
-	if (source) {
-		g_signal_emit_by_name (source, "drag-failed", local, 0, &handled);
-		g_signal_emit_by_name (source, "drag-end", local);
-	}
-	verne_local_cleanup (local);
-}
-
-static void
-verne_local_handover_native (VerneLocalDrag *local)
-{
-	GtkNative *native;
-	GdkSurface *surface;
-	GdkSeat *seat;
-	GdkDevice *device;
-	GdkContentProvider *provider;
-	VerneContentProvider *vp;
-	GdkDrag *drag;
-	GdkPaintable *paintable = NULL;
-
-	if (local->handed_over || local->source == NULL)
-		return;
-	native = gtk_widget_get_native (local->source);
-	surface = native ? gtk_native_get_surface (native) : NULL;
-	seat = gdk_display_get_default_seat (gdk_display_get_default ());
-	device = seat ? gdk_seat_get_pointer (seat) : NULL;
-	if (surface == NULL || device == NULL)
-		return;
-
-	provider = verne_content_provider_new_for_widget (local->source, local->targets);
-	vp = (VerneContentProvider *) provider;
-	drag = gdk_drag_begin (surface, device, provider, local->actions, 0, 0);
-	if (drag == NULL) {
-		g_warning ("gdk_drag_begin failed, staying local");
-		g_object_unref (provider);
-		return;
-	}
-	vp->drag = drag;
-	g_object_unref (provider);
-	g_object_set_qdata (G_OBJECT (drag), source_widget_quark (), local->source);
-
-	if (local->picture)
-		paintable = gtk_picture_get_paintable (GTK_PICTURE (local->picture));
-	if (paintable)
-		gtk_drag_icon_set_from_paintable (drag, paintable, local->hot_x, local->hot_y);
-
-	local->native_drag = drag;
-	local->handed_over = TRUE;
-	if (local->icon_window) {
-		gtk_window_destroy (GTK_WINDOW (local->icon_window));
-		local->icon_window = NULL;
-		local->picture = NULL;
-	}
-	g_signal_connect (drag, "cancel", G_CALLBACK (verne_native_drag_cancel), local);
-	g_signal_connect (drag, "dnd-finished", G_CALLBACK (verne_native_drag_finished), local);
-	g_warning ("handed local drag over to native XDND");
-}
-
 static gboolean
 verne_window_is_xdnd_aware (Display *dpy, Window w)
 {
@@ -734,18 +693,17 @@ verne_find_xdnd_in_tree (Display *dpy, Window w)
 }
 
 static void
-verne_xdnd_collect_skip (GHashTable *skip, GdkDrag *drag)
+verne_xdnd_collect_skip (GHashTable *skip, VerneLocalDrag *local)
 {
-	GdkSurface *surface, *icon;
 	GList *toplevels, *l;
 
-	if (drag) {
-		surface = gdk_drag_get_surface (drag);
-		icon = gdk_drag_get_drag_surface (drag);
-		if (surface)
-			g_hash_table_add (skip, GUINT_TO_POINTER (gdk_x11_surface_get_xid (surface)));
-		if (icon)
-			g_hash_table_add (skip, GUINT_TO_POINTER (gdk_x11_surface_get_xid (icon)));
+	if (local->xdnd_source)
+		g_hash_table_add (skip, GUINT_TO_POINTER (local->xdnd_source));
+	if (local->icon_window) {
+		GtkNative *native = gtk_widget_get_native (local->icon_window);
+		GdkSurface *surf = native ? gtk_native_get_surface (native) : NULL;
+		if (surf)
+			g_hash_table_add (skip, GUINT_TO_POINTER (gdk_x11_surface_get_xid (surf)));
 	}
 	toplevels = gtk_window_list_toplevels ();
 	for (l = toplevels; l; l = l->next) {
@@ -758,7 +716,7 @@ verne_xdnd_collect_skip (GHashTable *skip, GdkDrag *drag)
 }
 
 static Window
-verne_xdnd_target_at_pointer (Display *dpy, GdkDrag *drag)
+verne_xdnd_target_at_pointer (Display *dpy, VerneLocalDrag *local, int *root_x, int *root_y)
 {
 	Window root, root_ret, parent, *children = NULL, target = None;
 	int rx = 0, ry = 0, wx = 0, wy = 0;
@@ -768,8 +726,12 @@ verne_xdnd_target_at_pointer (Display *dpy, GdkDrag *drag)
 	root = DefaultRootWindow (dpy);
 	if (!XQueryPointer (dpy, root, &root_ret, &parent, &rx, &ry, &wx, &wy, &mask))
 		return None;
+	if (root_x)
+		*root_x = rx;
+	if (root_y)
+		*root_y = ry;
 	skip = g_hash_table_new (g_direct_hash, g_direct_equal);
-	verne_xdnd_collect_skip (skip, drag);
+	verne_xdnd_collect_skip (skip, local);
 	if (!XQueryTree (dpy, root, &root_ret, &parent, &children, &nchild) || children == NULL) {
 		g_hash_table_destroy (skip);
 		return None;
@@ -794,42 +756,296 @@ verne_xdnd_target_at_pointer (Display *dpy, GdkDrag *drag)
 }
 
 static void
-verne_xdnd_send_drop (GdkDrag *drag)
+verne_xdnd_client_message (Display *dpy, Window target, Atom type, long l0, long l1, long l2, long l3, long l4)
 {
-	Display *dpy;
-	Window target, source = None;
-	GdkSurface *surface;
 	XClientMessageEvent ev = { 0 };
 
-	if (drag == NULL)
+	if (target == None)
 		return;
-	dpy = GDK_DISPLAY_XDISPLAY (gdk_display_get_default ());
-	if (dpy == NULL)
-		return;
-	target = verne_xdnd_target_at_pointer (dpy, drag);
-	surface = gdk_drag_get_surface (drag);
-	if (surface)
-		source = gdk_x11_surface_get_xid (surface);
-	{
-		Atom xdnd_sel = XInternAtom (dpy, "XdndSelection", False);
-		Window owner = XGetSelectionOwner (dpy, xdnd_sel);
-		if (owner != None)
-			source = owner;
-	}
-	if (target == None || source == None) {
-		g_warning ("XdndDrop skipped target=0x%lx source=0x%lx", (unsigned long) target, (unsigned long) source);
-		return;
-	}
 	ev.type = ClientMessage;
 	ev.window = target;
-	ev.message_type = XInternAtom (dpy, "XdndDrop", False);
+	ev.message_type = type;
 	ev.format = 32;
-	ev.data.l[0] = (long) source;
-	ev.data.l[1] = 0;
-	ev.data.l[2] = (long) gdk_x11_display_get_user_time (gdk_display_get_default ());
+	ev.data.l[0] = l0;
+	ev.data.l[1] = l1;
+	ev.data.l[2] = l2;
+	ev.data.l[3] = l3;
+	ev.data.l[4] = l4;
+	gdk_x11_display_error_trap_push (gdk_display_get_default ());
 	XSendEvent (dpy, target, False, NoEventMask, (XEvent *) &ev);
 	XFlush (dpy);
-	g_warning ("sent XdndDrop to 0x%lx from 0x%lx", (unsigned long) target, (unsigned long) source);
+	gdk_x11_display_error_trap_pop_ignored (gdk_display_get_default ());
+}
+
+static Atom
+verne_xdnd_action_atom (Display *dpy, VerneLocalDrag *local)
+{
+	if (local->selected & GDK_ACTION_MOVE)
+		return XInternAtom (dpy, "XdndActionMove", False);
+	return XInternAtom (dpy, "XdndActionCopy", False);
+}
+
+static void
+verne_xdnd_send_leave (VerneLocalDrag *local)
+{
+	Display *dpy;
+
+	if (local->xdnd_target == None || local->xdnd_source == None)
+		return;
+	dpy = GDK_DISPLAY_XDISPLAY (gdk_display_get_default ());
+	verne_xdnd_client_message (dpy, local->xdnd_target,
+				   XInternAtom (dpy, "XdndLeave", False),
+				   (long) local->xdnd_source, 0, 0, 0, 0);
+	local->xdnd_target = None;
+	local->xdnd_accepted = FALSE;
+}
+
+static void
+verne_xdnd_send_enter (VerneLocalDrag *local, Window target)
+{
+	Display *dpy = GDK_DISPLAY_XDISPLAY (gdk_display_get_default ());
+	long flags = 5L << 24;
+
+	if (local->n_xdnd_atoms > 3)
+		flags |= 1;
+	verne_xdnd_client_message (dpy, target,
+				   XInternAtom (dpy, "XdndEnter", False),
+				   (long) local->xdnd_source, flags,
+				   local->n_xdnd_atoms > 0 ? (long) local->xdnd_atoms[0] : 0,
+				   local->n_xdnd_atoms > 1 ? (long) local->xdnd_atoms[1] : 0,
+				   local->n_xdnd_atoms > 2 ? (long) local->xdnd_atoms[2] : 0);
+	local->xdnd_target = target;
+	local->xdnd_accepted = FALSE;
+}
+
+static void
+verne_xdnd_send_position (VerneLocalDrag *local)
+{
+	Display *dpy = GDK_DISPLAY_XDISPLAY (gdk_display_get_default ());
+	int rx = 0, ry = 0;
+	Window target;
+	guint32 time;
+
+	if (local->xdnd_source == None)
+		return;
+	target = verne_xdnd_target_at_pointer (dpy, local, &rx, &ry);
+	if (target != local->xdnd_target) {
+		if (local->xdnd_target != None)
+			verne_xdnd_send_leave (local);
+		if (target != None)
+			verne_xdnd_send_enter (local, target);
+	}
+	if (local->xdnd_target == None)
+		return;
+	time = gdk_x11_display_get_user_time (gdk_display_get_default ());
+	verne_xdnd_client_message (dpy, local->xdnd_target,
+				   XInternAtom (dpy, "XdndPosition", False),
+				   (long) local->xdnd_source, 0,
+				   ((long) rx << 16) | (ry & 0xffff),
+				   (long) time,
+				   (long) verne_xdnd_action_atom (dpy, local));
+}
+
+static void
+verne_xdnd_handle_selection_request (VerneLocalDrag *local, const XSelectionRequestEvent *req)
+{
+	Display *dpy = req->display;
+	XSelectionEvent notify = { 0 };
+	gboolean success = FALSE;
+	char *name;
+
+	notify.type = SelectionNotify;
+	notify.serial = 0;
+	notify.send_event = True;
+	notify.display = dpy;
+	notify.requestor = req->requestor;
+	notify.selection = req->selection;
+	notify.target = req->target;
+	notify.property = req->property;
+	notify.time = req->time;
+
+	gdk_x11_display_error_trap_push (gdk_display_get_default ());
+	name = XGetAtomName (dpy, req->target);
+	if (name && g_strcmp0 (name, "TARGETS") == 0) {
+		XChangeProperty (dpy, req->requestor, req->property, XA_ATOM, 32,
+				 PropModeReplace, (unsigned char *) local->xdnd_atoms,
+				 (int) local->n_xdnd_atoms);
+		success = TRUE;
+	} else if (name && local->source) {
+		GtkSelectionData sel = { 0 };
+		guint info;
+		const char *mime = name;
+
+		if (g_strcmp0 (name, "STRING") == 0 || g_strcmp0 (name, "TEXT") == 0 ||
+		    g_strcmp0 (name, "UTF8_STRING") == 0 || g_strcmp0 (name, "text/plain") == 0)
+			mime = "text/uri-list";
+		sel.target = (GdkAtom) mime;
+		sel.type = sel.target;
+		sel.format = 8;
+		info = info_for_target (local->targets, sel.target);
+		g_signal_emit_by_name (local->source, "drag-data-get", local, &sel, info, req->time);
+		g_warning ("xdnd SelectionRequest mime=%s len=%d", mime, sel.length);
+		if (sel.data && sel.length > 0) {
+			XChangeProperty (dpy, req->requestor, req->property, req->target,
+					 sel.format ? sel.format : 8, PropModeReplace,
+					 sel.data, sel.length);
+			success = TRUE;
+		}
+		g_free (sel.data);
+	}
+	if (name)
+		XFree (name);
+	if (!success)
+		notify.property = None;
+	XSendEvent (dpy, req->requestor, False, NoEventMask, (XEvent *) &notify);
+	XFlush (dpy);
+	gdk_x11_display_error_trap_pop_ignored (gdk_display_get_default ());
+}
+
+static void
+verne_xdnd_pump (VerneLocalDrag *local)
+{
+	Display *dpy;
+	XEvent ev;
+
+	if (local->xdnd_source == None)
+		return;
+	dpy = GDK_DISPLAY_XDISPLAY (gdk_display_get_default ());
+	while (XCheckTypedWindowEvent (dpy, local->xdnd_source, SelectionRequest, &ev))
+		verne_xdnd_handle_selection_request (local, &ev.xselectionrequest);
+	while (XCheckTypedWindowEvent (dpy, local->xdnd_source, ClientMessage, &ev)) {
+		const char *atom_name = NULL;
+
+		if (ev.xclient.message_type)
+			atom_name = gdk_x11_get_xatom_name_for_display (gdk_display_get_default (), ev.xclient.message_type);
+		if (g_strcmp0 (atom_name, "XdndStatus") == 0) {
+			local->xdnd_accepted = (ev.xclient.data.l[1] & 1) != 0;
+			g_debug ("xdnd status accept=%d", local->xdnd_accepted);
+		} else if (g_strcmp0 (atom_name, "XdndFinished") == 0) {
+			g_warning ("xdnd finished accept=%ld", ev.xclient.data.l[1] & 1);
+			local->xdnd_finished = TRUE;
+		}
+	}
+}
+
+static gboolean
+verne_xdnd_xfd (gint fd, GIOCondition cond, gpointer data)
+{
+	(void) fd;
+	(void) cond;
+	verne_xdnd_pump (data);
+	return G_SOURCE_CONTINUE;
+}
+
+static gboolean
+verne_xdnd_finish_timeout (gpointer data)
+{
+	VerneLocalDrag *local = data;
+	GtkWidget *source = local->source;
+	gboolean handled = FALSE;
+
+	local->xdnd_finish_timeout = 0;
+	if (local->drop_emitted)
+		return G_SOURCE_REMOVE;
+	local->drop_emitted = TRUE;
+	g_warning ("xdnd finish timeout, accepted=%d", local->xdnd_accepted);
+	if (source) {
+		if (!local->xdnd_accepted)
+			g_signal_emit_by_name (source, "drag-failed", local, 0, &handled);
+		g_signal_emit_by_name (source, "drag-end", local);
+	}
+	verne_local_cleanup (local);
+	return G_SOURCE_REMOVE;
+}
+
+static void
+verne_xdnd_send_drop (VerneLocalDrag *local)
+{
+	Display *dpy = GDK_DISPLAY_XDISPLAY (gdk_display_get_default ());
+	guint32 time;
+
+	verne_xdnd_send_position (local);
+	verne_xdnd_pump (local);
+	if (local->xdnd_target == None || local->xdnd_source == None) {
+		g_warning ("XdndDrop skipped, no target");
+		return;
+	}
+	time = gdk_x11_display_get_user_time (gdk_display_get_default ());
+	verne_xdnd_client_message (dpy, local->xdnd_target,
+				   XInternAtom (dpy, "XdndDrop", False),
+				   (long) local->xdnd_source, 0, (long) time, 0, 0);
+	local->xdnd_dropped = TRUE;
+	g_warning ("sent XdndDrop to 0x%lx from 0x%lx",
+		   (unsigned long) local->xdnd_target, (unsigned long) local->xdnd_source);
+	if (local->xdnd_finish_timeout)
+		g_source_remove (local->xdnd_finish_timeout);
+	local->xdnd_finish_timeout = g_timeout_add_seconds (3, verne_xdnd_finish_timeout, local);
+}
+
+static void
+verne_local_handover_native (VerneLocalDrag *local)
+{
+	Display *dpy;
+	GdkDisplay *gdk_dpy;
+	XSetWindowAttributes swa;
+	Atom xdnd_aware, xdnd_sel, xdnd_typelist;
+	unsigned long version = 5;
+	guint32 time;
+	guint i;
+
+	if (local->handed_over || local->source == NULL)
+		return;
+	gdk_dpy = gdk_display_get_default ();
+	dpy = GDK_DISPLAY_XDISPLAY (gdk_dpy);
+	if (dpy == NULL)
+		return;
+
+	swa.override_redirect = True;
+	gdk_x11_display_error_trap_push (gdk_dpy);
+	local->xdnd_source = XCreateWindow (dpy, DefaultRootWindow (dpy),
+					    -20, -20, 1, 1, 0, CopyFromParent, InputOnly,
+					    CopyFromParent, CWOverrideRedirect, &swa);
+	xdnd_aware = XInternAtom (dpy, "XdndAware", False);
+	XChangeProperty (dpy, local->xdnd_source, xdnd_aware, XA_ATOM, 32,
+			 PropModeReplace, (unsigned char *) &version, 1);
+
+	local->n_xdnd_atoms = local->targets && local->targets->entries ? local->targets->entries->len : 0;
+	if (local->n_xdnd_atoms == 0) {
+		local->n_xdnd_atoms = 1;
+		local->xdnd_atoms = g_new0 (unsigned long, 1);
+		local->xdnd_atoms[0] = XInternAtom (dpy, "text/uri-list", False);
+	} else {
+		local->xdnd_atoms = g_new0 (unsigned long, local->n_xdnd_atoms);
+		for (i = 0; i < local->n_xdnd_atoms; i++) {
+			GtkTargetEntry *e = &g_array_index (local->targets->entries, GtkTargetEntry, i);
+			local->xdnd_atoms[i] = XInternAtom (dpy, e->target ? e->target : "text/uri-list", False);
+		}
+	}
+	xdnd_typelist = XInternAtom (dpy, "XdndTypeList", False);
+	XChangeProperty (dpy, local->xdnd_source, xdnd_typelist, XA_ATOM, 32,
+			 PropModeReplace, (unsigned char *) local->xdnd_atoms, (int) local->n_xdnd_atoms);
+
+	time = gdk_x11_display_get_user_time (gdk_dpy);
+	xdnd_sel = XInternAtom (dpy, "XdndSelection", False);
+	XSetSelectionOwner (dpy, xdnd_sel, local->xdnd_source, time);
+	XFlush (dpy);
+	gdk_x11_display_error_trap_pop_ignored (gdk_dpy);
+
+	if (XGetSelectionOwner (dpy, xdnd_sel) != local->xdnd_source) {
+		g_warning ("failed to own XdndSelection");
+		verne_xdnd_teardown (local);
+		return;
+	}
+
+	local->xdnd_fd_id = g_unix_fd_add_full (G_PRIORITY_HIGH,
+						ConnectionNumber (dpy), G_IO_IN,
+						verne_xdnd_xfd, local, NULL);
+	local->handed_over = TRUE;
+	if ((local->actions & GDK_ACTION_COPY) && !(local->selected & GDK_ACTION_MOVE))
+		local->selected = GDK_ACTION_COPY;
+	verne_xdnd_send_position (local);
+	g_warning ("handed local drag over to XDND source=0x%lx types=%u",
+		   (unsigned long) local->xdnd_source, local->n_xdnd_atoms);
 }
 
 static gboolean
@@ -844,10 +1060,21 @@ verne_local_poll (gpointer data)
 	if (local == NULL || !VERNE_IS_LOCAL_DRAG (local) || local->drop_emitted)
 		return G_SOURCE_REMOVE;
 	if (local->handed_over) {
-		if (!verne_local_button1_down ()) {
+		verne_local_move_icon (local);
+		verne_xdnd_pump (local);
+		if (local->xdnd_finished) {
 			local->poll_id = 0;
-			verne_xdnd_send_drop (local->native_drag);
+			local->drop_emitted = TRUE;
+			g_signal_emit_by_name (source, "drag-end", local);
+			verne_local_cleanup (local);
 			return G_SOURCE_REMOVE;
+		}
+		if (!local->xdnd_dropped) {
+			if (!verne_local_button1_down ()) {
+				verne_xdnd_send_drop (local);
+			} else {
+				verne_xdnd_send_position (local);
+			}
 		}
 		return G_SOURCE_CONTINUE;
 	}
