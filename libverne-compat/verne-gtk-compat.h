@@ -1834,6 +1834,13 @@ void verne_toggle_button_set_active (gpointer button, gboolean active);
 #define gtk_toggle_button_set_active(b, v) verne_toggle_button_set_active ((b), (v))
 #define gtk_toggle_button_get_inconsistent(b) FALSE
 #define gtk_toggle_button_set_inconsistent(b, v) ((void)0)
+/* GTK4 GtkCheckButton is no longer a GtkToggleButton. Nemo still casts. */
+#undef GTK_TOGGLE_BUTTON
+#define GTK_TOGGLE_BUTTON(o) ((GtkToggleButton *) (gpointer) (o))
+#undef GTK_IS_TOGGLE_BUTTON
+#define GTK_IS_TOGGLE_BUTTON(o) \
+	((o) != NULL && (G_TYPE_CHECK_INSTANCE_TYPE ((o), gtk_toggle_button_get_type ()) || \
+			  G_TYPE_CHECK_INSTANCE_TYPE ((o), gtk_check_button_get_type ())))
 gboolean gtk_window_propagate_key_event (GtkWindow *window, GdkEventKey *event);
 #define gtk_icon_size_register(name, w, h) GTK_ICON_SIZE_INHERIT
 void gtk_file_chooser_set_local_only (GtkFileChooser *chooser, gboolean local_only);

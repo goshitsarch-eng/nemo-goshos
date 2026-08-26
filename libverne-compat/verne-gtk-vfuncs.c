@@ -977,19 +977,25 @@ wrapped_dispose (GObject *object)
 	VerneVfuncs *v;
 	void (*real_dispose) (GObject *) = NULL;
 
+	if (!G_IS_OBJECT (object))
+		return;
+	if (g_object_get_data (object, "verne-in-orig-dispose"))
+		return;
 	if (g_object_get_data (object, "verne-disposing"))
 		return;
 	g_object_set_data (object, "verne-disposing", GINT_TO_POINTER (1));
 
 	if (!g_object_get_data (object, "verne-destroyed")) {
 		g_object_set_data (object, "verne-destroyed", GINT_TO_POINTER (1));
+		if (GTK_IS_WIDGET (object))
+			gtk_widget_set_visible (GTK_WIDGET (object), FALSE);
 		v = lookup_vfuncs_type (G_OBJECT_TYPE (object));
 		if (v && v->destroy)
 			v->destroy (GTK_WIDGET (object));
-	} else {
-		v = lookup_vfuncs_type (G_OBJECT_TYPE (object));
 	}
 
+	if (!G_IS_OBJECT (object))
+		return;
 	/* orig_dispose on a subclass is often wrapped_dispose itself (parent
 	 * class already wrapped). Walk to the first real GObject dispose. */
 	for (type = G_OBJECT_TYPE (object); type != 0 && type != G_TYPE_NONE; type = g_type_parent (type)) {
@@ -1001,8 +1007,10 @@ wrapped_dispose (GObject *object)
 			break;
 		}
 	}
-	if (real_dispose)
+	if (real_dispose) {
+		g_object_set_data (object, "verne-in-orig-dispose", GINT_TO_POINTER (1));
 		real_dispose (object);
+	}
 }
 
 static void
@@ -1433,6 +1441,12 @@ register_event_signals (void)
 			da->realize = verne_drawing_area_realize;
 		}
 		g_type_class_unref (da);
+	}
+	/* GTK4 GtkAppChooserWidget dropped populate-popup; Nemo still connects. */
+	if (g_signal_lookup ("populate-popup", GTK_TYPE_APP_CHOOSER_WIDGET) == 0) {
+		g_signal_new ("populate-popup", GTK_TYPE_APP_CHOOSER_WIDGET,
+			      G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL,
+			      G_TYPE_NONE, 2, GTK_TYPE_WIDGET, G_TYPE_APP_INFO);
 	}
 }
 
