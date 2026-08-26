@@ -436,7 +436,12 @@ on_async_drop (GtkDropTargetAsync *self, GdkDrop *drop, double x, double y, gpoi
 		return TRUE;
 	drop_already_emitted = TRUE;
 	pack_drop_xy (drop, x, y);
-	g_debug ("drop at %.0f,%.0f on %s", x, y, G_OBJECT_TYPE_NAME (widget));
+	if (g_object_get_qdata (G_OBJECT (drop), selected_action_quark ()) == NULL)
+		g_object_set_qdata (G_OBJECT (drop), selected_action_quark (),
+				    GINT_TO_POINTER ((int) GDK_ACTION_COPY));
+	g_warning ("async drop at %.0f,%.0f on %s selected=%d",
+		   x, y, G_OBJECT_TYPE_NAME (widget),
+		   GPOINTER_TO_INT (g_object_get_qdata (G_OBJECT (drop), selected_action_quark ())));
 	g_signal_emit_by_name (widget, "drag-drop", drop, (int) x, (int) y, GDK_CURRENT_TIME, &handled);
 	g_debug ("drag-drop handled=%d", handled);
 	return handled;
@@ -1235,12 +1240,17 @@ static void
 verne_xdnd_wait_status (VerneLocalDrag *local, int timeout_ms)
 {
 	gint64 deadline;
+	gint64 last_pos = 0;
 
 	deadline = g_get_monotonic_time () + (gint64) timeout_ms * 1000;
 	while (g_get_monotonic_time () < deadline) {
 		verne_xdnd_pump (local);
 		if (local->xdnd_accepted || local->xdnd_finished)
 			return;
+		if (g_get_monotonic_time () - last_pos > 40000) {
+			verne_xdnd_send_position (local);
+			last_pos = g_get_monotonic_time ();
+		}
 		g_usleep (2000);
 	}
 	verne_xdnd_pump (local);
@@ -1255,7 +1265,7 @@ verne_xdnd_send_drop (VerneLocalDrag *local)
 	if (local->xdnd_target == None)
 		verne_xdnd_send_position (local);
 	verne_xdnd_pump (local);
-	verne_xdnd_wait_status (local, 350);
+	verne_xdnd_wait_status (local, 500);
 	if (local->xdnd_target == None || local->xdnd_source == None) {
 		g_warning ("XdndDrop skipped, no target");
 		return;
@@ -1746,6 +1756,19 @@ gdk_drag_context_get_selected_action (GdkDragContext *context)
 		return stored;
 	if (VERNE_IS_LOCAL_DRAG (context))
 		return ((VerneLocalDrag *) context)->selected;
+	if (GDK_IS_DROP (context)) {
+		GdkDragAction a = gdk_drop_get_actions (GDK_DROP (context));
+		/* Foreign XDND often delivers Drop before dest motion can
+		 * gdk_drag_status(). Default to COPY so receive_dropped_icons
+		 * does not no-op with selected_action==0. */
+		if (a & GDK_ACTION_COPY)
+			return GDK_ACTION_COPY;
+		if (a & GDK_ACTION_MOVE)
+			return GDK_ACTION_MOVE;
+		if (a)
+			return a;
+		return GDK_ACTION_COPY;
+	}
 	if (GDK_IS_DRAG (context))
 		return gdk_drag_get_selected_action (GDK_DRAG (context));
 	return 0;
