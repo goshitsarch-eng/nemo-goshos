@@ -98,26 +98,26 @@ ensure_vfuncs (GtkWidgetClass *klass)
 }
 
 static void
-fill_button_event (GdkEventButton *ev, GtkGestureClick *click, gint n_press, gdouble x, gdouble y)
+fill_button_event (GdkEvent *ev, GtkGestureClick *click, gint n_press, gdouble x, gdouble y)
 {
 	GtkWidget *widget = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (click));
 	GdkEvent *ge = gtk_event_controller_get_current_event (GTK_EVENT_CONTROLLER (click));
 
 	memset (ev, 0, sizeof (*ev));
 	if (n_press >= 3)
-		ev->type = GDK_3BUTTON_PRESS;
+		ev->button.type = GDK_3BUTTON_PRESS;
 	else if (n_press == 2)
-		ev->type = GDK_2BUTTON_PRESS;
+		ev->button.type = GDK_2BUTTON_PRESS;
 	else
-		ev->type = GDK_BUTTON_PRESS;
-	ev->window = gtk_widget_get_window (widget);
-	ev->x = x;
-	ev->y = y;
-	ev->x_root = x;
-	ev->y_root = y;
-	ev->button = gtk_gesture_single_get_current_button (GTK_GESTURE_SINGLE (click));
-	ev->state = ge ? gdk_event_get_modifier_state (ge) : 0;
-	ev->time = ge ? gdk_event_get_time (ge) : GDK_CURRENT_TIME;
+		ev->button.type = GDK_BUTTON_PRESS;
+	ev->button.window = gtk_widget_get_window (widget);
+	ev->button.x = x;
+	ev->button.y = y;
+	ev->button.x_root = x;
+	ev->button.y_root = y;
+	ev->button.button = gtk_gesture_single_get_current_button (GTK_GESTURE_SINGLE (click));
+	ev->button.state = ge ? gdk_event_get_modifier_state (ge) : 0;
+	ev->button.time = ge ? gdk_event_get_time (ge) : GDK_CURRENT_TIME;
 }
 
 static gboolean
@@ -132,7 +132,7 @@ static void
 emit_motion (GtkWidget *widget, gdouble x, gdouble y, guint state, guint32 time)
 {
 	VerneVfuncs *v;
-	GdkEventMotion ev;
+	GdkEvent ev;
 
 	if (!GTK_IS_WIDGET (widget) || !gtk_widget_get_realized (widget) ||
 	    !gtk_widget_get_mapped (widget) ||
@@ -140,17 +140,17 @@ emit_motion (GtkWidget *widget, gdouble x, gdouble y, guint state, guint32 time)
 		return;
 	v = lookup_vfuncs_type (G_OBJECT_TYPE (widget));
 	memset (&ev, 0, sizeof (ev));
-	ev.type = GDK_MOTION_NOTIFY;
-	ev.window = gtk_widget_get_window (widget);
-	ev.x = x;
-	ev.y = y;
-	ev.x_root = x;
-	ev.y_root = y;
-	ev.state = state;
-	ev.time = time ? time : GDK_CURRENT_TIME;
-	verne_set_current_event (widget, (const GdkEvent *) &ev);
+	ev.motion.type = GDK_MOTION_NOTIFY;
+	ev.motion.window = gtk_widget_get_window (widget);
+	ev.motion.x = x;
+	ev.motion.y = y;
+	ev.motion.x_root = x;
+	ev.motion.y_root = y;
+	ev.motion.state = state;
+	ev.motion.time = time ? time : GDK_CURRENT_TIME;
+	verne_set_current_event (widget, &ev);
 	if (!emit_widget_event (widget, "motion-notify-event", &ev) && v && v->motion)
-		v->motion (widget, &ev);
+		v->motion (widget, &ev.motion);
 	verne_clear_current_event ();
 }
 
@@ -159,14 +159,14 @@ on_pressed (GtkGestureClick *click, gint n_press, gdouble x, gdouble y, gpointer
 {
 	GtkWidget *widget = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (click));
 	VerneVfuncs *v = lookup_vfuncs_type (G_OBJECT_TYPE (widget));
-	GdkEventButton ev;
+	GdkEvent ev;
 	gboolean handled = FALSE;
 
 	fill_button_event (&ev, click, n_press, x, y);
-	verne_set_current_event (widget, (const GdkEvent *) &ev);
+	verne_set_current_event (widget, &ev);
 	handled = emit_widget_event (widget, "button-press-event", &ev);
 	if (!handled && v && v->button_press)
-		handled = v->button_press (widget, &ev);
+		handled = v->button_press (widget, &ev.button);
 	verne_clear_current_event ();
 	/* Do not claim on press. Claiming takes a GTK4 pointer grab which
 	 * suppresses GtkEventControllerMotion, so icon/list DnD never starts.
@@ -180,7 +180,7 @@ on_released (GtkGestureClick *click, gint n_press, gdouble x, gdouble y, gpointe
 {
 	GtkWidget *widget = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (click));
 	VerneVfuncs *v = lookup_vfuncs_type (G_OBJECT_TYPE (widget));
-	GdkEventButton ev;
+	GdkEvent ev;
 
 	/* A live GdkDrag owns the pointer; synthesizing BUTTON_RELEASE here
 	 * would cancel GTK4 DND. Complete the in-process drop instead. */
@@ -190,10 +190,10 @@ on_released (GtkGestureClick *click, gint n_press, gdouble x, gdouble y, gpointe
 	}
 
 	fill_button_event (&ev, click, n_press, x, y);
-	ev.type = GDK_BUTTON_RELEASE;
-	verne_set_current_event (widget, (const GdkEvent *) &ev);
+	ev.button.type = GDK_BUTTON_RELEASE;
+	verne_set_current_event (widget, &ev);
 	if (!emit_widget_event (widget, "button-release-event", &ev) && v && v->button_release)
-		v->button_release (widget, &ev);
+		v->button_release (widget, &ev.button);
 	verne_clear_current_event ();
 }
 
@@ -257,7 +257,7 @@ on_enter (GtkEventControllerMotion *motion, gdouble x, gdouble y, gpointer data)
 {
 	GtkWidget *widget = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (motion));
 	VerneVfuncs *v;
-	GdkEventCrossing ev;
+	GdkEvent ev;
 
 	if (!GTK_IS_WIDGET (widget) || !gtk_widget_get_mapped (widget) ||
 	    g_object_get_data (G_OBJECT (widget), "verne-destroyed"))
@@ -265,13 +265,13 @@ on_enter (GtkEventControllerMotion *motion, gdouble x, gdouble y, gpointer data)
 	v = lookup_vfuncs_type (G_OBJECT_TYPE (widget));
 
 	memset (&ev, 0, sizeof (ev));
-	ev.type = GDK_ENTER_NOTIFY;
-	ev.x = x;
-	ev.y = y;
-	ev.mode = GDK_CROSSING_NORMAL;
-	verne_set_current_event (widget, (const GdkEvent *) &ev);
+	ev.crossing.type = GDK_ENTER_NOTIFY;
+	ev.crossing.x = x;
+	ev.crossing.y = y;
+	ev.crossing.mode = GDK_CROSSING_NORMAL;
+	verne_set_current_event (widget, &ev);
 	if (!emit_widget_event (widget, "enter-notify-event", &ev) && v && v->enter)
-		v->enter (widget, &ev);
+		v->enter (widget, &ev.crossing);
 	verne_clear_current_event ();
 }
 
@@ -280,7 +280,7 @@ on_leave (GtkEventControllerMotion *motion, gpointer data)
 {
 	GtkWidget *widget = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (motion));
 	VerneVfuncs *v;
-	GdkEventCrossing ev;
+	GdkEvent ev;
 
 	if (!GTK_IS_WIDGET (widget) ||
 	    g_object_get_data (G_OBJECT (widget), "verne-destroyed"))
@@ -288,11 +288,11 @@ on_leave (GtkEventControllerMotion *motion, gpointer data)
 	v = lookup_vfuncs_type (G_OBJECT_TYPE (widget));
 
 	memset (&ev, 0, sizeof (ev));
-	ev.type = GDK_LEAVE_NOTIFY;
-	ev.mode = GDK_CROSSING_NORMAL;
-	verne_set_current_event (widget, (const GdkEvent *) &ev);
+	ev.crossing.type = GDK_LEAVE_NOTIFY;
+	ev.crossing.mode = GDK_CROSSING_NORMAL;
+	verne_set_current_event (widget, &ev);
 	if (!emit_widget_event (widget, "leave-notify-event", &ev) && v && v->leave)
-		v->leave (widget, &ev);
+		v->leave (widget, &ev.crossing);
 	verne_clear_current_event ();
 }
 
@@ -301,30 +301,30 @@ on_key (GtkEventControllerKey *self, guint keyval, guint keycode, GdkModifierTyp
 {
 	GtkWidget *widget = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (self));
 	VerneVfuncs *v = lookup_vfuncs_type (G_OBJECT_TYPE (widget));
-	GdkEventKey ev;
+	GdkEvent ev;
 	GdkEvent *ge;
 	gboolean press = GPOINTER_TO_INT (data);
 	gboolean handled = FALSE;
 
 	memset (&ev, 0, sizeof (ev));
-	ev.type = press ? GDK_KEY_PRESS : GDK_KEY_RELEASE;
-	ev.keyval = keyval;
-	ev.hardware_keycode = keycode;
-	ev.state = state;
-	ev.window = gtk_widget_get_window (widget);
+	ev.key.type = press ? GDK_KEY_PRESS : GDK_KEY_RELEASE;
+	ev.key.keyval = keyval;
+	ev.key.hardware_keycode = keycode;
+	ev.key.state = state;
+	ev.key.window = gtk_widget_get_window (widget);
 	ge = gtk_event_controller_get_current_event (GTK_EVENT_CONTROLLER (self));
-	ev.time = ge ? gdk_event_get_time (ge) : GDK_CURRENT_TIME;
-	verne_set_current_event (widget, (const GdkEvent *) &ev);
+	ev.key.time = ge ? gdk_event_get_time (ge) : GDK_CURRENT_TIME;
+	verne_set_current_event (widget, &ev);
 	if (press) {
 		if (emit_widget_event (widget, "key-press-event", &ev))
 			handled = TRUE;
 		else if (v && v->key_press)
-			handled = v->key_press (widget, &ev);
+			handled = v->key_press (widget, &ev.key);
 	} else {
 		if (emit_widget_event (widget, "key-release-event", &ev))
 			handled = TRUE;
 		else if (v && v->key_release)
-			handled = v->key_release (widget, &ev);
+			handled = v->key_release (widget, &ev.key);
 	}
 	verne_clear_current_event ();
 	return handled;
@@ -335,28 +335,28 @@ on_scroll (GtkEventControllerScroll *self, gdouble dx, gdouble dy, gpointer data
 {
 	GtkWidget *widget = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (self));
 	VerneVfuncs *v = lookup_vfuncs_type (G_OBJECT_TYPE (widget));
-	GdkEventScroll ev;
+	GdkEvent ev;
 
 	memset (&ev, 0, sizeof (ev));
-	ev.type = GDK_SCROLL;
-	ev.delta_x = dx;
-	ev.delta_y = dy;
+	ev.scroll.type = GDK_SCROLL;
+	ev.scroll.delta_x = dx;
+	ev.scroll.delta_y = dy;
 	if (dy > 0)
-		ev.direction = GDK_SCROLL_DOWN;
+		ev.scroll.direction = GDK_SCROLL_DOWN;
 	else if (dy < 0)
-		ev.direction = GDK_SCROLL_UP;
+		ev.scroll.direction = GDK_SCROLL_UP;
 	else if (dx > 0)
-		ev.direction = GDK_SCROLL_RIGHT;
+		ev.scroll.direction = GDK_SCROLL_RIGHT;
 	else
-		ev.direction = GDK_SCROLL_LEFT;
-	ev.window = gtk_widget_get_window (widget);
-	verne_set_current_event (widget, (const GdkEvent *) &ev);
+		ev.scroll.direction = GDK_SCROLL_LEFT;
+	ev.scroll.window = gtk_widget_get_window (widget);
+	verne_set_current_event (widget, &ev);
 	if (emit_widget_event (widget, "scroll-event", &ev)) {
 		verne_clear_current_event ();
 		return TRUE;
 	}
 	if (v && v->scroll) {
-		gboolean handled = v->scroll (widget, &ev);
+		gboolean handled = v->scroll (widget, &ev.scroll);
 		verne_clear_current_event ();
 		return handled;
 	}
@@ -448,7 +448,7 @@ ensure_controllers (GtkWidget *widget)
 
 	{
 		GtkGesture *drag = gtk_gesture_drag_new ();
-		gtk_gesture_single_set_button (GTK_GESTURE_SINGLE (drag), 0);
+		gtk_gesture_single_set_button (GTK_GESTURE_SINGLE (drag), 1);
 		gtk_event_controller_set_propagation_phase (GTK_EVENT_CONTROLLER (drag), GTK_PHASE_CAPTURE);
 		g_signal_connect (drag, "drag-update", G_CALLBACK (on_drag_update), NULL);
 		g_signal_connect (drag, "drag-end", G_CALLBACK (on_local_drag_end), NULL);

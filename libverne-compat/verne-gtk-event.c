@@ -33,11 +33,35 @@ void
 verne_set_current_event (GtkWidget *widget, const GdkEvent *event)
 {
 	VerneCurrentEvent *cur;
+	GdkEvent full;
+	gsize n = sizeof (GdkEventAny);
 
 	if (verne_event_stack == NULL)
 		verne_event_stack = g_queue_new ();
+	memset (&full, 0, sizeof full);
+	if (event) {
+		guint type = (guint) event->type;
+		if (type == GDK_BUTTON_PRESS || type == GDK_BUTTON_RELEASE ||
+		    type == (guint) GDK_2BUTTON_PRESS || type == (guint) GDK_3BUTTON_PRESS)
+			n = sizeof (GdkEventButton);
+		else if (type == GDK_KEY_PRESS || type == GDK_KEY_RELEASE)
+			n = sizeof (GdkEventKey);
+		else if (type == GDK_MOTION_NOTIFY)
+			n = sizeof (GdkEventMotion);
+		else if (type == GDK_SCROLL)
+			n = sizeof (GdkEventScroll);
+		else if (type == GDK_ENTER_NOTIFY || type == GDK_LEAVE_NOTIFY)
+			n = sizeof (GdkEventCrossing);
+		else if (type == GDK_FOCUS_CHANGE)
+			n = sizeof (GdkEventFocus);
+		else if (type == GDK_WINDOW_STATE)
+			n = sizeof (GdkEventWindowState);
+		if (n > sizeof full)
+			n = sizeof full;
+		memcpy (&full, event, n);
+	}
 	cur = g_new0 (VerneCurrentEvent, 1);
-	cur->event = event ? gdk_event_copy (event) : NULL;
+	cur->event = event ? gdk_event_copy (&full) : NULL;
 	cur->widget = widget;
 	g_queue_push_head (verne_event_stack, cur);
 }
