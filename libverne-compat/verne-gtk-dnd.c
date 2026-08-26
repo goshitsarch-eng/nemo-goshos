@@ -282,6 +282,7 @@ G_DEFINE_TYPE (VerneLocalDrag, verne_local_drag, G_TYPE_OBJECT)
 #define VERNE_IS_LOCAL_DRAG(o) (G_TYPE_CHECK_INSTANCE_TYPE ((o), verne_local_drag_get_type ()))
 
 static void verne_xdnd_teardown (VerneLocalDrag *local);
+static gboolean verne_idle_destroy_window (gpointer data);
 
 static void
 verne_local_drag_finalize (GObject *object)
@@ -293,7 +294,8 @@ verne_local_drag_finalize (GObject *object)
 		self->poll_id = 0;
 	}
 	if (self->icon_window) {
-		gtk_window_destroy (GTK_WINDOW (self->icon_window));
+		gtk_widget_set_visible (self->icon_window, FALSE);
+		g_timeout_add_seconds (2, verne_idle_destroy_window, g_object_ref (self->icon_window));
 		self->icon_window = NULL;
 		self->picture = NULL;
 	}
@@ -692,7 +694,8 @@ verne_local_cleanup (VerneLocalDrag *local)
 
 		local->icon_window = NULL;
 		local->picture = NULL;
-		g_idle_add (verne_idle_destroy_window, g_object_ref (icon));
+		gtk_widget_set_visible (icon, FALSE);
+		g_timeout_add_seconds (2, verne_idle_destroy_window, g_object_ref (icon));
 	}
 	if (source)
 		g_object_set_data (G_OBJECT (source), "verne-active-drag", NULL);
