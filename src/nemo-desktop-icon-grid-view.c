@@ -686,19 +686,20 @@ do_desktop_rescan (gpointer data)
 	desktop_icon_grid_view = NEMO_DESKTOP_ICON_GRID_VIEW (data);
 
 	if (stat (desktop_directory, &buf) == -1) {
+		desktop_ensure_icons_from_model (NEMO_VIEW (desktop_icon_grid_view));
 		return TRUE;
 	}
 
-	if (buf.st_mtime != desktop_dir_modify_time) {
-		if (!desktop_icon_grid_view->details->pending_rescan) {
-			desktop_icon_grid_view->details->pending_rescan = TRUE;
-			desktop_reload_from_disk (NEMO_VIEW (desktop_icon_grid_view));
-		}
-		desktop_ensure_icons_from_model (NEMO_VIEW (desktop_icon_grid_view));
-	} else if (desktop_icon_grid_view->details->pending_rescan) {
-		/* Reload may not have finished; still resurrect missing icons. */
-		desktop_ensure_icons_from_model (NEMO_VIEW (desktop_icon_grid_view));
+	if (buf.st_mtime != desktop_dir_modify_time &&
+	    !desktop_icon_grid_view->details->pending_rescan) {
+		desktop_icon_grid_view->details->pending_rescan = TRUE;
+		desktop_reload_from_disk (NEMO_VIEW (desktop_icon_grid_view));
 	}
+
+	/* Always resurrect missing icons. GFileMonitor can miss g_file_copy
+	 * from another process, and done_loading can snap mtime so a later
+	 * poll would skip the file that is already on disk. */
+	desktop_ensure_icons_from_model (NEMO_VIEW (desktop_icon_grid_view));
 
 	return TRUE;
 }
