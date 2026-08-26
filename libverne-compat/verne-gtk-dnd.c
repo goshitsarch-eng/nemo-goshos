@@ -461,6 +461,8 @@ verne_ensure_native_drop_forwarder (GtkWidget *widget)
 	g_signal_connect (async, "drop", G_CALLBACK (on_forward_drop), win);
 	gtk_widget_add_controller (win, GTK_EVENT_CONTROLLER (async));
 	g_object_set_qdata (G_OBJECT (win), forwarder_quark (), async);
+	g_warning ("installed drop forwarder on %s native=%s",
+		   G_OBJECT_TYPE_NAME (widget), G_OBJECT_TYPE_NAME (win));
 }
 
 static void
@@ -1122,6 +1124,8 @@ verne_xdnd_target_at_pointer (Display *dpy, VerneLocalDrag *local, int *root_x, 
 
 		if (!XGetWindowAttributes (dpy, w, &attr) || attr.map_state != IsViewable)
 			continue;
+		if (attr.width <= 1 || attr.height <= 1)
+			continue;
 		if (rx < attr.x || ry < attr.y || rx >= attr.x + attr.width || ry >= attr.y + attr.height)
 			continue;
 		if (verne_tree_contains_xid (dpy, w, skip))
@@ -1283,9 +1287,9 @@ verne_xdnd_handle_selection_request (VerneLocalDrag *local, const XSelectionRequ
 		sel.format = 8;
 		info = info_for_target (local->targets, sel.target);
 		g_signal_emit_by_name (local->source, "drag-data-get", local, &sel, info, req->time);
-		g_warning ("xdnd SelectionRequest mime=%s len=%d data=%.*s",
-			   mime, sel.length, MAX (sel.length, 0),
-			   sel.data ? (const char *) sel.data : "");
+	g_warning ("xdnd SelectionRequest from=0x%lx mime=%s len=%d data=%.*s",
+		   (unsigned long) req->requestor, mime, sel.length, MAX (sel.length, 0),
+		   sel.data ? (const char *) sel.data : "");
 		if (sel.data && sel.length > 0) {
 			XChangeProperty (dpy, req->requestor, req->property, req->target,
 					 sel.format ? sel.format : 8, PropModeReplace,
@@ -1405,10 +1409,71 @@ verne_xdnd_wait_status (VerneLocalDrag *local, int timeout_ms)
 }
 
 static void
+verne_copy_uris_to_desktop (VerneLocalDrag *local)
+{
+	GtkSelectionData sel = { 0 };
+	gchar **uris;
+	const char *desk;
+	GFile *ddir;
+	guint info, i;
+	GdkDragAction action;
+
+	if (local->source == NULL)
+		return;
+	sel.target = gdk_atom_intern ("text/uri-list", FALSE);
+	sel.type = sel.target;
+	sel.format = 8;
+	info = info_for_target (local->targets, sel.target);
+	g_signal_emit_by_name (local->source, "drag-data-get", local, &sel, info, GDK_CURRENT_TIME);
+	uris = gtk_selection_data_get_uris (&sel);
+	g_free (sel.data);
+	if (uris == NULL || uris[0] == NULL) {
+		g_strfreev (uris);
+		return;
+	}
+	desk = g_get_user_special_dir (G_USER_DIRECTORY_DESKTOP);
+	if (desk == NULL || desk[0] == '\0')
+		desk = g_get_home_dir ();
+	ddir = g_file_new_for_path (desk);
+	action = local->selected ? local->selected : GDK_ACTION_COPY;
+	for (i = 0; uris[i] != NULL; i++) {
+		GFile *src, *dst;
+		char *base;
+		GError *err = NULL;
+		gboolean ok;
+
+		src = g_file_new_for_uri (uris[i]);
+		base = g_file_get_basename (src);
+		if (base == NULL || base[0] == '\0') {
+			g_object_unref (src);
+			g_free (base);
+			continue;
+		}
+		dst = g_file_get_child (ddir, base);
+		if (action & GDK_ACTION_MOVE)
+			ok = g_file_move (src, dst, G_FILE_COPY_NONE, NULL, NULL, NULL, &err);
+		else
+			ok = g_file_copy (src, dst, G_FILE_COPY_NONE, NULL, NULL, NULL, &err);
+		g_warning ("desktop drop %s %s -> %s ok=%d err=%s",
+			   (action & GDK_ACTION_MOVE) ? "move" : "copy",
+			   uris[i], base, ok, err ? err->message : "none");
+		g_clear_error (&err);
+		g_object_unref (src);
+		g_object_unref (dst);
+		g_free (base);
+	}
+	g_object_unref (ddir);
+	g_strfreev (uris);
+	local->xdnd_accepted = TRUE;
+	local->xdnd_served_data = TRUE;
+}
+
+static void
 verne_xdnd_send_drop (VerneLocalDrag *local)
 {
 	Display *dpy = GDK_DISPLAY_XDISPLAY (gdk_display_get_default ());
 	guint32 time;
+	gchar *wmclass;
 
 	if (local->xdnd_target == None)
 		verne_xdnd_send_position (local);
@@ -1418,18 +1483,24 @@ verne_xdnd_send_drop (VerneLocalDrag *local)
 		g_warning ("XdndDrop skipped, no target");
 		return;
 	}
+	wmclass = verne_xid_wm_class (dpy, local->xdnd_target);
+	if (verne_wm_class_is_verne_desktop (wmclass)) {
+		/* GTK4 does not deliver XDND on the transparent desktop
+		 * native to the icon canvas. Copy/move from the source so
+		 * nemo-desktop's directory monitor can show the icon. */
+		if (!(local->selected & GDK_ACTION_MOVE) && (local->actions & GDK_ACTION_COPY))
+			local->selected = GDK_ACTION_COPY;
+		verne_copy_uris_to_desktop (local);
+	}
 	time = gdk_x11_display_get_user_time (gdk_display_get_default ());
 	verne_xdnd_client_message (dpy, local->xdnd_target,
 				   XInternAtom (dpy, "XdndDrop", False),
 				   (long) local->xdnd_source, 0, (long) time, 0, 0);
 	local->xdnd_dropped = TRUE;
-	{
-		gchar *wmclass = verne_xid_wm_class (dpy, local->xdnd_target);
-		g_warning ("sent XdndDrop to 0x%lx from 0x%lx accepted=%d class=%s",
-			   (unsigned long) local->xdnd_target, (unsigned long) local->xdnd_source,
-			   local->xdnd_accepted, wmclass ? wmclass : "?");
-		g_free (wmclass);
-	}
+	g_warning ("sent XdndDrop to 0x%lx from 0x%lx accepted=%d class=%s",
+		   (unsigned long) local->xdnd_target, (unsigned long) local->xdnd_source,
+		   local->xdnd_accepted, wmclass ? wmclass : "?");
+	g_free (wmclass);
 	if (local->xdnd_finish_timeout)
 		g_source_remove (local->xdnd_finish_timeout);
 	local->xdnd_finish_timeout = g_timeout_add_seconds (3, verne_xdnd_finish_timeout, local);
