@@ -1464,7 +1464,10 @@ verne_to_gtk_ib (gpointer widget)
 #define gtk_info_bar_set_response_sensitive(b, r, s) (gtk_info_bar_set_response_sensitive) (verne_to_gtk_ib (b), r, s)
 #define gtk_info_bar_add_child(b, w) (gtk_info_bar_add_child) (verne_to_gtk_ib (b), w)
 
-typedef struct { GtkWidgetClass parent_class; } GtkInfoBarClass;
+/* VerneInfoBar is a GtkBox, so the GTK3 GtkInfoBarClass stub must be at least
+ * GtkBoxClass-sized. Subclassing it with GtkWidgetClass made NemoTrashBar
+ * (and sibling bars) fail GType class-size checks on trash:///. */
+typedef struct { GtkBoxClass parent_class; } GtkInfoBarClass;
 #define GTK_INFO_BAR_CLASS(k) ((GtkInfoBarClass *)(k))
 
 struct _GtkMenuItem {

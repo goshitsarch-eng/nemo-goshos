@@ -43,7 +43,7 @@ typedef struct
 
 typedef struct
 {
-	GtkInfoBarClass parent_class;
+	VerneInfoBarClass parent_class;
 } NemoInterestingFolderBarClass;
 
 typedef enum {

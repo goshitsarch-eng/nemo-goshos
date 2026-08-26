@@ -47,7 +47,7 @@ typedef struct
 
 typedef struct
 {
-	GtkInfoBarClass parent_class;
+	VerneInfoBarClass parent_class;
 } NemoTrashBarClass;
 
 GType		 nemo_trash_bar_get_type	(void) G_GNUC_CONST;

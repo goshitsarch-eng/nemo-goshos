@@ -48,7 +48,7 @@ typedef struct
 
 typedef struct
 {
-	GtkInfoBarClass parent_class;
+	VerneInfoBarClass parent_class;
 } NemoXContentBarClass;
 
 GType		 nemo_x_content_bar_get_type	(void) G_GNUC_CONST;
