@@ -3,7 +3,6 @@
 #include <libcinnamon-desktop/gnome-desktop-thumbnail.h>
 #include <glib/gstdio.h>
 #include <unistd.h>
-#include <errno.h>
 #include <string.h>
 #include <sys/stat.h>
 
@@ -436,6 +435,13 @@ gnome_desktop_thumbnail_cache_check_permissions (GnomeDesktopThumbnailFactory *f
 
 	(void) factory;
 	dir = g_build_filename (g_get_user_cache_dir (), "thumbnails", NULL);
+	g_mkdir_with_parents (dir, 0700);
+	if (g_stat (dir, &st) != 0) {
+		g_free (dir);
+		return !strict;
+	}
+	if ((st.st_uid == getuid ()) && (st.st_mode & 0077) != 0)
+		g_chmod (dir, 0700);
 	if (g_stat (dir, &st) != 0) {
 		g_free (dir);
 		return !strict;

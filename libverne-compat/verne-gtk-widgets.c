@@ -1503,26 +1503,12 @@ verne_editable_wants_key (GtkWidget *focus, guint key, GdkModifierType mods)
 }
 
 static gboolean
-verne_accel_key_pressed (GtkEventControllerKey *self, guint keyval, guint keycode,
-			 GdkModifierType state, gpointer data)
+verne_accel_group_activate (GtkAccelGroup *group, guint key, GdkModifierType mods)
 {
-	GtkAccelGroup *group = data;
-	GtkWidget *focus;
-	guint key = gdk_keyval_to_lower (keyval);
-	GdkModifierType mods = state & (GDK_CONTROL_MASK | GDK_ALT_MASK | GDK_SHIFT_MASK | GDK_SUPER_MASK);
 	gint i;
 
-	(void) keycode;
 	if (group == NULL || group->entries == NULL)
 		return FALSE;
-	focus = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (self));
-	if (focus) {
-		GtkRoot *root = gtk_widget_get_root (focus);
-		focus = root ? gtk_root_get_focus (root) : NULL;
-	}
-	if (verne_editable_wants_key (focus, keyval, mods))
-		return FALSE;
-	/* Newest bindings first so a live view wins over a stale one. */
 	for (i = (gint) group->entries->len - 1; i >= 0; i--) {
 		VerneAccelEntry *e = g_ptr_array_index (group->entries, i);
 		if (e->action == NULL || e->key != key || e->mods != mods)
@@ -1535,22 +1521,62 @@ verne_accel_key_pressed (GtkEventControllerKey *self, guint keyval, guint keycod
 	return FALSE;
 }
 
+static gboolean
+verne_accel_key_pressed (GtkEventControllerKey *self, guint keyval, guint keycode,
+			 GdkModifierType state, gpointer data)
+{
+	GtkWidget *widget = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (self));
+	GtkWidget *focus;
+	GSList *groups = g_object_get_data (G_OBJECT (widget), "verne-accel-groups");
+	guint key = gdk_keyval_to_lower (keyval);
+	GdkModifierType mods = state & (GDK_CONTROL_MASK | GDK_ALT_MASK | GDK_SHIFT_MASK | GDK_SUPER_MASK);
+
+	(void) keycode;
+	(void) data;
+	focus = widget;
+	if (focus) {
+		GtkRoot *root = gtk_widget_get_root (focus);
+		focus = root ? gtk_root_get_focus (root) : NULL;
+	}
+	if (verne_editable_wants_key (focus, keyval, mods))
+		return FALSE;
+	for (; groups != NULL; groups = groups->next) {
+		if (verne_accel_group_activate (groups->data, key, mods))
+			return TRUE;
+	}
+	return FALSE;
+}
+
 void gtk_window_add_accel_group (GtkWindow *window, GtkAccelGroup *accel)
 {
 	GtkEventController *controller;
+	GSList *groups;
 
 	if (window == NULL || accel == NULL)
 		return;
+	groups = g_object_get_data (G_OBJECT (window), "verne-accel-groups");
+	if (g_slist_find (groups, accel) == NULL) {
+		groups = g_slist_append (groups, accel);
+		g_object_set_data (G_OBJECT (window), "verne-accel-groups", groups);
+	}
 	if (g_object_get_data (G_OBJECT (window), "verne-accel-controller"))
 		return;
 	controller = GTK_EVENT_CONTROLLER (gtk_event_controller_key_new ());
 	gtk_event_controller_set_propagation_phase (controller, GTK_PHASE_CAPTURE);
-	g_signal_connect (controller, "key-pressed", G_CALLBACK (verne_accel_key_pressed), accel);
+	g_signal_connect (controller, "key-pressed", G_CALLBACK (verne_accel_key_pressed), window);
 	gtk_widget_add_controller (GTK_WIDGET (window), controller);
 	g_object_set_data (G_OBJECT (window), "verne-accel-controller", controller);
-	g_object_set_data (G_OBJECT (window), "verne-accel-group", accel);
 }
-void gtk_window_remove_accel_group (GtkWindow *window, GtkAccelGroup *accel) { (void) window; (void) accel; }
+void gtk_window_remove_accel_group (GtkWindow *window, GtkAccelGroup *accel)
+{
+	GSList *groups;
+
+	if (window == NULL || accel == NULL)
+		return;
+	groups = g_object_get_data (G_OBJECT (window), "verne-accel-groups");
+	groups = g_slist_remove (groups, accel);
+	g_object_set_data (G_OBJECT (window), "verne-accel-groups", groups);
+}
 void gtk_widget_add_accelerator (GtkWidget *widget, const gchar *accel_signal, GtkAccelGroup *accel_group,
 				 guint accel_key, GdkModifierType accel_mods, GtkAccelFlags accel_flags)
 {

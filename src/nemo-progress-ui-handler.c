@@ -141,6 +141,13 @@ progress_window_delete_event (GtkWidget *widget,
     return TRUE;
 }
 
+static gboolean
+progress_window_close_request (GtkWindow *window,
+			       NemoProgressUIHandler *self)
+{
+    return progress_window_delete_event (GTK_WIDGET (window), NULL, self);
+}
+
 static void
 ensure_first_separator_hidden (NemoProgressUIHandler *self)
 {
@@ -236,9 +243,13 @@ progress_ui_handler_ensure_window (NemoProgressUIHandler *self)
     gtk_widget_show_all (main_box);
     gtk_widget_set_visible (progress_window, TRUE);
 
+	gtk_window_set_hide_on_close (GTK_WINDOW (progress_window), TRUE);
 	g_signal_connect (progress_window,
 			  "delete-event",
 			  (GCallback) progress_window_delete_event, self);
+	g_signal_connect (progress_window,
+			  "close-request",
+			  (GCallback) progress_window_close_request, self);
 }
 
 static void

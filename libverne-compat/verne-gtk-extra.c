@@ -1619,9 +1619,22 @@ gtk_file_filter_add_custom (GtkFileFilter *filter, GtkFileFilterFlags needed, Gt
 	c->notify = notify;
 	c->needed = needed;
 	g_object_set_qdata_full (G_OBJECT (filter), verne_custom_filter_quark (), c, verne_custom_filter_free);
-	/* GTK4 GtkFileFilter has no custom hook for the listing; keep files visible
-	 * and enforce the callback when the chooser accepts a selection. */
-	gtk_file_filter_add_pattern (filter, "*");
+	/* GTK4 GtkFileFilter has no custom listing hook. Approximate the common
+	 * Nemo cases in the chooser, then enforce the real callback on accept. */
+	if (needed & GTK_FILE_FILTER_FILENAME) {
+		gtk_file_filter_add_mime_type (filter, "application/x-executable");
+		gtk_file_filter_add_mime_type (filter, "application/x-pie-executable");
+		gtk_file_filter_add_mime_type (filter, "application/x-sharedlib");
+		gtk_file_filter_add_mime_type (filter, "application/x-shellscript");
+		gtk_file_filter_add_mime_type (filter, "application/x-desktop");
+		gtk_file_filter_add_pattern (filter, "*.sh");
+		gtk_file_filter_add_pattern (filter, "*.desktop");
+		gtk_file_filter_add_pattern (filter, "*.py");
+		gtk_file_filter_add_pattern (filter, "*.pl");
+		gtk_file_filter_add_pattern (filter, "*.rb");
+	} else {
+		gtk_file_filter_add_pattern (filter, "*");
+	}
 }
 
 gboolean

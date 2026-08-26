@@ -2,7 +2,6 @@
 #include "verne-gtk-compat.h"
 #include <libxapp/xapp-favorites.h>
 #include <libxapp/xapp-status-icon.h>
-#include <libxapp/xapp-icon-chooser-dialog.h>
 #include <libxapp/xapp-gtk-window.h>
 #include <glib/gstdio.h>
 #ifdef GDK_WINDOWING_X11
@@ -211,16 +210,26 @@ xapp_status_icon_place (XAppStatusIcon *icon)
 		return;
 	monitor = g_list_model_get_item (monitors, 0);
 	gdk_monitor_get_geometry (monitor, &geo);
-	x = geo.x + geo.width - 40;
-	y = geo.y + 32;
+	x = geo.x + geo.width - 52;
+	y = geo.y + geo.height - 52;
 	g_object_unref (monitor);
-	gtk_window_set_default_size (GTK_WINDOW (icon->window), 28, 28);
+	gtk_window_set_default_size (GTK_WINDOW (icon->window), 40, 40);
 #ifdef GDK_WINDOWING_X11
 	{
 		GdkSurface *s = gtk_native_get_surface (GTK_NATIVE (icon->window));
-		if (s && GDK_IS_X11_SURFACE (s))
-			XMoveWindow (gdk_x11_display_get_xdisplay (gdk_surface_get_display (s)),
-				     gdk_x11_surface_get_xid (s), x, y);
+		if (s && GDK_IS_X11_SURFACE (s)) {
+			Display *dpy = gdk_x11_display_get_xdisplay (gdk_surface_get_display (s));
+			Window xid = gdk_x11_surface_get_xid (s);
+			Atom state = XInternAtom (dpy, "_NET_WM_STATE", False);
+			Atom atoms[3];
+			atoms[0] = XInternAtom (dpy, "_NET_WM_STATE_ABOVE", False);
+			atoms[1] = XInternAtom (dpy, "_NET_WM_STATE_SKIP_TASKBAR", False);
+			atoms[2] = XInternAtom (dpy, "_NET_WM_STATE_SKIP_PAGER", False);
+			XChangeProperty (dpy, xid, state, XA_ATOM, 32, PropModeReplace,
+					 (unsigned char *) atoms, 3);
+			XMoveWindow (dpy, xid, x, y);
+			XRaiseWindow (dpy, xid);
+		}
 	}
 #else
 	(void) x; (void) y;
@@ -252,14 +261,28 @@ xapp_status_icon_ensure_window (XAppStatusIcon *icon)
 	icon->window = gtk_window_new ();
 	gtk_window_set_decorated (GTK_WINDOW (icon->window), FALSE);
 	gtk_window_set_resizable (GTK_WINDOW (icon->window), FALSE);
-	gtk_window_set_title (GTK_WINDOW (icon->window), "Verne");
+	gtk_window_set_title (GTK_WINDOW (icon->window), "Verne File Operations");
 	gtk_window_set_hide_on_close (GTK_WINDOW (icon->window), TRUE);
+	gtk_widget_set_size_request (icon->window, 40, 40);
 	gtk_widget_add_css_class (icon->window, "osd");
+	gtk_widget_add_css_class (icon->window, "verne-status-icon");
+	{
+		GtkCssProvider *css = gtk_css_provider_new ();
+		gtk_css_provider_load_from_string (css,
+			"window.verne-status-icon { background-color: alpha(@window_bg_color, 0.95);"
+			" border-radius: 8px; border: 1px solid alpha(@window_fg_color, 0.35);"
+			" min-width: 40px; min-height: 40px; padding: 4px; }");
+		gtk_style_context_add_provider_for_display (gdk_display_get_default (),
+							    GTK_STYLE_PROVIDER (css),
+							    GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+		g_object_unref (css);
+	}
 #ifdef GDK_WINDOWING_X11
 	g_signal_connect_swapped (icon->window, "map", G_CALLBACK (xapp_status_icon_place), icon);
 	g_signal_connect (icon->window, "map", G_CALLBACK (verne_status_icon_mapped), NULL);
 #endif
 	img = gtk_image_new_from_icon_name (icon->icon_name ? icon->icon_name : "system-run", GTK_ICON_SIZE_BUTTON);
+	gtk_image_set_pixel_size (GTK_IMAGE (img), 24);
 	gtk_widget_set_hexpand (img, TRUE);
 	gtk_widget_set_vexpand (img, TRUE);
 	gtk_window_set_child (GTK_WINDOW (icon->window), img);
@@ -321,8 +344,14 @@ xapp_status_icon_set_icon_name (XAppStatusIcon *icon, const gchar *name)
 		return;
 	g_free (icon->icon_name);
 	icon->icon_name = g_strdup (name);
-	if (icon->image && name)
-		gtk_image_set_from_icon_name (GTK_IMAGE (icon->image), name);
+	if (icon->image && name) {
+		GtkIconTheme *theme = gtk_icon_theme_get_for_display (gdk_display_get_default ());
+		const gchar *use = name;
+		if (theme && !gtk_icon_theme_has_icon (theme, name))
+			use = "system-run";
+		gtk_image_set_from_icon_name (GTK_IMAGE (icon->image), use);
+		gtk_image_set_pixel_size (GTK_IMAGE (icon->image), 24);
+	}
 }
 
 void
@@ -334,39 +363,6 @@ xapp_status_icon_set_tooltip_text (XAppStatusIcon *icon, const gchar *text)
 	icon->tooltip = g_strdup (text);
 	if (icon->window)
 		gtk_widget_set_tooltip_text (icon->window, text);
-}
-
-GtkWidget *
-xapp_icon_chooser_dialog_new (void)
-{
-	GtkWidget *dialog = gtk_dialog_new_with_buttons ("Choose Icon", NULL, 0,
-							 "_Cancel", GTK_RESPONSE_CANCEL,
-							 "_OK", GTK_RESPONSE_OK, NULL);
-	GtkWidget *entry = gtk_entry_new ();
-	g_object_set_data (G_OBJECT (dialog), "icon-entry", entry);
-	gtk_box_append (GTK_BOX (gtk_dialog_get_content_area (GTK_DIALOG (dialog))), entry);
-	return dialog;
-}
-
-void
-xapp_icon_chooser_dialog_add_button (GtkDialog *dialog, GtkWidget *button, GtkResponseType response, GtkResponseType default_response)
-{
-	(void) default_response;
-	gtk_dialog_add_action_widget (dialog, button, response);
-}
-
-gint xapp_icon_chooser_dialog_run (GtkDialog *dialog) { return gtk_dialog_run (dialog); }
-gint xapp_icon_chooser_dialog_run_with_icon (GtkDialog *dialog, const gchar *icon) {
-	GtkWidget *entry = g_object_get_data (G_OBJECT (dialog), "icon-entry");
-	if (entry && icon)
-		gtk_editable_set_text (GTK_EDITABLE (entry), icon);
-	return gtk_dialog_run (dialog);
-}
-gchar *
-xapp_icon_chooser_dialog_get_icon_string (GtkDialog *dialog)
-{
-	GtkWidget *entry = g_object_get_data (G_OBJECT (dialog), "icon-entry");
-	return entry ? g_strdup (gtk_editable_get_text (GTK_EDITABLE (entry))) : g_strdup ("folder");
 }
 
 void

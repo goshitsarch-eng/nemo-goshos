@@ -393,13 +393,16 @@ gtk_scrolled_window_add_with_viewport (GtkScrolledWindow *sw, GtkWidget *child)
 	gtk_scrolled_window_set_child (sw, child);
 }
 
-static gint dialog_response;
-static GMainLoop *dialog_loop;
+typedef struct {
+	gint response;
+	GMainLoop *loop;
+} VerneDialogRun;
 
 static void
 dialog_response_cb (GtkDialog *dialog, gint response, gpointer data)
 {
-	(void) data;
+	VerneDialogRun *run = data;
+
 	if (response == GTK_RESPONSE_ACCEPT && GTK_IS_FILE_CHOOSER (dialog)) {
 		GtkFileFilter *filter = gtk_file_chooser_get_filter (GTK_FILE_CHOOSER (dialog));
 		GFile *file = gtk_file_chooser_get_file (GTK_FILE_CHOOSER (dialog));
@@ -409,9 +412,9 @@ dialog_response_cb (GtkDialog *dialog, gint response, gpointer data)
 		if (!ok)
 			return;
 	}
-	dialog_response = response;
-	if (dialog_loop)
-		g_main_loop_quit (dialog_loop);
+	run->response = response;
+	if (run->loop)
+		g_main_loop_quit (run->loop);
 }
 
 static gboolean
@@ -452,19 +455,19 @@ verne_prepare_dialog (GtkWidget *widget)
 gint
 gtk_dialog_run (GtkDialog *dialog)
 {
+	VerneDialogRun run = { GTK_RESPONSE_NONE, NULL };
 	gulong id;
-	dialog_response = GTK_RESPONSE_NONE;
-	dialog_loop = g_main_loop_new (NULL, FALSE);
-	id = g_signal_connect (dialog, "response", G_CALLBACK (dialog_response_cb), NULL);
+
+	run.loop = g_main_loop_new (NULL, FALSE);
+	id = g_signal_connect (dialog, "response", G_CALLBACK (dialog_response_cb), &run);
 	verne_prepare_dialog (GTK_WIDGET (dialog));
 	gtk_window_set_modal (GTK_WINDOW (dialog), TRUE);
 	gtk_widget_set_visible (GTK_WIDGET (dialog), TRUE);
 	gtk_window_present (GTK_WINDOW (dialog));
-	g_main_loop_run (dialog_loop);
+	g_main_loop_run (run.loop);
 	g_signal_handler_disconnect (dialog, id);
-	g_main_loop_unref (dialog_loop);
-	dialog_loop = NULL;
-	return dialog_response;
+	g_main_loop_unref (run.loop);
+	return run.response;
 }
 
 GtkWidget *
