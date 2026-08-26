@@ -332,7 +332,155 @@ static GdkDrop *pending_drop;
 static double pending_drop_x, pending_drop_y;
 static gboolean drop_already_emitted;
 
+static GdkDragAction on_async_motion (GtkDropTargetAsync *self, GdkDrop *drop, double x, double y, gpointer data);
 static gboolean on_async_drop (GtkDropTargetAsync *self, GdkDrop *drop, double x, double y, gpointer data);
+static void on_async_leave (GtkDropTargetAsync *self, GdkDrop *drop, gpointer data);
+static gboolean on_async_accept (GtkDropTargetAsync *self, GdkDrop *drop, gpointer data);
+static int verne_widget_depth (GtkWidget *widget);
+static gboolean verne_point_in_widget (GtkWidget *root, GtkWidget *widget, double px, double py,
+				       double *out_x, double *out_y);
+
+static GQuark
+forwarder_quark (void)
+{
+	static GQuark q;
+	if (!q)
+		q = g_quark_from_static_string ("verne-drop-forwarder");
+	return q;
+}
+
+static GtkWidget *
+verne_dest_for_native_xy (GtkNative *native, double x, double y, double *out_x, double *out_y)
+{
+	GtkWidget *root, *best = NULL, *fallback = NULL;
+	GList *d;
+	int best_depth = -1;
+	double bx = x, by = y, fb_x = x, fb_y = y;
+
+	if (native == NULL)
+		return NULL;
+	root = GTK_WIDGET (gtk_widget_get_root (GTK_WIDGET (native)));
+	if (root == NULL)
+		root = GTK_WIDGET (native);
+	for (d = verne_drop_dests; d; d = d->next) {
+		GtkWidget *dest = d->data;
+		double ox = 0, oy = 0;
+		int depth;
+		graphene_point_t p;
+
+		if (!GTK_IS_WIDGET (dest) || gtk_widget_get_native (dest) != native)
+			continue;
+		if (g_object_get_qdata (G_OBJECT (dest), forwarder_quark ()))
+			continue;
+		if (verne_point_in_widget (root, dest, x, y, &ox, &oy)) {
+			depth = verne_widget_depth (dest);
+			if (depth >= best_depth) {
+				best = dest;
+				bx = ox;
+				by = oy;
+				best_depth = depth;
+			}
+		} else if (fallback == NULL &&
+			   gtk_widget_compute_point (root, dest,
+						     &GRAPHENE_POINT_INIT ((float) x, (float) y), &p)) {
+			fallback = dest;
+			fb_x = p.x;
+			fb_y = p.y;
+		}
+	}
+	if (best == NULL) {
+		best = fallback;
+		bx = fb_x;
+		by = fb_y;
+	}
+	if (out_x)
+		*out_x = bx;
+	if (out_y)
+		*out_y = by;
+	return best;
+}
+
+static GdkDragAction
+on_forward_motion (GtkDropTargetAsync *self, GdkDrop *drop, double x, double y, gpointer data)
+{
+	GtkWidget *win = data;
+	GtkWidget *dest;
+	double dx = x, dy = y;
+
+	dest = verne_dest_for_native_xy (GTK_NATIVE (win), x, y, &dx, &dy);
+	if (dest == NULL)
+		return GDK_ACTION_COPY;
+	return on_async_motion (self, drop, dx, dy, dest);
+}
+
+static gboolean
+on_forward_drop (GtkDropTargetAsync *self, GdkDrop *drop, double x, double y, gpointer data)
+{
+	GtkWidget *win = data;
+	GtkWidget *dest;
+	double dx = x, dy = y;
+
+	dest = verne_dest_for_native_xy (GTK_NATIVE (win), x, y, &dx, &dy);
+	g_warning ("forward drop on %s -> %s at %.0f,%.0f (win %.0f,%.0f)",
+		   G_OBJECT_TYPE_NAME (win),
+		   dest ? G_OBJECT_TYPE_NAME (dest) : "(none)", dx, dy, x, y);
+	if (dest == NULL)
+		return FALSE;
+	return on_async_drop (self, drop, dx, dy, dest);
+}
+
+static void
+verne_ensure_native_drop_forwarder (GtkWidget *widget)
+{
+	GtkWidget *win;
+	GtkDropTargetAsync *async;
+	GdkContentFormats *formats;
+	const char *mimes[] = {
+		"x-special/gnome-icon-list",
+		"text/uri-list",
+		"x-special/gnome-copied-files",
+		"text/plain",
+		"_NETSCAPE_URL",
+		NULL
+	};
+
+	if (widget == NULL)
+		return;
+	win = GTK_WIDGET (gtk_widget_get_native (widget));
+	if (win == NULL || !GTK_IS_WINDOW (win) || GTK_IS_MENU (win))
+		return;
+	if (g_object_get_qdata (G_OBJECT (win), forwarder_quark ()))
+		return;
+	formats = gdk_content_formats_new (mimes, 5);
+	async = gtk_drop_target_async_new (formats,
+					   GDK_ACTION_COPY | GDK_ACTION_MOVE | GDK_ACTION_LINK | GDK_ACTION_ASK);
+	gtk_event_controller_set_propagation_phase (GTK_EVENT_CONTROLLER (async), GTK_PHASE_CAPTURE);
+	g_signal_connect (async, "accept", G_CALLBACK (on_async_accept), win);
+	g_signal_connect (async, "drag-enter", G_CALLBACK (on_forward_motion), win);
+	g_signal_connect (async, "drag-motion", G_CALLBACK (on_forward_motion), win);
+	g_signal_connect (async, "drop", G_CALLBACK (on_forward_drop), win);
+	gtk_widget_add_controller (win, GTK_EVENT_CONTROLLER (async));
+	g_object_set_qdata (G_OBJECT (win), forwarder_quark (), async);
+}
+
+static void
+on_dest_realize_forwarder (GtkWidget *widget, gpointer data)
+{
+	(void) data;
+	verne_ensure_native_drop_forwarder (widget);
+}
+
+static void
+verne_schedule_native_drop_forwarder (GtkWidget *widget)
+{
+	verne_ensure_native_drop_forwarder (widget);
+	if (gtk_widget_get_native (widget) == NULL &&
+	    g_object_get_data (G_OBJECT (widget), "verne-fwd-realize") == NULL) {
+		g_object_set_data (G_OBJECT (widget), "verne-fwd-realize", GINT_TO_POINTER (1));
+		g_signal_connect (widget, "realize", G_CALLBACK (on_dest_realize_forwarder), NULL);
+	}
+}
+
 static void verne_local_cleanup (VerneLocalDrag *local);
 static void verne_local_update_dest (VerneLocalDrag *local);
 static void verne_local_move_icon (VerneLocalDrag *local);
@@ -1537,6 +1685,7 @@ gtk_drag_dest_set (GtkWidget *widget, GtkDestDefaults flags, const GtkTargetEntr
 		gdk_content_formats_unref (formats);
 	}
 	verne_drop_dest_register (widget);
+	verne_schedule_native_drop_forwarder (widget);
 }
 
 void
@@ -1644,7 +1793,9 @@ drop_read_done (GObject *source, GAsyncResult *result, gpointer data)
 		sel.length = (gint) n;
 	}
 	g_signal_emit_by_name (rd->widget, "drag-data-received", rd->drop, rd->x, rd->y, &sel, rd->info, rd->time);
-	g_debug ("drag-data-received mime=%s len=%d info=%u", mime ? mime : "(null)", sel.length, rd->info);
+	g_warning ("drag-data-received mime=%s len=%d info=%u dest=%s",
+		   mime ? mime : "(null)", sel.length, rd->info,
+		   rd->widget ? G_OBJECT_TYPE_NAME (rd->widget) : "(null)");
 	g_free (sel.data);
 	g_free (rd);
 }
