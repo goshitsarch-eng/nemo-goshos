@@ -245,8 +245,13 @@ gtk_window_set_type_hint (GtkWindow *window, GdkWindowTypeHint hint)
 				if (schema && g_settings_schema_has_key (schema, "picture-uri")) {
 					GSettings *settings = g_settings_new (schemas[i]);
 					gchar *uri = g_settings_get_string (settings, "picture-uri");
-					if (uri && g_str_has_prefix (uri, "file://"))
-						wallpaper = g_uri_unescape_string (uri + 7, NULL);
+					if (uri && g_str_has_prefix (uri, "file://")) {
+						gchar *path = g_uri_unescape_string (uri + 7, NULL);
+						if (path && g_file_test (path, G_FILE_TEST_IS_REGULAR))
+							wallpaper = path;
+						else
+							g_free (path);
+					}
 					g_free (uri);
 					g_object_unref (settings);
 				}
