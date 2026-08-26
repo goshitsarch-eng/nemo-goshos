@@ -672,7 +672,6 @@ verne_idle_finish_local (gpointer data)
 	g_warning ("idle finish after drag-end");
 	verne_local_cleanup (local);
 	g_warning ("idle finish after cleanup");
-	g_object_unref (local);
 	return G_SOURCE_REMOVE;
 }
 
@@ -715,7 +714,6 @@ verne_local_emit_drop (VerneLocalDrag *local)
 	if (local->drop_emitted)
 		return;
 	local->drop_emitted = TRUE;
-	g_object_ref (local);
 	if (local->current_dest == NULL)
 		verne_local_update_dest (local);
 	source = local->source;
