@@ -260,6 +260,84 @@ clear_drag_dest_row (NemoTreeViewDragDest *dest)
 	set_widget_highlight (dest, FALSE);
 }
 
+/* GTK4 dest_row_at_pos often misses a short list row: it converts to
+ * bin-window coords that do not match the widget-local pointer from
+ * Verne's local drag. Fall back to path_at_pos and background_area. */
+static gboolean
+tree_view_row_at_pos (GtkTreeView *tree_view,
+		      int x,
+		      int y,
+		      GtkTreePath **path_out,
+		      GtkTreeViewDropPosition *pos_out)
+{
+	GtkTreePath *path = NULL;
+	GtkTreeViewDropPosition pos = GTK_TREE_VIEW_DROP_INTO_OR_BEFORE;
+	GtkTreeModel *model;
+	GtkTreeIter iter;
+	int bx = x, by = y;
+	static int logs;
+
+	if (path_out)
+		*path_out = NULL;
+	if (pos_out)
+		*pos_out = pos;
+
+	if (gtk_tree_view_get_dest_row_at_pos (tree_view, x, y, &path, &pos) && path)
+		goto got_path;
+	g_clear_pointer (&path, gtk_tree_path_free);
+
+	gtk_tree_view_convert_widget_to_bin_window_coords (tree_view, x, y, &bx, &by);
+	if (gtk_tree_view_get_path_at_pos (tree_view, bx, by, &path, NULL, NULL, NULL) && path)
+		goto got_path;
+	g_clear_pointer (&path, gtk_tree_path_free);
+	if (gtk_tree_view_get_path_at_pos (tree_view, x, y, &path, NULL, NULL, NULL) && path)
+		goto got_path;
+	g_clear_pointer (&path, gtk_tree_path_free);
+
+	model = gtk_tree_view_get_model (tree_view);
+	if (model != NULL && gtk_tree_model_get_iter_first (model, &iter)) {
+		do {
+			GdkRectangle rect = { 0 };
+			int wx = 0, wy = 0;
+
+			path = gtk_tree_model_get_path (model, &iter);
+			gtk_tree_view_get_background_area (tree_view, path, NULL, &rect);
+			gtk_tree_view_convert_bin_window_to_widget_coords (tree_view, rect.x, rect.y, &wx, &wy);
+			if (wx >= -40 && wy >= -40) {
+				rect.x = wx;
+				rect.y = wy;
+			}
+			if (rect.height < 2)
+				rect.height = 24;
+			if (y >= rect.y - 2 && y < rect.y + rect.height + 10) {
+				if (logs < 8) {
+					char *ps = gtk_tree_path_to_string (path);
+
+					g_warning ("tree dest fallback path=%s xy=%d,%d rect=%d,%d %dx%d",
+						   ps ? ps : "?", x, y,
+						   rect.x, rect.y, rect.width, rect.height);
+					g_free (ps);
+					logs++;
+				}
+				goto got_path;
+			}
+			gtk_tree_path_free (path);
+			path = NULL;
+		} while (gtk_tree_model_iter_next (model, &iter));
+	}
+	return FALSE;
+
+got_path:
+	pos = GTK_TREE_VIEW_DROP_INTO_OR_BEFORE;
+	if (path_out)
+		*path_out = path;
+	else
+		gtk_tree_path_free (path);
+	if (pos_out)
+		*pos_out = pos;
+	return TRUE;
+}
+
 static gboolean
 get_drag_data (NemoTreeViewDragDest *dest,
 	       GdkDragContext *context,
@@ -487,8 +565,7 @@ drag_motion_callback (GtkWidget *widget,
 
 	dest = NEMO_TREE_VIEW_DRAG_DEST (data);
 
-	gtk_tree_view_get_dest_row_at_pos (GTK_TREE_VIEW (widget),
-					   x, y, &path, &pos);
+	tree_view_row_at_pos (GTK_TREE_VIEW (widget), x, y, &path, &pos);
 
 	if (!dest->details->have_drag_data) {
 		res = get_drag_data (dest, context, time);
@@ -595,8 +672,7 @@ get_drop_target_uri_at_pos (NemoTreeViewDragDest *dest, int x, int y)
 	GtkTreePath *drop_path;
 	GtkTreeViewDropPosition pos;
 
-	gtk_tree_view_get_dest_row_at_pos (dest->details->tree_view, x, y,
-					   &path, &pos);
+	tree_view_row_at_pos (dest->details->tree_view, x, y, &path, &pos);
 
 	drop_path = get_drop_path (dest, path);
 
