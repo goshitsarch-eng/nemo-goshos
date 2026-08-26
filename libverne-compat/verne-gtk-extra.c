@@ -2349,30 +2349,70 @@ gtk_activatable_get_type (void)
 const gchar *
 verne_dialog_button_label (const gchar *text)
 {
+	static const struct {
+		const gchar *id;
+		const gchar *label;
+	} map[] = {
+		{ "cancel", "_Cancel" },
+		{ "gtk-cancel", "_Cancel" },
+		{ "ok", "_OK" },
+		{ "gtk-ok", "_OK" },
+		{ "gtk-yes", "_Yes" },
+		{ "gtk-no", "_No" },
+		{ "document-open", "_Open" },
+		{ "gtk-open", "_Open" },
+		{ "document-save", "_Save" },
+		{ "gtk-save", "_Save" },
+		{ "document-save-as", "Save _As" },
+		{ "window-close", "_Close" },
+		{ "gtk-close", "_Close" },
+		{ "apply", "_Apply" },
+		{ "gtk-apply", "_Apply" },
+		{ "help-browser", "_Help" },
+		{ "gtk-help", "_Help" },
+		{ "edit-delete", "_Delete" },
+		{ "gtk-delete", "_Delete" },
+		{ "edit-cut", "Cu_t" },
+		{ "gtk-cut", "Cu_t" },
+		{ "edit-copy", "_Copy" },
+		{ "gtk-copy", "_Copy" },
+		{ "edit-paste", "_Paste" },
+		{ "gtk-paste", "_Paste" },
+		{ "edit-undo", "_Undo" },
+		{ "gtk-undo", "_Undo" },
+		{ "edit-redo", "_Redo" },
+		{ "gtk-redo", "_Redo" },
+		{ "edit-find", "_Find" },
+		{ "gtk-find", "_Find" },
+		{ "document-new", "_New" },
+		{ "gtk-new", "_New" },
+		{ "list-add", "_Add" },
+		{ "gtk-add", "_Add" },
+		{ "list-remove", "_Remove" },
+		{ "gtk-remove", "_Remove" },
+		{ "application-exit", "_Quit" },
+		{ "gtk-quit", "_Quit" },
+		{ "document-properties", "_Properties" },
+		{ "gtk-properties", "_Properties" },
+		{ "preferences-system", "_Preferences" },
+		{ "gtk-preferences", "_Preferences" },
+		{ "help-about", "_About" },
+		{ "gtk-about", "_About" },
+		{ "process-stop", "_Stop" },
+		{ "gtk-stop", "_Stop" },
+		{ "view-refresh", "_Refresh" },
+		{ "gtk-refresh", "_Refresh" },
+	};
+	guint i;
+
 	if (text == NULL || text[0] == '\0' || text[0] == '_')
 		return text;
 	if (strchr (text, ' ') != NULL)
 		return text;
-	if (g_strcmp0 (text, "cancel") == 0 || g_strcmp0 (text, "gtk-cancel") == 0)
-		return "_Cancel";
-	if (g_strcmp0 (text, "ok") == 0 || g_strcmp0 (text, "gtk-ok") == 0)
-		return "_OK";
-	if (g_strcmp0 (text, "document-open") == 0 || g_strcmp0 (text, "gtk-open") == 0)
-		return "_Open";
-	if (g_strcmp0 (text, "document-save") == 0 || g_strcmp0 (text, "gtk-save") == 0)
-		return "_Save";
-	if (g_strcmp0 (text, "document-save-as") == 0)
-		return "Save _As";
-	if (g_strcmp0 (text, "window-close") == 0 || g_strcmp0 (text, "gtk-close") == 0)
-		return "_Close";
-	if (g_strcmp0 (text, "apply") == 0 || g_strcmp0 (text, "gtk-apply") == 0)
-		return "_Apply";
-	if (g_strcmp0 (text, "help-browser") == 0 || g_strcmp0 (text, "gtk-help") == 0)
-		return "_Help";
-	if (g_strcmp0 (text, "gtk-yes") == 0)
-		return "_Yes";
-	if (g_strcmp0 (text, "gtk-no") == 0)
-		return "_No";
+	for (i = 0; i < G_N_ELEMENTS (map); i++) {
+		if (g_strcmp0 (text, map[i].id) == 0)
+			return map[i].label;
+	}
 	return text;
 }
 
@@ -2380,6 +2420,23 @@ GtkWidget *
 verne_dialog_add_button (GtkDialog *dialog, const gchar *text, gint response)
 {
 	return (gtk_dialog_add_button) (dialog, verne_dialog_button_label (text), response);
+}
+
+void
+verne_dialog_add_buttons (GtkDialog *dialog, const gchar *first_text, ...)
+{
+	va_list args;
+	const gchar *text;
+
+	va_start (args, first_text);
+	text = first_text;
+	while (text != NULL) {
+		gint response = va_arg (args, gint);
+
+		verne_dialog_add_button (dialog, text, response);
+		text = va_arg (args, const gchar *);
+	}
+	va_end (args);
 }
 
 void
