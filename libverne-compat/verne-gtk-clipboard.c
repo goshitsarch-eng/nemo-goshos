@@ -60,8 +60,14 @@ gtk_target_list_unref (GtkTargetList *list)
 	if (--list->ref)
 		return;
 	list->magic = 0;
-	if (list->entries)
-		g_array_free (list->entries, TRUE);
+	if (list->entries != NULL) {
+		gpointer data = list->entries->data;
+		/* A corrupted GArray (pathbar qdata teardown) has an unaligned
+		 * data pointer; g_array_free then aborts in malloc. */
+		if (data == NULL || (((guintptr) data) & (sizeof (void *) - 1)) == 0)
+			g_array_free (list->entries, TRUE);
+		list->entries = NULL;
+	}
 	g_free (list);
 }
 void gtk_target_list_add (GtkTargetList *list, GdkAtom target, guint flags, guint info) {
