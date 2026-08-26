@@ -616,9 +616,10 @@ nemo_mime_application_chooser_build_ui (NemoMimeApplicationChooser *chooser)
     g_signal_connect (chooser->details->open_with_widget, "application-selected",
               G_CALLBACK (application_selected_cb),
               chooser);
-    g_signal_connect (chooser->details->open_with_widget, "populate-popup",
-              G_CALLBACK (populate_popup_cb),
-              chooser);
+    if (g_signal_lookup ("populate-popup", G_OBJECT_TYPE (chooser->details->open_with_widget)) != 0)
+        g_signal_connect (chooser->details->open_with_widget, "populate-popup",
+                  G_CALLBACK (populate_popup_cb),
+                  chooser);
     g_signal_connect (chooser->details->open_with_widget, "application-activated",
               G_CALLBACK (application_activated_cb),
               chooser);

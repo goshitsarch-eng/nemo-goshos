@@ -622,6 +622,18 @@ ensure_controllers (GtkWidget *widget)
 		return;
 	g_object_set_qdata (G_OBJECT (widget), verne_controllers_quark, GINT_TO_POINTER (1));
 
+	if (GTK_IS_WINDOW (widget)) {
+		g_signal_connect (widget, "close-request", G_CALLBACK (on_close_request), NULL);
+		g_signal_connect (widget, "notify::maximized", G_CALLBACK (on_window_state_notify), NULL);
+		g_signal_connect (widget, "notify::fullscreened", G_CALLBACK (on_window_state_notify), NULL);
+		return;
+	}
+	/* Extra capture controllers on GTK4-native widgets (AppChooser,
+	 * etc.) free junk during dispose. Only Nemo/Eel classes that
+	 * installed GTK3 vfuncs need synthesized events. */
+	if (v == NULL)
+		return;
+
 	click = gtk_gesture_click_new ();
 	gtk_gesture_single_set_button (GTK_GESTURE_SINGLE (click), 0);
 	gtk_event_controller_set_propagation_phase (GTK_EVENT_CONTROLLER (click), GTK_PHASE_CAPTURE);
@@ -659,13 +671,6 @@ ensure_controllers (GtkWidget *widget)
 	g_signal_connect (focus, "enter", G_CALLBACK (on_focus_enter), NULL);
 	g_signal_connect (focus, "leave", G_CALLBACK (on_focus_leave), NULL);
 	gtk_widget_add_controller (widget, focus);
-
-	if (GTK_IS_WINDOW (widget)) {
-		g_signal_connect (widget, "close-request", G_CALLBACK (on_close_request), NULL);
-		g_signal_connect (widget, "notify::maximized", G_CALLBACK (on_window_state_notify), NULL);
-		g_signal_connect (widget, "notify::fullscreened", G_CALLBACK (on_window_state_notify), NULL);
-	}
-	(void) v;
 }
 
 static VerneVfuncs *
@@ -1441,12 +1446,6 @@ register_event_signals (void)
 			da->realize = verne_drawing_area_realize;
 		}
 		g_type_class_unref (da);
-	}
-	/* GTK4 GtkAppChooserWidget dropped populate-popup; Nemo still connects. */
-	if (g_signal_lookup ("populate-popup", GTK_TYPE_APP_CHOOSER_WIDGET) == 0) {
-		g_signal_new ("populate-popup", GTK_TYPE_APP_CHOOSER_WIDGET,
-			      G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL,
-			      G_TYPE_NONE, 2, GTK_TYPE_WIDGET, G_TYPE_APP_INFO);
 	}
 }
 
