@@ -57,7 +57,7 @@ typedef struct {
 } VerneVfuncs;
 
 static void (*orig_gtk_widget_realize) (GtkWidget *);
-static void (*orig_tree_view_snapshot) (GtkWidget *, GtkSnapshot *);
+static void (*orig_drawing_area_realize) (GtkWidget *);
 static gboolean event_signals_registered;
 static guint verne_draw_signal_id;
 
@@ -82,23 +82,6 @@ verne_emit_draw_signal (GtkWidget *widget, cairo_t *cr)
 }
 
 static void
-verne_emit_draw_from_snapshot (GtkWidget *widget, GtkSnapshot *snapshot)
-{
-	int w, h;
-	cairo_t *cr;
-
-	if (!verne_widget_has_draw_handlers (widget) || snapshot == NULL)
-		return;
-	w = gtk_widget_get_width (widget);
-	h = gtk_widget_get_height (widget);
-	if (w < 1 || h < 1)
-		return;
-	cr = gtk_snapshot_append_cairo (snapshot, &GRAPHENE_RECT_INIT (0, 0, (float) w, (float) h));
-	verne_emit_draw_signal (widget, cr);
-	cairo_destroy (cr);
-}
-
-static void
 verne_drawing_area_draw (GtkDrawingArea *area, cairo_t *cr, int width, int height, gpointer data)
 {
 	(void) width;
@@ -108,15 +91,18 @@ verne_drawing_area_draw (GtkDrawingArea *area, cairo_t *cr, int width, int heigh
 }
 
 static void
-verne_tree_view_snapshot (GtkWidget *widget, GtkSnapshot *snapshot)
+verne_drawing_area_realize (GtkWidget *widget)
 {
-	if (g_object_get_data (G_OBJECT (widget), "verne-in-snapshot"))
-		return;
-	g_object_set_data (G_OBJECT (widget), "verne-in-snapshot", GINT_TO_POINTER (1));
-	if (orig_tree_view_snapshot)
-		orig_tree_view_snapshot (widget, snapshot);
-	verne_emit_draw_from_snapshot (widget, snapshot);
-	g_object_set_data (G_OBJECT (widget), "verne-in-snapshot", NULL);
+	if (GTK_IS_DRAWING_AREA (widget) &&
+	    g_object_get_data (G_OBJECT (widget), "verne-draw-func") == NULL) {
+		gtk_drawing_area_set_draw_func (GTK_DRAWING_AREA (widget),
+						verne_drawing_area_draw, NULL, NULL);
+		g_object_set_data (G_OBJECT (widget), "verne-draw-func", GINT_TO_POINTER (1));
+	}
+	if (orig_drawing_area_realize)
+		orig_drawing_area_realize (widget);
+	else if (orig_gtk_widget_realize)
+		orig_gtk_widget_realize (widget);
 }
 
 static GHashTable *vfunc_table;
@@ -1324,12 +1310,12 @@ register_event_signals (void)
 	wclass->realize = global_widget_realize;
 	verne_draw_signal_id = g_signal_lookup ("draw", GTK_TYPE_WIDGET);
 	{
-		GtkWidgetClass *tv = GTK_WIDGET_CLASS (g_type_class_ref (GTK_TYPE_TREE_VIEW));
-		if (tv->snapshot != verne_tree_view_snapshot) {
-			orig_tree_view_snapshot = tv->snapshot;
-			tv->snapshot = verne_tree_view_snapshot;
+		GtkWidgetClass *da = GTK_WIDGET_CLASS (g_type_class_ref (GTK_TYPE_DRAWING_AREA));
+		if (da->realize != verne_drawing_area_realize) {
+			orig_drawing_area_realize = da->realize;
+			da->realize = verne_drawing_area_realize;
 		}
-		g_type_class_unref (tv);
+		g_type_class_unref (da);
 	}
 }
 
