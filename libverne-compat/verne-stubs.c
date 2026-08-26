@@ -210,10 +210,10 @@ xapp_status_icon_place (XAppStatusIcon *icon)
 		return;
 	monitor = g_list_model_get_item (monitors, 0);
 	gdk_monitor_get_geometry (monitor, &geo);
-	x = geo.x + geo.width - 52;
-	y = geo.y + geo.height - 52;
+	x = geo.x + geo.width - 64;
+	y = geo.y + 48;
 	g_object_unref (monitor);
-	gtk_window_set_default_size (GTK_WINDOW (icon->window), 40, 40);
+	gtk_window_set_default_size (GTK_WINDOW (icon->window), 56, 56);
 #ifdef GDK_WINDOWING_X11
 	{
 		GdkSurface *s = gtk_native_get_surface (GTK_NATIVE (icon->window));
@@ -263,7 +263,12 @@ xapp_status_icon_ensure_window (XAppStatusIcon *icon)
 	gtk_window_set_resizable (GTK_WINDOW (icon->window), FALSE);
 	gtk_window_set_title (GTK_WINDOW (icon->window), "Verne File Operations");
 	gtk_window_set_hide_on_close (GTK_WINDOW (icon->window), TRUE);
-	gtk_widget_set_size_request (icon->window, 40, 40);
+	gtk_widget_set_size_request (icon->window, 56, 56);
+	{
+		GtkApplication *app = GTK_APPLICATION (g_application_get_default ());
+		if (app)
+			gtk_application_add_window (app, GTK_WINDOW (icon->window));
+	}
 	gtk_widget_add_css_class (icon->window, "osd");
 	gtk_widget_add_css_class (icon->window, "verne-status-icon");
 	{
@@ -325,7 +330,14 @@ xapp_status_icon_set_visible (XAppStatusIcon *icon, gboolean visible)
 {
 	if (icon == NULL)
 		return;
-	icon->visible = !!visible;
+	visible = !!visible;
+	if (icon->visible == visible && icon->window != NULL) {
+		if (!visible)
+			return;
+		xapp_status_icon_place (icon);
+		return;
+	}
+	icon->visible = visible;
 	if (!visible) {
 		if (icon->window)
 			gtk_widget_set_visible (icon->window, FALSE);

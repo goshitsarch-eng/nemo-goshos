@@ -136,6 +136,7 @@ progress_window_delete_event (GtkWidget *widget,
     gtk_widget_hide (widget);
 
     self->priv->should_show_status_icon = TRUE;
+    g_message ("File Operations hidden; showing status icon");
     progress_ui_handler_update_status_icon (self);
 
     return TRUE;
