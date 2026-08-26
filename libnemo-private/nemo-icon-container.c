@@ -1068,11 +1068,15 @@ unschedule_redo_layout (NemoIconContainer *container)
 static void
 schedule_redo_layout (NemoIconContainer *container)
 {
-	if (container->details->idle_id == 0
-	    && container->details->has_been_allocated) {
-		container->details->idle_id = g_idle_add
-			(redo_layout_callback, container);
+	if (container->details->idle_id == 0) {
+		if (container->details->has_been_allocated) {
+			container->details->idle_id = g_idle_add
+				(redo_layout_callback, container);
+		} else {
+			gtk_widget_queue_allocate (GTK_WIDGET (container));
+		}
 	}
+	gtk_widget_queue_draw (GTK_WIDGET (container));
 }
 
 void

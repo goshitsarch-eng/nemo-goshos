@@ -45,8 +45,10 @@
 #include <fcntl.h>
 #include <gdk/gdkx.h>
 #include <glib/gi18n.h>
+#include <libnemo-private/nemo-desktop-directory.h>
 #include <libnemo-private/nemo-desktop-icon-file.h>
 #include <libnemo-private/nemo-directory-notify.h>
+#include <libnemo-private/nemo-file.h>
 #include <libnemo-private/nemo-file-changes-queue.h>
 #include <libnemo-private/nemo-file-operations.h>
 #include <libnemo-private/nemo-file-utilities.h>
@@ -67,7 +69,7 @@
 #include <unistd.h>
 
 /* Timeout to check the desktop directory for updates */
-#define RESCAN_TIMEOUT 4
+#define RESCAN_TIMEOUT 1
 
 struct NemoDesktopIconGridViewDetails
 {
@@ -81,6 +83,7 @@ struct NemoDesktopIconGridViewDetails
 	guint reload_desktop_timeout;
 	gboolean pending_rescan;
     gboolean updating_menus;
+	GFileMonitor *dir_monitor;
 };
 
 typedef struct {
@@ -207,7 +210,11 @@ should_show_file_on_current_monitor (NemoView *view, NemoFile *file)
     }
 
     if (file_monitor == -1) {
-        /* New file, no previous metadata - this should go on the primary monitor */
+        /* New file, no previous metadata. On a single monitor, always
+         * show it. Otherwise keep it on the primary desktop. */
+        if (nemo_desktop_utils_get_num_monitors () <= 1) {
+            return TRUE;
+        }
         return nemo_desktop_manager_get_monitor_is_primary (dm, current_monitor);
     }
 
@@ -336,6 +343,11 @@ nemo_desktop_icon_grid_view_dispose (GObject *object)
 	if (icon_view->details->reload_desktop_timeout != 0) {
 		g_source_remove (icon_view->details->reload_desktop_timeout);
 		icon_view->details->reload_desktop_timeout = 0;
+	}
+
+	if (icon_view->details->dir_monitor != NULL) {
+		g_file_monitor_cancel (icon_view->details->dir_monitor);
+		g_clear_object (&icon_view->details->dir_monitor);
 	}
 
 	ui_manager = nemo_view_get_ui_manager (NEMO_VIEW (icon_view));
@@ -467,6 +479,103 @@ desktop_icon_container_realize (GtkWidget *widget,
     gdk_window_set_background_rgba (bin_window, &transparent);
 }
 
+static void
+desktop_ensure_icons_from_model (NemoView *view)
+{
+	NemoDirectory *model;
+	NemoIconContainer *container;
+	GList *files, *l;
+
+	model = nemo_view_get_model (view);
+	if (model == NULL) {
+		return;
+	}
+
+	files = nemo_directory_get_file_list (model);
+	for (l = files; l != NULL; l = l->next) {
+		if (NEMO_VIEW_GET_CLASS (view)->add_file != NULL) {
+			NEMO_VIEW_GET_CLASS (view)->add_file (view, l->data, model);
+		}
+	}
+	nemo_file_list_free (files);
+
+	container = get_icon_container (NEMO_ICON_VIEW (view));
+	if (container != NULL) {
+		nemo_icon_container_layout_now (container);
+		gtk_widget_queue_draw (GTK_WIDGET (container));
+	}
+}
+
+static void
+desktop_reload_from_disk (NemoView *view)
+{
+	NemoDirectory *model;
+
+	model = nemo_view_get_model (view);
+	if (model != NULL) {
+		nemo_directory_force_reload (model);
+	}
+}
+
+static void
+on_real_dir_files_added (NemoDirectory *real_directory,
+			 GList *files,
+			 gpointer data)
+{
+	NemoView *view = NEMO_VIEW (data);
+	NemoDirectory *model;
+	GList *l;
+
+	(void) real_directory;
+	model = nemo_view_get_model (view);
+	if (model == NULL || files == NULL) {
+		return;
+	}
+
+	for (l = files; l != NULL; l = l->next) {
+		if (NEMO_VIEW_GET_CLASS (view)->add_file != NULL) {
+			NEMO_VIEW_GET_CLASS (view)->add_file (view, l->data, model);
+		}
+	}
+	desktop_ensure_icons_from_model (view);
+}
+
+static void
+desktop_dir_monitor_changed (GFileMonitor *monitor,
+			     GFile *file,
+			     GFile *other_file,
+			     GFileMonitorEvent event,
+			     gpointer user_data)
+{
+	NemoView *view = NEMO_VIEW (user_data);
+	GList *list;
+
+	(void) monitor;
+	(void) other_file;
+
+	switch (event) {
+	case G_FILE_MONITOR_EVENT_CREATED:
+	case G_FILE_MONITOR_EVENT_MOVED_IN:
+		list = g_list_prepend (NULL, g_object_ref (file));
+		nemo_directory_notify_files_added (list);
+		g_list_free_full (list, g_object_unref);
+		desktop_ensure_icons_from_model (view);
+		break;
+	case G_FILE_MONITOR_EVENT_DELETED:
+	case G_FILE_MONITOR_EVENT_MOVED_OUT:
+		list = g_list_prepend (NULL, g_object_ref (file));
+		nemo_directory_notify_files_removed (list);
+		g_list_free_full (list, g_object_unref);
+		break;
+	case G_FILE_MONITOR_EVENT_MOVED:
+	case G_FILE_MONITOR_EVENT_RENAMED:
+		desktop_reload_from_disk (view);
+		break;
+	default:
+		break;
+	}
+}
+
 static gboolean
 do_desktop_rescan (gpointer data)
 {
@@ -482,14 +591,14 @@ do_desktop_rescan (gpointer data)
 		return TRUE;
 	}
 
-	if (buf.st_ctime == desktop_dir_modify_time) {
+	if (buf.st_mtime == desktop_dir_modify_time) {
 		return TRUE;
 	}
 
 	desktop_icon_grid_view->details->pending_rescan = TRUE;
 
-	nemo_directory_force_reload
-		(nemo_view_get_model (NEMO_VIEW (desktop_icon_grid_view)));
+	desktop_reload_from_disk (NEMO_VIEW (desktop_icon_grid_view));
+	desktop_ensure_icons_from_model (NEMO_VIEW (desktop_icon_grid_view));
 
 	return TRUE;
 }
@@ -500,12 +609,14 @@ done_loading (NemoDirectory *model,
 {
 	struct stat buf;
 
+	(void) model;
 	desktop_icon_grid_view->details->pending_rescan = FALSE;
+	desktop_ensure_icons_from_model (NEMO_VIEW (desktop_icon_grid_view));
 	if (stat (desktop_directory, &buf) == -1) {
 		return;
 	}
 
-	desktop_dir_modify_time = buf.st_ctime;
+	desktop_dir_modify_time = buf.st_mtime;
 }
 
 /* This function is used because the NemoDirectory model does not
@@ -515,12 +626,40 @@ done_loading (NemoDirectory *model,
 static void
 delayed_init (NemoDesktopIconGridView *desktop_icon_grid_view)
 {
+	NemoDirectory *model;
+	NemoDirectory *real_directory;
+	GFile *dir;
+	char *path;
+
+	model = nemo_view_get_model (NEMO_VIEW (desktop_icon_grid_view));
+
 	/* Keep track of the load time. */
-	g_signal_connect_object (nemo_view_get_model (NEMO_VIEW (desktop_icon_grid_view)),
+	g_signal_connect_object (model,
 				 "done_loading",
 				 G_CALLBACK (done_loading), desktop_icon_grid_view, 0);
 
-	/* Monitor desktop directory. */
+	if (NEMO_IS_DESKTOP_DIRECTORY (model)) {
+		real_directory = nemo_desktop_directory_get_real_directory (NEMO_DESKTOP_DIRECTORY (model));
+		g_signal_connect_object (real_directory, "files_added",
+					 G_CALLBACK (on_real_dir_files_added),
+					 desktop_icon_grid_view, 0);
+		nemo_directory_unref (real_directory);
+	}
+
+	path = nemo_get_desktop_directory ();
+	dir = g_file_new_for_path (path);
+	desktop_icon_grid_view->details->dir_monitor =
+		g_file_monitor_directory (dir, G_FILE_MONITOR_WATCH_MOVES, NULL, NULL);
+	if (desktop_icon_grid_view->details->dir_monitor != NULL) {
+		g_signal_connect (desktop_icon_grid_view->details->dir_monitor, "changed",
+				  G_CALLBACK (desktop_dir_monitor_changed),
+				  desktop_icon_grid_view);
+	}
+	g_object_unref (dir);
+	g_free (path);
+
+	/* Always poll as well: GFileMonitor may exist without delivering
+	 * CREATED events to the merged x-nemo-desktop:/// view. */
 	desktop_icon_grid_view->details->reload_desktop_timeout =
 		g_timeout_add_seconds (RESCAN_TIMEOUT, do_desktop_rescan, desktop_icon_grid_view);
 
@@ -587,14 +726,13 @@ nemo_desktop_icon_grid_view_constructed (GObject *object)
     nemo_icon_container_set_use_drop_shadows (icon_container, TRUE);
     nemo_icon_view_grid_container_set_sort_desktop (NEMO_ICON_VIEW_GRID_CONTAINER (icon_container), TRUE);
 
-    /* Do a reload on the desktop if we don't have FAM, a smarter
-     * way to keep track of the items on the desktop.
+    /* Always rescan the desktop. GFileMonitor can be created
+     * (nemo_monitor_active) without the merged x-nemo-desktop:/// view
+     * showing newly created files until restart.
      */
-    if (!nemo_monitor_active ()) {
-        desktop_icon_grid_view->details->delayed_init_signal = g_signal_connect_object
-            (desktop_icon_grid_view, "begin_loading",
-             G_CALLBACK (delayed_init), desktop_icon_grid_view, 0);
-    }
+    desktop_icon_grid_view->details->delayed_init_signal = g_signal_connect_object
+        (desktop_icon_grid_view, "begin_loading",
+         G_CALLBACK (delayed_init), desktop_icon_grid_view, 0);
 
     nemo_icon_container_set_is_fixed_size (icon_container, TRUE);
     nemo_icon_container_set_is_desktop (icon_container, TRUE);

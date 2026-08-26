@@ -1098,10 +1098,7 @@ nemo_icon_view_grid_container_finish_adding_new_icons (NemoIconContainer *contai
          * Thus, we pass FALSE for tight, like lay_down_icons_tblr */
         grid = nemo_centered_placement_grid_new (container, container->details->horizontal);
 
-        if (grid == NULL) {
-           return;
-        }
-
+        if (grid != NULL) {
         nemo_centered_placement_grid_pre_populate (grid, container->details->icons, TRUE);
 
         for (p = semi_position_icons; p != NULL; p = p->next) {
@@ -1138,6 +1135,7 @@ nemo_icon_view_grid_container_finish_adding_new_icons (NemoIconContainer *contai
         }
 
         nemo_centered_placement_grid_free (grid);
+        }
         g_list_free (semi_position_icons);
     }
 
