@@ -1240,6 +1240,7 @@ gboolean gtk_widget_hide_on_delete (GtkWidget *widget);
 typedef struct _GtkBindingSet {
 	gchar *name;
 	GtkWidgetClass *klass;
+	GPtrArray *entries;
 } GtkBindingSet;
 
 GtkBindingSet *gtk_binding_set_by_class (gpointer class_struct);
@@ -1288,6 +1289,8 @@ typedef enum {
 #define gtk_widget_set_window(w, win) ((void)0)
 #define gtk_style_context_set_background(ctx, win) ((void)0)
 #define gtk_im_context_set_client_window(c, w) ((void)0)
+gboolean verne_im_context_filter_keypress (GtkIMContext *context, GdkEvent *event);
+#define gtk_im_context_filter_keypress(c, e) verne_im_context_filter_keypress ((c), (GdkEvent *) (e))
 #define GTK_MENU_SHELL(x) ((gpointer)(x))
 #define gtk_expander_set_spacing(e, s) ((void)0)
 #define gtk_label_set_line_wrap(l, b) gtk_label_set_wrap (l, b)
@@ -1850,9 +1853,9 @@ verne_gtk_tree_view_get_tooltip_context (GtkTreeView *tree_view, gint *x, gint *
 #define gtk_builder_connect_signals(b, d) ((void)0)
 #define gtk_action_set_always_show_image(a, b) ((void)0)
 #define gdk_window_get_state(w) 0
-#define gdk_event_get_scroll_deltas(e, x, y) FALSE
-#define gtk_widget_send_focus_change(w, e) FALSE
-#define gtk_menu_item_set_accel_path(i, p) ((void)0)
+gboolean gdk_event_get_scroll_deltas (const GdkEvent *event, gdouble *delta_x, gdouble *delta_y);
+gboolean gtk_widget_send_focus_change (GtkWidget *widget, GdkEvent *event);
+void gtk_menu_item_set_accel_path (GtkMenuItem *item, const gchar *accel_path);
 #define gtk_button_box_new(o) gtk_box_new (o, 6)
 #define gtk_activatable_sync_action_properties(a, act) ((void)0)
 #define gtk_activatable_do_set_related_action(a, act) gtk_activatable_set_related_action (a, act)

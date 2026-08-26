@@ -116,7 +116,18 @@ fill_button_event (GdkEvent *ev, GtkGestureClick *click, gint n_press, gdouble x
 	ev->button.x_root = x;
 	ev->button.y_root = y;
 	ev->button.button = gtk_gesture_single_get_current_button (GTK_GESTURE_SINGLE (click));
+	if (ge && !verne_gdk_event_is_synth (ge)) {
+		guint native_button = gdk_button_event_get_button (ge);
+		if (native_button != 0)
+			ev->button.button = native_button;
+	}
 	ev->button.state = ge ? gdk_event_get_modifier_state (ge) : 0;
+	if (ev->button.button == 2)
+		ev->button.state |= GDK_BUTTON2_MASK;
+	else if (ev->button.button == 1)
+		ev->button.state |= GDK_BUTTON1_MASK;
+	else if (ev->button.button == 3)
+		ev->button.state |= GDK_BUTTON3_MASK;
 	ev->button.time = ge ? gdk_event_get_time (ge) : GDK_CURRENT_TIME;
 }
 
@@ -305,6 +316,8 @@ on_key (GtkEventControllerKey *self, guint keyval, guint keycode, GdkModifierTyp
 	GdkEvent *ge;
 	gboolean press = GPOINTER_TO_INT (data);
 	gboolean handled = FALSE;
+	gchar strbuf[8];
+	gunichar ch;
 
 	memset (&ev, 0, sizeof (ev));
 	ev.key.type = press ? GDK_KEY_PRESS : GDK_KEY_RELEASE;
@@ -314,6 +327,13 @@ on_key (GtkEventControllerKey *self, guint keyval, guint keycode, GdkModifierTyp
 	ev.key.window = gtk_widget_get_window (widget);
 	ge = gtk_event_controller_get_current_event (GTK_EVENT_CONTROLLER (self));
 	ev.key.time = ge ? gdk_event_get_time (ge) : GDK_CURRENT_TIME;
+	ch = gdk_keyval_to_unicode (keyval);
+	if (ch != 0 && !g_unichar_iscntrl (ch)) {
+		gint n = g_unichar_to_utf8 (ch, strbuf);
+		strbuf[n] = '\0';
+		ev.key.string = strbuf;
+		ev.key.length = n;
+	}
 	verne_set_current_event (widget, &ev);
 	if (press) {
 		if (emit_widget_event (widget, "key-press-event", &ev))

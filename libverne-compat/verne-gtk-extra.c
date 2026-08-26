@@ -607,6 +607,25 @@ gtk_window_activate_default (GtkWindow *window)
 
 static GHashTable *binding_sets;
 
+typedef struct {
+	guint keyval;
+	GdkModifierType modifiers;
+	gchar *signal_name;
+	GVariant *args;
+} VerneBindEntry;
+
+static void
+verne_bind_entry_free (gpointer data)
+{
+	VerneBindEntry *e = data;
+	if (e == NULL)
+		return;
+	g_free (e->signal_name);
+	if (e->args)
+		g_variant_unref (e->args);
+	g_free (e);
+}
+
 GtkBindingSet *
 gtk_binding_set_by_class (gpointer class_struct)
 {
@@ -620,6 +639,7 @@ gtk_binding_set_by_class (gpointer class_struct)
 		set = g_new0 (GtkBindingSet, 1);
 		set->klass = class_struct;
 		set->name = g_strdup (G_OBJECT_CLASS_NAME (class_struct));
+		set->entries = g_ptr_array_new_with_free_func (verne_bind_entry_free);
 		g_hash_table_insert (binding_sets, class_struct, set);
 		if (set->name)
 			g_hash_table_insert (binding_sets, set->name, set);
@@ -640,31 +660,68 @@ gtk_binding_entry_add_signal (GtkBindingSet *binding_set, guint keyval, GdkModif
 			      const gchar *signal_name, guint n_args, ...)
 {
 	va_list args;
+	VerneBindEntry *entry;
+	GVariantBuilder builder;
+	GVariant *params = NULL;
+	GtkShortcut *shortcut;
+	guint i;
+
 	g_return_if_fail (binding_set != NULL && binding_set->klass != NULL);
+	g_return_if_fail (signal_name != NULL);
+
 	va_start (args, n_args);
-	if (n_args == 0) {
-		gtk_widget_class_add_binding_signal (binding_set->klass, keyval, modifiers, signal_name, NULL);
-	} else if (n_args == 1) {
-		GType t1 = va_arg (args, GType);
-		if (t1 == G_TYPE_BOOLEAN) {
-			gboolean v = va_arg (args, gboolean);
-			gtk_widget_class_add_binding_signal (binding_set->klass, keyval, modifiers, signal_name, "b", v);
-		} else {
-			gtk_widget_class_add_binding_signal (binding_set->klass, keyval, modifiers, signal_name, NULL);
-			(void) va_arg (args, gpointer);
+	if (n_args > 0) {
+		g_variant_builder_init (&builder, G_VARIANT_TYPE_TUPLE);
+		for (i = 0; i < n_args; i++) {
+			GType t = va_arg (args, GType);
+			if (t == G_TYPE_BOOLEAN)
+				g_variant_builder_add (&builder, "b", (gboolean) va_arg (args, gint));
+			else if (t == G_TYPE_INT || t == G_TYPE_ENUM || G_TYPE_IS_ENUM (t))
+				g_variant_builder_add (&builder, "i", va_arg (args, gint));
+			else if (t == G_TYPE_UINT)
+				g_variant_builder_add (&builder, "u", va_arg (args, guint));
+			else if (t == G_TYPE_STRING)
+				g_variant_builder_add (&builder, "s", va_arg (args, const gchar *));
+			else if (t == G_TYPE_DOUBLE)
+				g_variant_builder_add (&builder, "d", va_arg (args, gdouble));
+			else
+				g_variant_builder_add (&builder, "i", va_arg (args, gint));
 		}
-	} else {
-		gtk_widget_class_add_binding_signal (binding_set->klass, keyval, modifiers, signal_name, NULL);
+		params = g_variant_ref_sink (g_variant_builder_end (&builder));
 	}
 	va_end (args);
+
+	entry = g_new0 (VerneBindEntry, 1);
+	entry->keyval = keyval;
+	entry->modifiers = modifiers;
+	entry->signal_name = g_strdup (signal_name);
+	entry->args = params ? g_variant_ref (params) : NULL;
+	if (binding_set->entries == NULL)
+		binding_set->entries = g_ptr_array_new_with_free_func (verne_bind_entry_free);
+	g_ptr_array_add (binding_set->entries, entry);
+
+	shortcut = gtk_shortcut_new (gtk_keyval_trigger_new (keyval, modifiers),
+				     gtk_signal_action_new (signal_name));
+	if (params)
+		gtk_shortcut_set_arguments (shortcut, params);
+	gtk_widget_class_add_shortcut (binding_set->klass, shortcut);
+	g_object_unref (shortcut);
+	if (params)
+		g_variant_unref (params);
 }
 
 void
 gtk_binding_entry_remove (GtkBindingSet *binding_set, guint keyval, GdkModifierType modifiers)
 {
-	(void) binding_set;
-	(void) keyval;
-	(void) modifiers;
+	guint i;
+
+	if (binding_set == NULL || binding_set->entries == NULL)
+		return;
+	for (i = binding_set->entries->len; i-- > 0; ) {
+		VerneBindEntry *e = g_ptr_array_index (binding_set->entries, i);
+		if (e->keyval == keyval && e->modifiers == modifiers)
+			g_ptr_array_remove_index (binding_set->entries, i);
+	}
 }
 
 void
@@ -989,12 +1046,30 @@ gdk_monitor_get_workarea (GdkMonitor *monitor, GdkRectangle *workarea)
 GdkEvent *
 gdk_event_copy (const GdkEvent *event)
 {
-	return event ? g_memdup2 (event, sizeof (GdkEvent)) : NULL;
+	GdkEvent *copy;
+
+	if (event == NULL)
+		return NULL;
+	if (!verne_gdk_event_is_synth (event))
+		return (gdk_event_ref) ((GdkEvent *) event);
+	copy = g_memdup2 (event, sizeof (GdkEvent));
+	if (((guint) event->type == GDK_KEY_PRESS || (guint) event->type == GDK_KEY_RELEASE) &&
+	    event->key.string != NULL)
+		copy->key.string = g_strdup (event->key.string);
+	return copy;
 }
 
 void
 gdk_event_free (GdkEvent *event)
 {
+	if (event == NULL)
+		return;
+	if (!verne_gdk_event_is_synth (event)) {
+		gdk_event_unref (event);
+		return;
+	}
+	if ((guint) event->type == GDK_KEY_PRESS || (guint) event->type == GDK_KEY_RELEASE)
+		g_free (event->key.string);
 	g_free (event);
 }
 
@@ -1290,8 +1365,172 @@ verne_tree_view_column_set_attributes (GtkTreeViewColumn *tree_column,
 void gtk_activatable_set_use_action_appearance (gpointer activatable, gboolean use) { (void) activatable; (void) use; }
 gboolean gtk_activatable_get_use_action_appearance (gpointer activatable) { (void) activatable; return TRUE; }
 
-gboolean gtk_bindings_activate_event (GObject *object, GdkEventKey *event) { (void) object; (void) event; return FALSE; }
-void gtk_propagate_event (GtkWidget *widget, GdkEvent *event) { (void) widget; (void) event; }
+static gboolean
+verne_emit_binding (GObject *object, VerneBindEntry *e)
+{
+	const gchar *name = e->signal_name;
+	guint n;
+	gchar *alt = NULL;
+
+	if (g_signal_lookup (name, G_OBJECT_TYPE (object)) == 0) {
+		alt = g_strdup (name);
+		g_strdelimit (alt, "_", '-');
+		if (g_signal_lookup (alt, G_OBJECT_TYPE (object)) != 0)
+			name = alt;
+		else {
+			g_strdelimit (alt, "-", '_');
+			if (g_signal_lookup (alt, G_OBJECT_TYPE (object)) != 0)
+				name = alt;
+			else {
+				g_free (alt);
+				return FALSE;
+			}
+		}
+	}
+
+	n = e->args ? g_variant_n_children (e->args) : 0;
+	if (n == 0)
+		g_signal_emit_by_name (object, name);
+	else if (n == 1) {
+		GVariant *c = g_variant_get_child_value (e->args, 0);
+		if (g_variant_is_of_type (c, G_VARIANT_TYPE_STRING))
+			g_signal_emit_by_name (object, name, g_variant_get_string (c, NULL));
+		else if (g_variant_is_of_type (c, G_VARIANT_TYPE_BOOLEAN))
+			g_signal_emit_by_name (object, name, g_variant_get_boolean (c));
+		else if (g_variant_is_of_type (c, G_VARIANT_TYPE_INT32))
+			g_signal_emit_by_name (object, name, g_variant_get_int32 (c));
+		else
+			g_signal_emit_by_name (object, name);
+		g_variant_unref (c);
+	} else if (n == 2 && g_variant_is_of_type (e->args, G_VARIANT_TYPE ("(ii)"))) {
+		gint a, b;
+		g_variant_get (e->args, "(ii)", &a, &b);
+		g_signal_emit_by_name (object, name, a, b);
+	} else if (n == 3 && g_variant_is_of_type (e->args, G_VARIANT_TYPE ("(iib)"))) {
+		gint a, b;
+		gboolean c;
+		g_variant_get (e->args, "(iib)", &a, &b, &c);
+		g_signal_emit_by_name (object, name, a, b, c);
+	} else
+		g_signal_emit_by_name (object, name);
+	g_free (alt);
+	return TRUE;
+}
+
+gboolean
+gtk_bindings_activate_event (GObject *object, GdkEventKey *event)
+{
+	GType type;
+	guint key;
+	GdkModifierType mods;
+
+	if (object == NULL || event == NULL || binding_sets == NULL)
+		return FALSE;
+	key = event->keyval;
+	mods = event->state & gtk_accelerator_get_default_mod_mask ();
+	for (type = G_OBJECT_TYPE (object); type != 0 && type != G_TYPE_OBJECT; type = g_type_parent (type)) {
+		GtkWidgetClass *klass = g_type_class_peek (type);
+		GtkBindingSet *set;
+		guint i;
+
+		if (klass == NULL)
+			continue;
+		set = g_hash_table_lookup (binding_sets, klass);
+		if (set == NULL || set->entries == NULL)
+			continue;
+		for (i = 0; i < set->entries->len; i++) {
+			VerneBindEntry *e = g_ptr_array_index (set->entries, i);
+			if (e->modifiers != mods)
+				continue;
+			if (e->keyval != key &&
+			    gdk_keyval_to_lower (e->keyval) != gdk_keyval_to_lower (key))
+				continue;
+			if (verne_emit_binding (object, e))
+				return TRUE;
+		}
+	}
+	return FALSE;
+}
+
+void gtk_propagate_event (GtkWidget *widget, GdkEvent *event)
+{
+	if (widget && event)
+		gtk_widget_event (widget, event);
+}
+
+gboolean
+gdk_event_get_scroll_deltas (const GdkEvent *event, gdouble *delta_x, gdouble *delta_y)
+{
+	if (delta_x)
+		*delta_x = 0;
+	if (delta_y)
+		*delta_y = 0;
+	if (event == NULL)
+		return FALSE;
+	if (verne_gdk_event_is_synth (event)) {
+		if ((guint) event->type != GDK_SCROLL)
+			return FALSE;
+		if (delta_x)
+			*delta_x = event->scroll.delta_x;
+		if (delta_y)
+			*delta_y = event->scroll.delta_y;
+		return TRUE;
+	}
+	if ((gdk_event_get_event_type) ((GdkEvent *) event) != GDK_SCROLL)
+		return FALSE;
+	gdk_scroll_event_get_deltas ((GdkEvent *) event, delta_x, delta_y);
+	return TRUE;
+}
+
+gboolean
+gtk_widget_send_focus_change (GtkWidget *widget, GdkEvent *event)
+{
+	gboolean handled = FALSE;
+	gboolean in;
+
+	if (!GTK_IS_WIDGET (widget) || event == NULL)
+		return FALSE;
+	in = FALSE;
+	if (verne_gdk_event_is_synth (event) &&
+	    ((guint) event->type == GDK_FOCUS_CHANGE))
+		in = event->focus_change.in;
+	else if (!verne_gdk_event_is_synth (event) &&
+		 gdk_event_get_event_type (event) == GDK_FOCUS_CHANGE)
+		in = TRUE;
+	if (in)
+		gtk_widget_grab_focus (widget);
+	g_signal_emit_by_name (widget, in ? "focus-in-event" : "focus-out-event", event, &handled);
+	return handled;
+}
+
+gboolean
+verne_im_context_filter_keypress (GtkIMContext *context, GdkEvent *event)
+{
+	GdkEventKey *key;
+	gunichar ch;
+	gchar buf[8];
+	gint n;
+
+	if (context == NULL || event == NULL)
+		return FALSE;
+	if (!verne_gdk_event_is_synth (event))
+		return (gtk_im_context_filter_keypress) (context, event);
+
+	if ((guint) event->type != GDK_KEY_PRESS)
+		return FALSE;
+	key = &event->key;
+	if (key->state & (GDK_CONTROL_MASK | GDK_ALT_MASK | GDK_SUPER_MASK | GDK_META_MASK))
+		return FALSE;
+	ch = gdk_keyval_to_unicode (key->keyval);
+	if (ch == 0 || g_unichar_iscntrl (ch))
+		return FALSE;
+	n = g_unichar_to_utf8 (ch, buf);
+	if (n <= 0)
+		return FALSE;
+	buf[n] = '\0';
+	g_signal_emit_by_name (context, "commit", buf);
+	return TRUE;
+}
 
 GtkWidget *
 gtk_image_new_from_surface (cairo_surface_t *surface)

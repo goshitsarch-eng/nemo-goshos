@@ -1271,6 +1271,37 @@ void gtk_menu_item_set_label (GtkMenuItem *item, const gchar *label) {
 	gtk_button_set_label (GTK_BUTTON (item), label);
 }
 const gchar *gtk_menu_item_get_label (GtkMenuItem *item) { return item->label; }
+
+void
+gtk_menu_item_set_accel_path (GtkMenuItem *item, const gchar *accel_path)
+{
+	GtkAccelKey key;
+	gchar *accel_label, *combined;
+	const gchar *base;
+
+	if (item == NULL)
+		return;
+	g_object_set_data_full (G_OBJECT (item), "verne-accel-path",
+				g_strdup (accel_path), g_free);
+	if (accel_path == NULL || accel_path[0] == '\0')
+		return;
+	memset (&key, 0, sizeof key);
+	if (!gtk_accel_map_lookup_entry (accel_path, &key) || key.accel_key == 0)
+		return;
+	accel_label = gtk_accelerator_get_label (key.accel_key, key.accel_mods);
+	if (accel_label == NULL || accel_label[0] == '\0') {
+		g_free (accel_label);
+		return;
+	}
+	base = item->label ? item->label : gtk_button_get_label (GTK_BUTTON (item));
+	if (base == NULL)
+		base = "";
+	combined = g_strdup_printf ("%s    %s", base, accel_label);
+	gtk_button_set_use_underline (GTK_BUTTON (item), TRUE);
+	gtk_button_set_label (GTK_BUTTON (item), combined);
+	g_free (combined);
+	g_free (accel_label);
+}
 void gtk_image_menu_item_set_image (GtkMenuItem *item, GtkWidget *image) { item->image = image; }
 GtkWidget *gtk_image_menu_item_get_image (GtkMenuItem *item) { return item->image; }
 GtkWidget *gtk_image_menu_item_new_with_label (const gchar *label) { return gtk_menu_item_new_with_label (label); }
@@ -1517,6 +1548,12 @@ verne_editable_wants_key (GtkWidget *focus, guint key, GdkModifierType mods)
 {
 	if (focus == NULL || !GTK_IS_EDITABLE (focus))
 		return FALSE;
+	/* Function keys, Escape, and Menu are window/view accelerators (F2 rename, F3 split). */
+	if (key == GDK_KEY_Escape || key == GDK_KEY_Menu || key == GDK_KEY_F10)
+		return FALSE;
+	if ((key >= GDK_KEY_F1 && key <= GDK_KEY_F35) ||
+	    (key >= GDK_KEY_KP_F1 && key <= GDK_KEY_KP_F4))
+		return FALSE;
 	if (!(mods & (GDK_CONTROL_MASK | GDK_ALT_MASK | GDK_SUPER_MASK)))
 		return TRUE;
 	if ((mods & GDK_CONTROL_MASK) && !(mods & GDK_ALT_MASK)) {
@@ -1625,7 +1662,21 @@ void gtk_window_remove_accel_group (GtkWindow *window, GtkAccelGroup *accel)
 void gtk_widget_add_accelerator (GtkWidget *widget, const gchar *accel_signal, GtkAccelGroup *accel_group,
 				 guint accel_key, GdkModifierType accel_mods, GtkAccelFlags accel_flags)
 {
-	(void) widget; (void) accel_signal; (void) accel_group; (void) accel_key; (void) accel_mods; (void) accel_flags;
+	GtkAction *action;
+	gchar *name;
+
+	(void) accel_signal;
+	(void) accel_flags;
+	if (widget == NULL || accel_group == NULL || accel_key == 0)
+		return;
+	name = g_strdup_printf ("verne-widget-accel-%p", widget);
+	action = gtk_action_new (name, NULL, NULL, NULL);
+	g_free (name);
+	g_free (action->accelerator);
+	action->accelerator = gtk_accelerator_name (accel_key, accel_mods);
+	g_signal_connect_swapped (action, "activate", G_CALLBACK (gtk_widget_activate), widget);
+	verne_accel_group_connect_action (accel_group, action, action->accelerator);
+	g_object_set_data_full (G_OBJECT (widget), "verne-widget-accel-action", action, g_object_unref);
 }
 
 GtkIconTheme *
