@@ -4891,8 +4891,13 @@ create_properties_window (StartupData *startup_data)
 	gtk_window_set_default_size (GTK_WINDOW (window), 500, -1);
 
 	if (startup_data->parent_widget) {
+		GtkWidget *toplevel;
+
 		gtk_window_set_screen (GTK_WINDOW (window),
 				       gtk_widget_get_screen (startup_data->parent_widget));
+		toplevel = gtk_widget_get_ancestor (startup_data->parent_widget, GTK_TYPE_WINDOW);
+		if (GTK_IS_WINDOW (toplevel))
+			gtk_window_set_transient_for (GTK_WINDOW (window), GTK_WINDOW (toplevel));
 	}
 
 	if (startup_data->startup_id) {
