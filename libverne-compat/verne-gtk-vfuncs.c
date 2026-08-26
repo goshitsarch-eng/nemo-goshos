@@ -577,6 +577,8 @@ wrapped_snapshot (GtkWidget *widget, GtkSnapshot *snapshot)
 		type = g_type_parent (type);
 	}
 
+	verne_paint_desktop_wallpaper (widget, snapshot, w, h);
+
 	if (draw && w > 0 && h > 0) {
 		cr = gtk_snapshot_append_cairo (snapshot, &GRAPHENE_RECT_INIT (0, 0, w, h));
 		draw (widget, cr);

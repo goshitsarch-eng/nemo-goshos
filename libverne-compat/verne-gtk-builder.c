@@ -1,5 +1,7 @@
 #include "config.h"
 #include "verne-gtk-compat.h"
+#include <stdlib.h>
+#include <string.h>
 
 #ifdef gtk_builder_add_from_string
 #undef gtk_builder_add_from_string
@@ -211,6 +213,51 @@ rewrite_stock_labels (GString *s)
 		replace_all (s, map[i].from, map[i].to);
 }
 
+static void
+verne_bind_action_widgets (GtkBuilder *builder, const gchar *xml)
+{
+	const char *p = xml;
+
+	while ((p = strstr (p, "<action-widget")) != NULL) {
+		const char *resp;
+		const char *gt;
+		const char *id_end;
+		gchar *id;
+		gint response;
+		GObject *obj;
+
+		resp = strstr (p, "response=\"");
+		gt = strchr (p, '>');
+		if (resp == NULL || gt == NULL || resp > gt) {
+			p++;
+			continue;
+		}
+		response = atoi (resp + 10);
+		id_end = strstr (gt + 1, "</action-widget>");
+		if (id_end == NULL)
+			break;
+		id = g_strndup (gt + 1, (gsize) (id_end - (gt + 1)));
+		g_strstrip (id);
+		obj = gtk_builder_get_object (builder, id);
+		if (GTK_IS_WIDGET (obj)) {
+			GtkWidget *button = GTK_WIDGET (obj);
+			GtkWidget *dialog = GTK_WIDGET (gtk_widget_get_root (button));
+			if (!GTK_IS_DIALOG (dialog))
+				dialog = gtk_widget_get_ancestor (button, GTK_TYPE_DIALOG);
+			if (GTK_IS_DIALOG (dialog)) {
+				GtkWidget *parent = gtk_widget_get_parent (button);
+				g_object_ref (button);
+				if (parent)
+					gtk_widget_unparent (button);
+				gtk_dialog_add_action_widget (GTK_DIALOG (dialog), button, response);
+				g_object_unref (button);
+			}
+		}
+		g_free (id);
+		p = id_end + 1;
+	}
+}
+
 static gchar *
 verne_transform_gtk3_ui (const gchar *xml, gssize len)
 {
@@ -241,7 +288,6 @@ verne_transform_gtk3_ui (const gchar *xml, gssize len)
 	replace_all (s, "GtkArrow", "GtkImage");
 	replace_all (s, "GtkRadioButton", "GtkCheckButton");
 	replace_all (s, "GtkViewport", "GtkBox");
-	replace_all (s, "class=\"GtkDialog\"", "class=\"GtkWindow\"");
 	replace_all (s, "class=\"GtkInfoBar\"", "class=\"GtkBox\"");
 
 	replace_all (s, " name=\"can-focus\"", " name=\"focusable\"");
@@ -253,9 +299,8 @@ verne_transform_gtk3_ui (const gchar *xml, gssize len)
 	replace_all (s, " name=\"bottom-padding\"", " name=\"margin-bottom\"");
 	replace_all (s, "xsi-", "");
 
-	replace_all (s, " internal-child=\"vbox\"", "");
+	replace_all (s, " internal-child=\"vbox\"", " internal-child=\"content_area\"");
 	replace_all (s, " internal-child=\"action_area\"", "");
-	replace_all (s, " internal-child=\"content_area\"", "");
 
 	rewrite_stock_labels (s);
 	strip_packing_blocks (s);
@@ -308,6 +353,8 @@ verne_gtk_builder_add_from_string (GtkBuilder *builder, const gchar *buffer, gss
 	} else if (error) {
 		*error = NULL;
 	}
+	if (ok)
+		verne_bind_action_widgets (builder, buffer);
 	g_free (transformed);
 	return ok;
 }

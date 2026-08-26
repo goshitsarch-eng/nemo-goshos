@@ -44,6 +44,11 @@ gtk_container_add (gpointer container_ptr, GtkWidget *child)
 		}
 	}
 
+	if (GTK_IS_DIALOG (container)) {
+		gtk_box_append (GTK_BOX (gtk_dialog_get_content_area (GTK_DIALOG (container))), child);
+		return;
+	}
+
 	if (GTK_IS_WINDOW (container)) {
 		if (gtk_window_get_child (GTK_WINDOW (container)) == NULL)
 			gtk_window_set_child (GTK_WINDOW (container), child);
@@ -102,8 +107,6 @@ gtk_container_add (gpointer container_ptr, GtkWidget *child)
 		gtk_action_bar_set_center_widget (GTK_ACTION_BAR (container), child);
 	} else if (GTK_IS_HEADER_BAR (container)) {
 		gtk_header_bar_set_title_widget (GTK_HEADER_BAR (container), child);
-	} else if (GTK_IS_DIALOG (container)) {
-		gtk_box_append (GTK_BOX (gtk_dialog_get_content_area (GTK_DIALOG (container))), child);
 	} else if (GTK_IS_BIN (container)) {
 		GtkBin *bin = GTK_BIN (container);
 		if (bin->child)
@@ -361,6 +364,7 @@ gtk_dialog_run (GtkDialog *dialog)
 	id = g_signal_connect (dialog, "response", G_CALLBACK (dialog_response_cb), NULL);
 	gtk_window_set_modal (GTK_WINDOW (dialog), TRUE);
 	gtk_widget_set_visible (GTK_WIDGET (dialog), TRUE);
+	gtk_window_present (GTK_WINDOW (dialog));
 	g_main_loop_run (dialog_loop);
 	g_signal_handler_disconnect (dialog, id);
 	g_main_loop_unref (dialog_loop);

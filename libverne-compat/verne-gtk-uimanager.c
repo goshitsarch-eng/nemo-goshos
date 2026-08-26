@@ -107,6 +107,18 @@ on_item_activate (GtkButton *button, gpointer data)
 	(void) button;
 	if (action)
 		gtk_action_activate (action);
+	if (GTK_IS_CHECK_MENU_ITEM (button) && GTK_IS_TOGGLE_ACTION (action))
+		gtk_check_menu_item_set_active (GTK_CHECK_MENU_ITEM (button),
+						gtk_toggle_action_get_active (GTK_TOGGLE_ACTION (action)));
+}
+
+static void
+on_toggle_action_notify_active (GtkAction *action, GParamSpec *pspec, gpointer item)
+{
+	(void) pspec;
+	if (GTK_IS_TOGGLE_ACTION (action) && GTK_IS_CHECK_MENU_ITEM (item))
+		gtk_check_menu_item_set_active (GTK_CHECK_MENU_ITEM (item),
+						gtk_toggle_action_get_active (GTK_TOGGLE_ACTION (action)));
 }
 
 static GtkWidget *
@@ -123,7 +135,9 @@ build_menu_item_for_action (GtkUIManager *self, UiNode *node)
 		item = gtk_check_menu_item_new_with_mnemonic (label ? label : "");
 		gtk_check_menu_item_set_active (GTK_CHECK_MENU_ITEM (item),
 						gtk_toggle_action_get_active (GTK_TOGGLE_ACTION (action)));
-		g_signal_connect_swapped (item, "toggled", G_CALLBACK (gtk_action_activate), action);
+		g_signal_connect (item, "clicked", G_CALLBACK (on_item_activate), action);
+		g_signal_connect_object (action, "notify::active",
+					 G_CALLBACK (on_toggle_action_notify_active), item, 0);
 	} else {
 		item = gtk_menu_item_new_with_mnemonic (label ? label : "");
 		if (action)

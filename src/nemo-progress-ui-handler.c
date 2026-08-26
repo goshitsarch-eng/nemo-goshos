@@ -204,7 +204,7 @@ progress_ui_handler_ensure_window (NemoProgressUIHandler *self)
 
     gtk_window_set_type_hint (GTK_WINDOW (progress_window), GDK_WINDOW_TYPE_HINT_DIALOG);
     gtk_window_set_resizable (GTK_WINDOW (progress_window), FALSE);
-    gtk_window_set_default_size (GTK_WINDOW (progress_window), 500, -1);
+    gtk_window_set_default_size (GTK_WINDOW (progress_window), 500, 160);
 
 	gtk_window_set_title (GTK_WINDOW (progress_window),
 			      _("File Operations"));
@@ -227,15 +227,14 @@ progress_ui_handler_ensure_window (NemoProgressUIHandler *self)
     priv->list = w;
     gtk_container_add (GTK_CONTAINER (frame), w);
 
-    g_object_set (priv->list,
-                  "margin-left", 5,
-                  "margin-right", 5,
-                  "margin-top", 5,
-                  "margin-bottom", 5,
-                  NULL);
+    gtk_widget_set_margin_start (priv->list, 5);
+    gtk_widget_set_margin_end (priv->list, 5);
+    gtk_widget_set_margin_top (priv->list, 5);
+    gtk_widget_set_margin_bottom (priv->list, 5);
 
     gtk_box_pack_start (GTK_BOX (main_box), frame, FALSE, FALSE, 0);
     gtk_widget_show_all (main_box);
+    gtk_widget_set_visible (progress_window, TRUE);
 
 	g_signal_connect (progress_window,
 			  "delete-event",

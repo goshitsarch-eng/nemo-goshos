@@ -1047,22 +1047,91 @@ void gtk_image_menu_item_set_always_show_image (GtkMenuItem *item, gboolean alwa
 GType gtk_separator_menu_item_get_type (void) { return GTK_TYPE_SEPARATOR; }
 GtkWidget *gtk_separator_menu_item_new (void) { return gtk_separator_new (GTK_ORIENTATION_HORIZONTAL); }
 
-typedef struct _GtkCheckMenuItemClass { GtkCheckButtonClass parent_class; } GtkCheckMenuItemClass;
-struct _GtkCheckMenuItem { GtkCheckButton parent; };
-G_DEFINE_TYPE (GtkCheckMenuItem, gtk_check_menu_item, GTK_TYPE_CHECK_BUTTON)
-static void gtk_check_menu_item_class_init (GtkCheckMenuItemClass *c) { (void) c; }
-static void gtk_check_menu_item_init (GtkCheckMenuItem *i) { (void) i; }
-GtkWidget *gtk_check_menu_item_new_with_mnemonic (const gchar *label) {
+enum { CHECK_MENU_TOGGLED, CHECK_MENU_LAST };
+static guint check_menu_signals[CHECK_MENU_LAST];
+
+typedef struct _GtkCheckMenuItemClass {
+	GtkMenuItemClass parent_class;
+	void (* toggled) (GtkCheckMenuItem *check_menu_item);
+} GtkCheckMenuItemClass;
+
+struct _GtkCheckMenuItem {
+	GtkMenuItem parent;
+	gboolean active;
+	gchar *raw_label;
+};
+
+static void gtk_check_menu_item_class_init (GtkCheckMenuItemClass *klass);
+static void gtk_check_menu_item_init (GtkCheckMenuItem *item);
+G_DEFINE_TYPE (GtkCheckMenuItem, gtk_check_menu_item, GTK_TYPE_MENU_ITEM)
+
+static void
+gtk_check_menu_item_sync_label (GtkCheckMenuItem *item)
+{
+	const gchar *raw = item->raw_label ? item->raw_label : "";
+	gchar *shown = g_strdup_printf ("%s%s", item->active ? "✓  " : "     ", raw);
+	gtk_menu_item_set_label (GTK_MENU_ITEM (item), shown);
+	g_free (shown);
+}
+
+static void
+gtk_check_menu_item_dispose (GObject *object)
+{
+	GtkCheckMenuItem *item = GTK_CHECK_MENU_ITEM (object);
+	g_clear_pointer (&item->raw_label, g_free);
+	G_OBJECT_CLASS (gtk_check_menu_item_parent_class)->dispose (object);
+}
+
+static void
+gtk_check_menu_item_clicked (GtkButton *button)
+{
+	GtkCheckMenuItem *item = GTK_CHECK_MENU_ITEM (button);
+	item->active = !item->active;
+	gtk_check_menu_item_sync_label (item);
+	g_signal_emit (item, check_menu_signals[CHECK_MENU_TOGGLED], 0);
+	GTK_BUTTON_CLASS (gtk_check_menu_item_parent_class)->clicked (button);
+}
+
+static void
+gtk_check_menu_item_class_init (GtkCheckMenuItemClass *klass)
+{
+	G_OBJECT_CLASS (klass)->dispose = gtk_check_menu_item_dispose;
+	GTK_BUTTON_CLASS (klass)->clicked = gtk_check_menu_item_clicked;
+	check_menu_signals[CHECK_MENU_TOGGLED] =
+		g_signal_new ("toggled", G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_FIRST,
+			      G_STRUCT_OFFSET (GtkCheckMenuItemClass, toggled),
+			      NULL, NULL, NULL, G_TYPE_NONE, 0);
+}
+
+static void
+gtk_check_menu_item_init (GtkCheckMenuItem *item)
+{
+	item->active = FALSE;
+	item->raw_label = NULL;
+}
+
+GtkWidget *
+gtk_check_menu_item_new_with_mnemonic (const gchar *label)
+{
 	GtkWidget *w = g_object_new (GTK_TYPE_CHECK_MENU_ITEM, NULL);
-	gtk_check_button_set_use_underline (GTK_CHECK_BUTTON (w), TRUE);
-	gtk_check_button_set_label (GTK_CHECK_BUTTON (w), label);
+	GTK_CHECK_MENU_ITEM (w)->raw_label = g_strdup (label);
+	gtk_check_menu_item_sync_label (GTK_CHECK_MENU_ITEM (w));
 	return w;
 }
-void gtk_check_menu_item_set_active (GtkCheckMenuItem *item, gboolean is_active) {
-	gtk_check_button_set_active (GTK_CHECK_BUTTON (item), is_active);
+
+void
+gtk_check_menu_item_set_active (GtkCheckMenuItem *item, gboolean is_active)
+{
+	if (item == NULL || item->active == !!is_active)
+		return;
+	item->active = !!is_active;
+	gtk_check_menu_item_sync_label (item);
 }
-gboolean gtk_check_menu_item_get_active (GtkCheckMenuItem *item) {
-	return gtk_check_button_get_active (GTK_CHECK_BUTTON (item));
+
+gboolean
+gtk_check_menu_item_get_active (GtkCheckMenuItem *item)
+{
+	return item ? item->active : FALSE;
 }
 
 /* images / buttons */

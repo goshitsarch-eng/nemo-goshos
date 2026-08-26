@@ -350,6 +350,17 @@ verne_map_icon_name (const char *name)
 		return "edit-find-replace-symbolic";
 	if (g_strcmp0 (name, "tab-new-symbolic") == 0)
 		return "list-add-symbolic";
+	if (g_strcmp0 (name, "drive-harddisk-symbolic") == 0) {
+		GdkDisplay *display = gdk_display_get_default ();
+		GtkIconTheme *theme = display ? gtk_icon_theme_get_for_display (display) : NULL;
+		if (theme && !gtk_icon_theme_has_icon (theme, "drive-harddisk-symbolic")) {
+			if (gtk_icon_theme_has_icon (theme, "computer-symbolic"))
+				return "computer-symbolic";
+			if (gtk_icon_theme_has_icon (theme, "drive-harddisk"))
+				return "drive-harddisk";
+			return "folder-symbolic";
+		}
+	}
 	return name;
 }
 
@@ -1624,6 +1635,7 @@ void gtk_builder_add_callback_symbols (GtkBuilder *builder, const char *first, .
 gboolean verne_gtk_builder_add_from_string (GtkBuilder *builder, const gchar *buffer, gssize length, GError **error);
 gboolean verne_gtk_builder_add_from_file (GtkBuilder *builder, const gchar *filename, GError **error);
 gboolean verne_gtk_builder_add_from_resource (GtkBuilder *builder, const gchar *path, GError **error);
+void verne_paint_desktop_wallpaper (GtkWidget *widget, GtkSnapshot *snapshot, int width, int height);
 #define gtk_builder_add_from_string(b, buf, len, err) verne_gtk_builder_add_from_string ((b), (buf), (len), (err))
 #define gtk_builder_add_from_file(b, f, err) verne_gtk_builder_add_from_file ((b), (f), (err))
 #define gtk_builder_add_from_resource(b, p, err) verne_gtk_builder_add_from_resource ((b), (p), (err))

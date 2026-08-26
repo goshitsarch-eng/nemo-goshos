@@ -250,6 +250,17 @@ gtk_window_set_type_hint (GtkWindow *window, GdkWindowTypeHint hint)
 		if (desktop_css == NULL)
 			desktop_css = gtk_css_provider_new ();
 		if (wallpaper) {
+			GdkTexture *tex = gdk_texture_new_from_filename (wallpaper, NULL);
+			if (tex == NULL) {
+				GdkPixbuf *pb = gdk_pixbuf_new_from_file (wallpaper, NULL);
+				if (pb) {
+					tex = gdk_texture_new_for_pixbuf (pb);
+					g_object_unref (pb);
+				}
+			}
+			if (tex)
+				g_object_set_data_full (G_OBJECT (window), "verne-wallpaper",
+							tex, g_object_unref);
 			gchar *escaped = g_uri_escape_string (wallpaper, "/:", TRUE);
 			css = g_strdup_printf (
 				"window.verne-desktop, window.nemo-desktop-window {"
@@ -274,6 +285,41 @@ gtk_window_set_type_hint (GtkWindow *window, GdkWindowTypeHint hint)
 							    GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
 	}
 	verne_window_ensure_realize_hook (window);
+}
+
+void
+verne_paint_desktop_wallpaper (GtkWidget *widget, GtkSnapshot *snapshot, int width, int height)
+{
+	GtkWidget *win;
+	GdkTexture *tex;
+	int tw, th;
+	float scale, dw, dh, x, y;
+
+	if (widget == NULL || snapshot == NULL || width <= 0 || height <= 0)
+		return;
+	if (GTK_IS_WINDOW (widget))
+		win = widget;
+	else
+		win = gtk_widget_get_ancestor (widget, GTK_TYPE_WINDOW);
+	if (win == NULL)
+		return;
+	if (!gtk_widget_has_css_class (win, "verne-desktop") &&
+	    !gtk_widget_has_css_class (win, "nemo-desktop-window"))
+		return;
+	tex = g_object_get_data (G_OBJECT (win), "verne-wallpaper");
+	if (tex == NULL)
+		return;
+	tw = gdk_texture_get_width (tex);
+	th = gdk_texture_get_height (tex);
+	if (tw <= 0 || th <= 0)
+		return;
+	scale = MAX ((float) width / (float) tw, (float) height / (float) th);
+	dw = (float) tw * scale;
+	dh = (float) th * scale;
+	x = ((float) width - dw) / 2.0f;
+	y = ((float) height - dh) / 2.0f;
+	gtk_snapshot_append_scaled_texture (snapshot, tex, GSK_SCALING_FILTER_LINEAR,
+					    &GRAPHENE_RECT_INIT (x, y, dw, dh));
 }
 
 GdkWindowTypeHint
