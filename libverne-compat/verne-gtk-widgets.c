@@ -756,14 +756,29 @@ verne_widget_root_xy (GtkWidget *widget, int *x, int *y)
 }
 
 static void
+verne_menu_set_attach (GtkMenu *menu, GtkWidget *attach)
+{
+	if (menu->attach == attach)
+		return;
+	if (menu->attach != NULL) {
+		g_object_remove_weak_pointer (G_OBJECT (menu->attach), (gpointer *) &menu->attach);
+		menu->attach = NULL;
+	}
+	if (attach != NULL && GTK_IS_WIDGET (attach)) {
+		menu->attach = attach;
+		g_object_add_weak_pointer (G_OBJECT (attach), (gpointer *) &menu->attach);
+	}
+}
+
+static void
 verne_ensure_menu_attach (GtkMenu *menu, GtkWidget *fallback)
 {
 	GtkWidget *attach = menu->attach ? menu->attach : fallback;
 	GtkRoot *root;
 
-	if (attach)
-		menu->attach = attach;
-	if (menu->attach == NULL)
+	if (attach && GTK_IS_WIDGET (attach))
+		verne_menu_set_attach (menu, attach);
+	if (menu->attach == NULL || !GTK_IS_WIDGET (menu->attach))
 		return;
 	root = gtk_widget_get_root (menu->attach);
 	if (GTK_IS_WINDOW (root) && !GTK_IS_MENU (root))
@@ -772,7 +787,16 @@ verne_ensure_menu_attach (GtkMenu *menu, GtkWidget *fallback)
 		gtk_window_set_transient_for (GTK_WINDOW (menu), GTK_WINDOW (root));
 }
 
-static void gtk_menu_class_init (GtkMenuClass *c) { (void) c; }
+static void gtk_menu_dispose (GObject *object)
+{
+	verne_menu_set_attach (GTK_MENU (object), NULL);
+	G_OBJECT_CLASS (gtk_menu_parent_class)->dispose (object);
+}
+
+static void gtk_menu_class_init (GtkMenuClass *c)
+{
+	G_OBJECT_CLASS (c)->dispose = gtk_menu_dispose;
+}
 static void
 gtk_menu_init (GtkMenu *menu)
 {
@@ -871,7 +895,7 @@ verne_toplevel_dismiss_menus (GtkGestureClick *gesture, gint n_press, gdouble x,
 	if (toplevel == NULL)
 		return;
 	picked = gtk_widget_pick (toplevel, x, y, GTK_PICK_DEFAULT);
-	if (picked != NULL &&
+	if (picked != NULL && GTK_IS_WIDGET (picked) &&
 	    (GTK_IS_MENU_ITEM (picked) || GTK_IS_MENU_BAR (picked) ||
 	     GTK_IS_NOTEBOOK (picked) ||
 	     gtk_widget_get_ancestor (picked, GTK_TYPE_MENU_ITEM) != NULL ||
@@ -1092,10 +1116,12 @@ void gtk_menu_popdown (GtkMenu *menu) {
 	gtk_widget_set_opacity (GTK_WIDGET (menu), 0.0);
 	verne_menu_unmap_surface (GTK_WIDGET (menu));
 	attach = menu->attach;
-	if (attach) {
+	if (GTK_IS_WIDGET (attach)) {
 		GtkWidget *parent_menu = gtk_widget_get_ancestor (attach, GTK_TYPE_MENU);
 		if (parent_menu && parent_menu != GTK_WIDGET (menu))
 			gtk_menu_popdown (GTK_MENU (parent_menu));
+	} else {
+		menu->attach = NULL;
 	}
 	g_idle_add (verne_menu_unmap_idle, g_object_ref (menu));
 	g_timeout_add (50, verne_menu_unmap_idle, g_object_ref (menu));
@@ -1103,7 +1129,7 @@ void gtk_menu_popdown (GtkMenu *menu) {
 }
 void gtk_menu_attach_to_widget (GtkMenu *menu, GtkWidget *attach, gpointer detacher) {
 	(void) detacher;
-	menu->attach = attach;
+	verne_menu_set_attach (menu, attach);
 	verne_ensure_menu_attach (menu, attach);
 }
 GtkWidget *gtk_menu_get_attach_widget (GtkMenu *menu) { return menu->attach; }
