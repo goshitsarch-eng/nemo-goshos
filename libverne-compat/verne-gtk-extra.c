@@ -1155,6 +1155,9 @@ typedef struct {
 	GtkTreeViewDropPosition pos;
 } VerneTreeDestRow;
 
+static GHashTable *verne_tree_snapshot_origs;
+static void (*verne_tree_view_snapshot_default) (GtkWidget *, GtkSnapshot *);
+
 static GQuark
 verne_tree_dest_quark (void)
 {
@@ -1176,6 +1179,113 @@ verne_tree_dest_free (gpointer data)
 	g_free (row);
 }
 
+static void
+verne_paint_tree_dest_row (GtkTreeView *tree_view, GtkSnapshot *snapshot)
+{
+	VerneTreeDestRow *row;
+	GdkRectangle rect = { 0 };
+	GtkStyleContext *style;
+	GdkRGBA accent = { 0.208, 0.518, 0.894, 1.0 };
+	cairo_t *cr;
+	int ww, wh, wx, wy;
+	double x, y, w, h, r;
+
+	row = g_object_get_qdata (G_OBJECT (tree_view), verne_tree_dest_quark ());
+	if (row == NULL || row->path == NULL)
+		return;
+
+	gtk_tree_view_get_background_area (tree_view, row->path, NULL, &rect);
+	gtk_tree_view_convert_bin_window_to_widget_coords (tree_view, rect.x, rect.y, &wx, &wy);
+	rect.x = wx;
+	rect.y = wy;
+	if (rect.width < 2 || rect.height < 2)
+		return;
+
+	ww = gtk_widget_get_width (GTK_WIDGET (tree_view));
+	wh = gtk_widget_get_height (GTK_WIDGET (tree_view));
+	if (ww < 1 || wh < 1)
+		return;
+
+	style = gtk_widget_get_style_context (GTK_WIDGET (tree_view));
+	if (!gtk_style_context_lookup_color (style, "accent_bg_color", &accent))
+		gtk_style_context_lookup_color (style, "theme_selected_bg_color", &accent);
+
+	cr = gtk_snapshot_append_cairo (snapshot, &GRAPHENE_RECT_INIT (0, 0, (float) ww, (float) wh));
+	cairo_save (cr);
+	cairo_set_source_rgba (cr, accent.red, accent.green, accent.blue, 0.95);
+
+	if (row->pos == GTK_TREE_VIEW_DROP_BEFORE ||
+	    row->pos == GTK_TREE_VIEW_DROP_AFTER) {
+		cairo_set_line_width (cr, 3.0);
+		y = (row->pos == GTK_TREE_VIEW_DROP_BEFORE) ? rect.y : rect.y + rect.height;
+		cairo_move_to (cr, rect.x + 4, y + 0.5);
+		cairo_line_to (cr, rect.x + rect.width - 4, y + 0.5);
+		cairo_stroke (cr);
+	} else {
+		x = rect.x + 2;
+		y = rect.y + 1;
+		w = MAX (rect.width - 4, 4);
+		h = MAX (rect.height - 2, 4);
+		r = MIN (6.0, h / 2.0);
+		cairo_new_sub_path (cr);
+		cairo_arc (cr, x + w - r, y + r, r, -G_PI_2, 0);
+		cairo_arc (cr, x + w - r, y + h - r, r, 0, G_PI_2);
+		cairo_arc (cr, x + r, y + h - r, r, G_PI_2, G_PI);
+		cairo_arc (cr, x + r, y + r, r, G_PI, 3 * G_PI_2);
+		cairo_close_path (cr);
+		cairo_set_source_rgba (cr, accent.red, accent.green, accent.blue, 0.32);
+		cairo_fill_preserve (cr);
+		cairo_set_source_rgba (cr, accent.red, accent.green, accent.blue, 0.95);
+		cairo_set_line_width (cr, 2.5);
+		cairo_stroke (cr);
+	}
+	cairo_restore (cr);
+	cairo_destroy (cr);
+}
+
+static void
+verne_tree_view_snapshot (GtkWidget *widget, GtkSnapshot *snapshot)
+{
+	void (*orig) (GtkWidget *, GtkSnapshot *) = NULL;
+	GType type;
+
+	if (verne_tree_snapshot_origs) {
+		for (type = G_OBJECT_TYPE (widget); type != 0 && type != G_TYPE_OBJECT; type = g_type_parent (type)) {
+			orig = g_hash_table_lookup (verne_tree_snapshot_origs, GSIZE_TO_POINTER (type));
+			if (orig)
+				break;
+		}
+	}
+	if (orig == NULL)
+		orig = verne_tree_view_snapshot_default;
+	if (orig && orig != verne_tree_view_snapshot)
+		orig (widget, snapshot);
+	if (GTK_IS_TREE_VIEW (widget))
+		verne_paint_tree_dest_row (GTK_TREE_VIEW (widget), snapshot);
+}
+
+static void
+verne_tree_view_hook_snapshot (GtkTreeView *tree_view)
+{
+	GtkWidgetClass *klass;
+	GType type;
+
+	if (!GTK_IS_TREE_VIEW (tree_view))
+		return;
+	klass = GTK_WIDGET_GET_CLASS (tree_view);
+	if (klass->snapshot == verne_tree_view_snapshot)
+		return;
+	type = G_OBJECT_TYPE (tree_view);
+	if (verne_tree_snapshot_origs == NULL)
+		verne_tree_snapshot_origs = g_hash_table_new (g_direct_hash, g_direct_equal);
+	if (g_hash_table_lookup (verne_tree_snapshot_origs, GSIZE_TO_POINTER (type)) == NULL &&
+	    klass->snapshot != NULL)
+		g_hash_table_insert (verne_tree_snapshot_origs, GSIZE_TO_POINTER (type), klass->snapshot);
+	if (verne_tree_view_snapshot_default == NULL && klass->snapshot != verne_tree_view_snapshot)
+		verne_tree_view_snapshot_default = klass->snapshot;
+	klass->snapshot = verne_tree_view_snapshot;
+}
+
 void
 verne_gtk_tree_view_set_drag_dest_row (GtkTreeView *tree_view, GtkTreePath *path, GtkTreeViewDropPosition pos)
 {
@@ -1183,6 +1293,7 @@ verne_gtk_tree_view_set_drag_dest_row (GtkTreeView *tree_view, GtkTreePath *path
 
 	if (!GTK_IS_TREE_VIEW (tree_view))
 		return;
+	verne_tree_view_hook_snapshot (tree_view);
 	if (path == NULL) {
 		g_object_set_qdata (G_OBJECT (tree_view), verne_tree_dest_quark (), NULL);
 		gtk_widget_queue_draw (GTK_WIDGET (tree_view));
