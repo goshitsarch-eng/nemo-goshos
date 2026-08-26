@@ -1636,6 +1636,7 @@ gboolean verne_gtk_builder_add_from_string (GtkBuilder *builder, const gchar *bu
 gboolean verne_gtk_builder_add_from_file (GtkBuilder *builder, const gchar *filename, GError **error);
 gboolean verne_gtk_builder_add_from_resource (GtkBuilder *builder, const gchar *path, GError **error);
 void verne_paint_desktop_wallpaper (GtkWidget *widget, GtkSnapshot *snapshot, int width, int height);
+void verne_paint_desktop_wallpaper_cairo (GtkWidget *widget, cairo_t *cr, int width, int height);
 #define gtk_builder_add_from_string(b, buf, len, err) verne_gtk_builder_add_from_string ((b), (buf), (len), (err))
 #define gtk_builder_add_from_file(b, f, err) verne_gtk_builder_add_from_file ((b), (f), (err))
 #define gtk_builder_add_from_resource(b, p, err) verne_gtk_builder_add_from_resource ((b), (p), (err))

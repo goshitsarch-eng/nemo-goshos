@@ -581,6 +581,7 @@ wrapped_snapshot (GtkWidget *widget, GtkSnapshot *snapshot)
 
 	if (draw && w > 0 && h > 0) {
 		cr = gtk_snapshot_append_cairo (snapshot, &GRAPHENE_RECT_INIT (0, 0, w, h));
+		verne_paint_desktop_wallpaper_cairo (widget, cr, w, h);
 		draw (widget, cr);
 		cairo_destroy (cr);
 	}

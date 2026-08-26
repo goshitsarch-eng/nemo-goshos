@@ -322,6 +322,52 @@ verne_paint_desktop_wallpaper (GtkWidget *widget, GtkSnapshot *snapshot, int wid
 					    &GRAPHENE_RECT_INIT (x, y, dw, dh));
 }
 
+void
+verne_paint_desktop_wallpaper_cairo (GtkWidget *widget, cairo_t *cr, int width, int height)
+{
+	GtkWidget *win;
+	GdkTexture *tex;
+	GdkPixbuf *pb;
+	int tw, th;
+	double scale, dw, dh, x, y;
+
+	if (widget == NULL || cr == NULL || width <= 0 || height <= 0)
+		return;
+	if (GTK_IS_WINDOW (widget))
+		win = widget;
+	else
+		win = gtk_widget_get_ancestor (widget, GTK_TYPE_WINDOW);
+	if (win == NULL)
+		return;
+	if (!gtk_widget_has_css_class (win, "verne-desktop") &&
+	    !gtk_widget_has_css_class (win, "nemo-desktop-window"))
+		return;
+	tex = g_object_get_data (G_OBJECT (win), "verne-wallpaper");
+	if (tex == NULL)
+		return;
+	pb = gdk_pixbuf_get_from_texture (tex);
+	if (pb == NULL)
+		return;
+	tw = gdk_pixbuf_get_width (pb);
+	th = gdk_pixbuf_get_height (pb);
+	if (tw <= 0 || th <= 0) {
+		g_object_unref (pb);
+		return;
+	}
+	scale = MAX ((double) width / (double) tw, (double) height / (double) th);
+	dw = tw * scale;
+	dh = th * scale;
+	x = ((double) width - dw) / 2.0;
+	y = ((double) height - dh) / 2.0;
+	cairo_save (cr);
+	cairo_translate (cr, x, y);
+	cairo_scale (cr, scale, scale);
+	gdk_cairo_set_source_pixbuf (cr, pb, 0, 0);
+	cairo_paint (cr);
+	cairo_restore (cr);
+	g_object_unref (pb);
+}
+
 GdkWindowTypeHint
 gtk_window_get_type_hint (GtkWindow *window)
 {
@@ -1197,12 +1243,21 @@ void gtk_render_icon_surface (GtkStyleContext *context, cairo_t *cr, cairo_surfa
 	}
 }
 
+static GtkIconLookupFlags
+verne_icon_lookup_flags (const gchar *name)
+{
+	if (name != NULL && g_str_has_suffix (name, "-symbolic"))
+		return GTK_ICON_LOOKUP_FORCE_SYMBOLIC;
+	return 0;
+}
+
 gpointer
 gtk_icon_theme_lookup_icon_for_scale (GtkIconTheme *theme, const gchar *name, gint size, gint scale, GtkIconLookupFlags flags)
 {
+	const gchar *mapped = verne_map_icon_name (name);
 	(void) flags;
-	return gtk_icon_theme_lookup_icon (theme, verne_map_icon_name (name), NULL, size, scale, GTK_TEXT_DIR_NONE,
-					   GTK_ICON_LOOKUP_FORCE_REGULAR);
+	return gtk_icon_theme_lookup_icon (theme, mapped, NULL, size, scale, GTK_TEXT_DIR_NONE,
+					   verne_icon_lookup_flags (mapped));
 }
 
 static GIcon *
@@ -1243,8 +1298,16 @@ gtk_icon_theme_lookup_by_gicon_for_scale (GtkIconTheme *theme, GIcon *icon, gint
 	gpointer paintable;
 	(void) flags;
 	mapped = icon ? verne_map_gicon (icon) : NULL;
-	paintable = gtk_icon_theme_lookup_by_gicon (theme, mapped ? mapped : icon, size, scale, GTK_TEXT_DIR_NONE,
-						    GTK_ICON_LOOKUP_FORCE_REGULAR);
+	{
+		const gchar *first = NULL;
+		if (mapped && G_IS_THEMED_ICON (mapped)) {
+			const gchar *const *names = g_themed_icon_get_names (G_THEMED_ICON (mapped));
+			if (names)
+				first = names[0];
+		}
+		paintable = gtk_icon_theme_lookup_by_gicon (theme, mapped ? mapped : icon, size, scale, GTK_TEXT_DIR_NONE,
+							    verne_icon_lookup_flags (first));
+	}
 	g_clear_object (&mapped);
 	return paintable;
 }
