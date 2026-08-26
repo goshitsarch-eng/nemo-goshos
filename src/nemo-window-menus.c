@@ -393,8 +393,8 @@ action_nemo_manual_callback (GtkAction *action,
 						 GTK_BUTTONS_OK,
 						 _("There was an error displaying help: \n%s"),
 						 error->message);
-		g_signal_connect (G_OBJECT (dialog), "response",
-				  G_CALLBACK (gtk_widget_destroy),
+		g_signal_connect (dialog, "response",
+				  G_CALLBACK (gtk_window_destroy),
 				  NULL);
 
 		gtk_window_set_resizable (GTK_WINDOW (dialog), FALSE);
@@ -652,7 +652,7 @@ action_split_view_callback (GtkAction *action,
 		}
 
 		slot = nemo_window_get_active_slot (window);
-		if (slot != NULL) {
+		if (slot != NULL && slot->content_view != NULL) {
 			nemo_view_update_menus (slot->content_view);
 		}
 	}

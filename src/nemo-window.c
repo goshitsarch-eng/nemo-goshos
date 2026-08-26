@@ -1026,13 +1026,19 @@ void
 nemo_window_close_pane (NemoWindow *window,
 			    NemoWindowPane *pane)
 {
-	g_assert (NEMO_IS_WINDOW_PANE (pane));
+	GtkWidget *pane_widget;
+	GtkWidget *hpane;
+	GtkWidget *focus;
+
+	g_return_if_fail (NEMO_IS_WINDOW (window));
+	g_return_if_fail (NEMO_IS_WINDOW_PANE (pane));
 
 	while (pane->slots != NULL) {
 		NemoWindowSlot *slot = pane->slots->data;
 
 		nemo_window_pane_remove_slot_unsafe (pane, slot);
 	}
+	pane->active_slot = NULL;
 
 	/* If the pane was active, set it to NULL. The caller is responsible
 	 * for setting a new active pane with nemo_window_set_active_pane()
@@ -1041,19 +1047,47 @@ nemo_window_close_pane (NemoWindow *window,
 		window->details->active_pane = NULL;
 	}
 
+	pane_widget = GTK_WIDGET (pane);
+	hpane = window->details->split_view_hpane;
+	focus = gtk_window_get_focus (GTK_WINDOW (window));
+	if (focus != NULL && gtk_widget_is_ancestor (focus, pane_widget))
+		gtk_window_set_focus (GTK_WINDOW (window), NULL);
+
 	/* Required really. Destroying the NemoWindowPane still leaves behind the toolbar.
 	 * This kills it off. Do it before we call gtk_widget_destroy for safety. */
-	gtk_container_remove (GTK_CONTAINER (window->details->toolbar_holder), GTK_WIDGET (pane->tool_bar));
+	if (pane->tool_bar != NULL) {
+		g_settings_unbind (pane->tool_bar, "visible");
+		if (window->details->toolbar_holder != NULL &&
+		    gtk_widget_get_parent (pane->tool_bar) == window->details->toolbar_holder) {
+			g_object_ref (pane->tool_bar);
+			gtk_container_remove (GTK_CONTAINER (window->details->toolbar_holder),
+					      pane->tool_bar);
+			gtk_widget_destroy (pane->tool_bar);
+			g_object_unref (pane->tool_bar);
+		}
+	}
 
 	window->details->panes = g_list_remove (window->details->panes, pane);
 
-	gtk_widget_destroy (GTK_WIDGET (pane));
+	/* GTK4 GtkPaned cannot restore focus onto a child that is already
+	 * being destroyed; drop the paned parentage first. */
+	if (hpane != NULL && gtk_widget_get_parent (pane_widget) == hpane) {
+		g_object_ref (pane_widget);
+		if (gtk_paned_get_start_child (GTK_PANED (hpane)) == pane_widget)
+			gtk_paned_set_start_child (GTK_PANED (hpane), NULL);
+		else if (gtk_paned_get_end_child (GTK_PANED (hpane)) == pane_widget)
+			gtk_paned_set_end_child (GTK_PANED (hpane), NULL);
+		gtk_widget_destroy (pane_widget);
+		g_object_unref (pane_widget);
+	} else {
+		gtk_widget_destroy (pane_widget);
+	}
 }
 
 NemoWindowPane*
 nemo_window_get_active_pane (NemoWindow *window)
 {
-	g_assert (NEMO_IS_WINDOW (window));
+	g_return_val_if_fail (NEMO_IS_WINDOW (window), NULL);
 	return window->details->active_pane;
 }
 
@@ -1078,7 +1112,8 @@ void
 nemo_window_set_active_pane (NemoWindow *window,
 				 NemoWindowPane *new_pane)
 {
-	g_assert (NEMO_IS_WINDOW_PANE (new_pane));
+	g_return_if_fail (NEMO_IS_WINDOW (window));
+	g_return_if_fail (NEMO_IS_WINDOW_PANE (new_pane));
 
 	DEBUG ("Setting new pane %p as active", new_pane);
 
@@ -1096,14 +1131,14 @@ void
 nemo_window_set_active_slot (NemoWindow *window, NemoWindowSlot *new_slot)
 {
 	NemoWindowSlot *old_slot;
-	g_assert (NEMO_IS_WINDOW (window));
+	g_return_if_fail (NEMO_IS_WINDOW (window));
 
 	DEBUG ("Setting new slot %p as active", new_slot);
 
 	if (new_slot) {
-		g_assert ((window == nemo_window_slot_get_window (new_slot)));
-		g_assert (NEMO_IS_WINDOW_PANE (new_slot->pane));
-		g_assert (g_list_find (new_slot->pane->slots, new_slot) != NULL);
+		g_return_if_fail (window == nemo_window_slot_get_window (new_slot));
+		g_return_if_fail (NEMO_IS_WINDOW_PANE (new_slot->pane));
+		g_return_if_fail (g_list_find (new_slot->pane->slots, new_slot) != NULL);
 	}
 
 	old_slot = nemo_window_get_active_slot (window);
@@ -1118,7 +1153,8 @@ nemo_window_set_active_slot (NemoWindow *window, NemoWindowSlot *new_slot)
 		if (old_slot->content_view != NULL) {
 			nemo_window_disconnect_content_view (window, old_slot->content_view);
 		}
-		gtk_widget_hide (GTK_WIDGET (old_slot->pane->tool_bar));
+		if (old_slot->pane != NULL && old_slot->pane->tool_bar != NULL)
+			gtk_widget_hide (GTK_WIDGET (old_slot->pane->tool_bar));
 		/* inform slot & view */
 		g_signal_emit_by_name (old_slot, "inactive");
 	}
@@ -1129,7 +1165,8 @@ nemo_window_set_active_slot (NemoWindow *window, NemoWindowSlot *new_slot)
 		real_set_active_pane (window, new_slot->pane);
 	}
 
-	window->details->active_pane->active_slot = new_slot;
+	if (window->details->active_pane != NULL)
+		window->details->active_pane->active_slot = new_slot;
 
 	/* make new slot active, if it exists */
 	if (new_slot) {
@@ -1233,7 +1270,7 @@ nemo_window_key_press_event (GtkWidget *widget,
 	window = NEMO_WINDOW (widget);
 
 	active_slot = nemo_window_get_active_slot (window);
-	view = active_slot->content_view;
+	view = (active_slot != NULL) ? active_slot->content_view : NULL;
 
       /**
        * Disable the GTK Emoji Chooser
@@ -1794,7 +1831,7 @@ nemo_window_set_hidden_files_mode (NemoWindow *window,
 NemoWindowSlot *
 nemo_window_get_active_slot (NemoWindow *window)
 {
-	g_assert (NEMO_IS_WINDOW (window));
+	g_return_val_if_fail (NEMO_IS_WINDOW (window), NULL);
 
 	if (window->details->active_pane == NULL) {
 		return NULL;
@@ -1809,10 +1846,7 @@ nemo_window_get_extra_slot (NemoWindow *window)
 	NemoWindowPane *extra_pane;
 	GList *node;
 
-	g_assert (NEMO_IS_WINDOW (window));
-
-
-	/* return NULL if there is only one pane */
+	g_return_val_if_fail (NEMO_IS_WINDOW (window), NULL);
 	if (window->details->panes == NULL ||
 	    window->details->panes->next == NULL) {
 		return NULL;
@@ -2561,7 +2595,8 @@ nemo_window_split_view_off (NemoWindow *window)
 		pane = l->data;
 		if (pane != active_pane) {
             g_clear_object (&window->details->secondary_pane_last_location);
-            window->details->secondary_pane_last_location = nemo_window_slot_get_location (pane->active_slot);
+            if (pane->active_slot != NULL)
+                window->details->secondary_pane_last_location = nemo_window_slot_get_location (pane->active_slot);
 			nemo_window_close_pane (window, pane);
 		}
 	}
@@ -2573,9 +2608,11 @@ nemo_window_split_view_off (NemoWindow *window)
                   "position-set", FALSE,
                   NULL);
 
-	nemo_window_set_active_pane (window, active_pane);
-	nemo_navigation_state_set_master (window->details->nav_state,
-					      active_pane->action_group);
+	if (NEMO_IS_WINDOW_PANE (active_pane) && active_pane->action_group != NULL) {
+		nemo_window_set_active_pane (window, active_pane);
+		nemo_navigation_state_set_master (window->details->nav_state,
+						      active_pane->action_group);
+	}
 
 	nemo_window_update_show_hide_ui_elements (window);
 }

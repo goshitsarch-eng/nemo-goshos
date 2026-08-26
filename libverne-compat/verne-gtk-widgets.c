@@ -106,8 +106,24 @@ gtk_container_real_forall (GtkContainer *container, gboolean include_internals, 
 }
 
 static void
+gtk_container_dispose (GObject *object)
+{
+	GtkWidget *widget = GTK_WIDGET (object);
+	GtkWidget *child;
+
+	/* GTK4 requires children to be unparented before finalize. Custom
+	 * GtkContainer subclasses (NemoPathBar) add children with set_parent
+	 * and never unparent them on destroy. */
+	while ((child = gtk_widget_get_first_child (widget)) != NULL)
+		gtk_widget_unparent (child);
+
+	G_OBJECT_CLASS (gtk_container_parent_class)->dispose (object);
+}
+
+static void
 gtk_container_class_init (GtkContainerClass *klass)
 {
+	G_OBJECT_CLASS (klass)->dispose = gtk_container_dispose;
 	GTK_WIDGET_CLASS (klass)->snapshot = gtk_container_snapshot;
 	GTK_WIDGET_CLASS (klass)->size_allocate = gtk_container_size_allocate;
 	klass->add = gtk_container_real_add;

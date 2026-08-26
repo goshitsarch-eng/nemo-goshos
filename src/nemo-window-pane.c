@@ -256,6 +256,12 @@ toolbar_focus_in_callback (GtkWidget *widget,
 			   gpointer user_data)
 {
 	NemoWindowPane *pane = user_data;
+
+	if (!NEMO_IS_WINDOW_PANE (pane) || !NEMO_IS_WINDOW (pane->window))
+		return FALSE;
+	if (pane->slots == NULL || pane->active_slot == NULL)
+		return FALSE;
+
 	nemo_window_set_active_pane (pane->window, pane);
 
 	return FALSE;
@@ -295,7 +301,11 @@ path_bar_button_pressed_callback (GtkWidget *widget,
 			   GINT_TO_POINTER (TRUE));
 
 	if (event->button == GDK_BUTTON_SECONDARY) {
+		if (!NEMO_IS_WINDOW (pane->window))
+			return GDK_EVENT_STOP;
 		slot = nemo_window_get_active_slot (pane->window);
+		if (slot == NULL)
+			return GDK_EVENT_STOP;
 		view = slot->content_view;
 		if (view != NULL) {
 			button_location = nemo_path_bar_get_path_for_button (
@@ -344,7 +354,15 @@ path_bar_button_released_callback (GtkWidget *widget,
 		}
 
 		if (flags != 0) {
+			if (!NEMO_IS_WINDOW (pane->window)) {
+				g_object_unref (button_location);
+				return TRUE;
+			}
 			slot = nemo_window_get_active_slot (pane->window);
+			if (slot == NULL) {
+				g_object_unref (button_location);
+				return TRUE;
+			}
 			nemo_window_slot_open_location (slot, button_location, flags);
 			g_object_unref (button_location);
 			return TRUE;
@@ -358,7 +376,11 @@ path_bar_button_released_callback (GtkWidget *widget,
     if (event->button == GDK_BUTTON_PRIMARY) {
         NemoView *view;
 
+        if (!NEMO_IS_WINDOW (pane->window))
+            return GDK_EVENT_STOP;
         slot = nemo_window_get_active_slot (pane->window);
+        if (slot == NULL)
+            return GDK_EVENT_STOP;
         view = slot->content_view;
         
         if (view != NULL) {
@@ -862,12 +884,15 @@ nemo_window_pane_dispose (GObject *object)
 
 	unset_focus_widget (pane);
 
-	pane->window = NULL;
 	g_clear_object (&pane->action_group);
 
 	g_assert (pane->slots == NULL);
 
+	/* Keep pane->window valid while GTK4 unparents children so pathbar
+	 * and focus callbacks can still resolve the hosting NemoWindow. */
 	G_OBJECT_CLASS (nemo_window_pane_parent_class)->dispose (object);
+
+	pane->window = NULL;
 }
 
 gboolean
