@@ -1850,7 +1850,116 @@ typedef struct {
 	gint x, y;
 	guint info;
 	guint32 time;
+	char *mime;
+	GCancellable *cancellable;
+	GInputStream *stream;
+	GOutputStream *mem;
+	guint timeout_id;
+	int refs;
+	gboolean completed;
 } VerneDropRead;
+
+static void
+drop_read_free (VerneDropRead *rd)
+{
+	if (rd->timeout_id != 0) {
+		g_source_remove (rd->timeout_id);
+		rd->timeout_id = 0;
+	}
+	g_clear_object (&rd->stream);
+	g_clear_object (&rd->mem);
+	g_clear_object (&rd->cancellable);
+	g_clear_object (&rd->widget);
+	g_clear_object (&rd->drop);
+	g_free (rd->mime);
+	g_free (rd);
+}
+
+static void
+drop_read_unref (VerneDropRead *rd)
+{
+	if (rd == NULL)
+		return;
+	if (--rd->refs > 0)
+		return;
+	drop_read_free (rd);
+}
+
+static void
+drop_read_emit (VerneDropRead *rd, GBytes *bytes)
+{
+	GtkSelectionData sel = { 0 };
+
+	if (rd == NULL)
+		return;
+	if (!rd->completed) {
+		rd->completed = TRUE;
+		sel.target = (GdkAtom) (rd->mime ? rd->mime : "text/uri-list");
+		sel.type = sel.target;
+		sel.format = 8;
+		if (bytes) {
+			gsize n;
+			sel.data = (guchar *) g_bytes_unref_to_data (bytes, &n);
+			sel.length = (gint) n;
+			bytes = NULL;
+		}
+		if (rd->widget && GTK_IS_WIDGET (rd->widget)) {
+			g_signal_emit_by_name (rd->widget, "drag-data-received",
+					       rd->drop, rd->x, rd->y, &sel, rd->info, rd->time);
+		} else if (rd->drop) {
+			gdk_drop_finish (rd->drop, 0);
+		}
+		g_warning ("drag-data-received mime=%s len=%d info=%u dest=%s",
+			   rd->mime ? rd->mime : "(null)", sel.length, rd->info,
+			   rd->widget ? G_OBJECT_TYPE_NAME (rd->widget) : "(null)");
+		g_free (sel.data);
+	}
+	if (bytes)
+		g_bytes_unref (bytes);
+	{
+		int n = 1;
+
+		if (rd->timeout_id != 0) {
+			g_source_remove (rd->timeout_id);
+			rd->timeout_id = 0;
+			n++;
+		}
+		rd->refs -= n;
+		if (rd->refs <= 0)
+			drop_read_free (rd);
+	}
+}
+
+static gboolean
+drop_read_timeout (gpointer data)
+{
+	VerneDropRead *rd = data;
+
+	rd->timeout_id = 0;
+	g_warning ("drop-read timeout dest=%s — not blocking dest main loop",
+		   rd->widget ? G_OBJECT_TYPE_NAME (rd->widget) : "(null)");
+	if (rd->cancellable)
+		g_cancellable_cancel (rd->cancellable);
+	drop_read_emit (rd, NULL);
+	return G_SOURCE_REMOVE;
+}
+
+static void
+drop_splice_done (GObject *source, GAsyncResult *result, gpointer data)
+{
+	VerneDropRead *rd = data;
+	GError *err = NULL;
+	GBytes *bytes = NULL;
+
+	g_output_stream_splice_finish (G_OUTPUT_STREAM (source), result, &err);
+	if (err) {
+		g_warning ("drop-read splice failed: %s", err->message);
+		g_clear_error (&err);
+	} else if (rd->mem) {
+		bytes = g_memory_output_stream_steal_as_bytes (G_MEMORY_OUTPUT_STREAM (rd->mem));
+	}
+	drop_read_emit (rd, bytes);
+}
 
 static void
 drop_read_done (GObject *source, GAsyncResult *result, gpointer data)
@@ -1858,28 +1967,32 @@ drop_read_done (GObject *source, GAsyncResult *result, gpointer data)
 	VerneDropRead *rd = data;
 	const char *mime = NULL;
 	GInputStream *stream;
-	GBytes *bytes = NULL;
-	GtkSelectionData sel = { 0 };
+	GError *err = NULL;
 
-	stream = gdk_drop_read_finish (GDK_DROP (source), result, &mime, NULL);
-	if (stream) {
-		bytes = g_input_stream_read_bytes (stream, 1 << 20, NULL, NULL);
-		g_object_unref (stream);
+	stream = gdk_drop_read_finish (GDK_DROP (source), result, &mime, &err);
+	if (err) {
+		g_warning ("gdk_drop_read_finish failed: %s", err->message);
+		g_clear_error (&err);
 	}
-	sel.target = (GdkAtom) (mime ? mime : "text/uri-list");
-	sel.type = sel.target;
-	sel.format = 8;
-	if (bytes) {
-		gsize n;
-		sel.data = (guchar *) g_bytes_unref_to_data (bytes, &n);
-		sel.length = (gint) n;
+	if (rd->mime == NULL)
+		rd->mime = g_strdup (mime ? mime : "text/uri-list");
+	if (rd->completed) {
+		if (stream)
+			g_object_unref (stream);
+		drop_read_unref (rd);
+		return;
 	}
-	g_signal_emit_by_name (rd->widget, "drag-data-received", rd->drop, rd->x, rd->y, &sel, rd->info, rd->time);
-	g_warning ("drag-data-received mime=%s len=%d info=%u dest=%s",
-		   mime ? mime : "(null)", sel.length, rd->info,
-		   rd->widget ? G_OBJECT_TYPE_NAME (rd->widget) : "(null)");
-	g_free (sel.data);
-	g_free (rd);
+	if (stream == NULL) {
+		drop_read_emit (rd, NULL);
+		return;
+	}
+	rd->stream = stream;
+	rd->mem = g_memory_output_stream_new_resizable ();
+	g_output_stream_splice_async (rd->mem, stream,
+				      G_OUTPUT_STREAM_SPLICE_CLOSE_SOURCE |
+				      G_OUTPUT_STREAM_SPLICE_CLOSE_TARGET,
+				      G_PRIORITY_DEFAULT, rd->cancellable,
+				      drop_splice_done, rd);
 }
 
 void
@@ -1913,14 +2026,23 @@ gtk_drag_get_data (GtkWidget *widget, GdkDragContext *context, GdkAtom target, g
 	if (!GDK_IS_DROP (context))
 		return;
 	rd = g_new0 (VerneDropRead, 1);
-	rd->widget = widget;
-	rd->drop = GDK_DROP (context);
+	rd->widget = g_object_ref (widget);
+	rd->drop = g_object_ref (GDK_DROP (context));
 	unpack_drop_xy (context, &rd->x, &rd->y);
 	rd->time = time;
 	rd->info = info_for_target (gtk_drag_dest_get_target_list (widget), target);
+	rd->cancellable = g_cancellable_new ();
+	rd->refs = 2; /* timeout + gdk_drop_read_async chain */
+	/* GDK X11 drop streams need the main loop. A sync read here deadlocks
+	 * dest after mouse-up (source already sent XdndLeave) so live icons
+	 * never appear. Time out so dest keeps rescanning. */
+	rd->timeout_id = g_timeout_add (1500, drop_read_timeout, rd);
 	mimes[0] = target ? (const char *) target : "text/uri-list";
 	mimes[1] = NULL;
-	gdk_drop_read_async (GDK_DROP (context), mimes, G_PRIORITY_DEFAULT, NULL, drop_read_done, rd);
+	g_warning ("drop-read async target=%s dest=%s",
+		   mimes[0], widget ? G_OBJECT_TYPE_NAME (widget) : "(null)");
+	gdk_drop_read_async (GDK_DROP (context), mimes, G_PRIORITY_DEFAULT,
+			     rd->cancellable, drop_read_done, rd);
 }
 
 void

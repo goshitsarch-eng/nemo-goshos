@@ -530,6 +530,8 @@ desktop_ensure_icons_from_model (NemoView *view)
 		g_object_unref (en);
 	}
 	if (disk != NULL) {
+		g_warning ("desktop ensure_icons notifying %u disk files",
+			   g_list_length (disk));
 		nemo_directory_notify_files_added (disk);
 		g_list_free_full (disk, g_object_unref);
 	}
