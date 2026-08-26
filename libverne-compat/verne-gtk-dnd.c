@@ -658,6 +658,17 @@ verne_idle_destroy_window (gpointer data)
 	return G_SOURCE_REMOVE;
 }
 
+static gboolean
+verne_idle_drag_leave (gpointer data)
+{
+	GtkWidget *dest = data;
+
+	if (GTK_IS_WIDGET (dest))
+		g_signal_emit_by_name (dest, "drag-leave", NULL, GDK_CURRENT_TIME);
+	g_object_unref (dest);
+	return G_SOURCE_REMOVE;
+}
+
 static void
 verne_local_cleanup (VerneLocalDrag *local)
 {
@@ -710,7 +721,6 @@ verne_local_emit_drop (VerneLocalDrag *local)
 		g_signal_emit_by_name (dest, "drag-drop", local,
 				       (int) local->dest_x, (int) local->dest_y, GDK_CURRENT_TIME, &handled);
 		g_warning ("local drag-drop handled=%d", handled);
-		g_signal_emit_by_name (dest, "drag-leave", local, GDK_CURRENT_TIME);
 	} else {
 		g_warning ("local drop with no dest, cancelling");
 		if (source)
@@ -718,6 +728,11 @@ verne_local_emit_drop (VerneLocalDrag *local)
 	}
 	if (source && g_object_get_data (G_OBJECT (source), "verne-active-drag") == (gpointer) local)
 		g_signal_emit_by_name (source, "drag-end", local);
+	/* Defer drag-leave until after drop/end so Nemo is not asked to
+	 * free drag data twice, and highlight teardown is not re-entrant
+	 * inside the drop signal. */
+	if (dest)
+		g_idle_add (verne_idle_drag_leave, g_object_ref (dest));
 	verne_local_cleanup (local);
 	g_object_unref (local);
 }

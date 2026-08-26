@@ -230,8 +230,18 @@ struct _GdkEvent {
 #define GDK_IS_WINDOW GDK_IS_SURFACE
 #define GDK_TYPE_WINDOW GDK_TYPE_SURFACE
 #define gdk_window_get_display gdk_surface_get_display
-#define gdk_window_get_width gdk_surface_get_width
-#define gdk_window_get_height gdk_surface_get_height
+static inline int
+verne_gdk_window_get_width (GdkSurface *window)
+{
+	return (window != NULL && GDK_IS_SURFACE (window)) ? gdk_surface_get_width (window) : 0;
+}
+static inline int
+verne_gdk_window_get_height (GdkSurface *window)
+{
+	return (window != NULL && GDK_IS_SURFACE (window)) ? gdk_surface_get_height (window) : 0;
+}
+#define gdk_window_get_width(w) verne_gdk_window_get_width (w)
+#define gdk_window_get_height(w) verne_gdk_window_get_height (w)
 #define gdk_window_get_scale_factor gdk_surface_get_scale_factor
 #define gdk_cairo_set_source_window(cr, win, x, y) ((void)0)
 

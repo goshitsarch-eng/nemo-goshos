@@ -110,9 +110,13 @@ verne_drawing_area_draw (GtkDrawingArea *area, cairo_t *cr, int width, int heigh
 static void
 verne_tree_view_snapshot (GtkWidget *widget, GtkSnapshot *snapshot)
 {
+	if (g_object_get_data (G_OBJECT (widget), "verne-in-snapshot"))
+		return;
+	g_object_set_data (G_OBJECT (widget), "verne-in-snapshot", GINT_TO_POINTER (1));
 	if (orig_tree_view_snapshot)
 		orig_tree_view_snapshot (widget, snapshot);
 	verne_emit_draw_from_snapshot (widget, snapshot);
+	g_object_set_data (G_OBJECT (widget), "verne-in-snapshot", NULL);
 }
 
 static GHashTable *vfunc_table;
@@ -737,6 +741,18 @@ wrapped_snapshot (GtkWidget *widget, GtkSnapshot *snapshot)
 	cairo_t *cr;
 	GtkWidget *child;
 
+	if (g_object_get_data (G_OBJECT (widget), "verne-in-snapshot")) {
+		if (gtk_widget_get_first_child (widget)) {
+			for (child = gtk_widget_get_first_child (widget); child; child = gtk_widget_get_next_sibling (child)) {
+				if (gtk_widget_get_width (child) <= 0 || gtk_widget_get_height (child) <= 0)
+					continue;
+				gtk_widget_snapshot_child (widget, child, snapshot);
+			}
+		}
+		return;
+	}
+	g_object_set_data (G_OBJECT (widget), "verne-in-snapshot", GINT_TO_POINTER (1));
+
 	w = gtk_widget_get_width (widget);
 	h = gtk_widget_get_height (widget);
 	if (w <= 0 || h <= 0) {
@@ -786,6 +802,7 @@ wrapped_snapshot (GtkWidget *widget, GtkSnapshot *snapshot)
 			gtk_widget_snapshot_child (widget, child, snapshot);
 		}
 	}
+	g_object_set_data (G_OBJECT (widget), "verne-in-snapshot", NULL);
 }
 
 static void
