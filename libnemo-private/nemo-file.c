@@ -1653,14 +1653,19 @@ nemo_file_get_local_uri (NemoFile *file)
 
 	loc = nemo_file_get_location (file);
 	path = g_file_get_path (loc);
-	g_object_unref (loc);
-
-	if (path == NULL) {
+	/* gvfsd-fuse may report a local path under ~/.gvfs that does not
+	 * actually exist. Clipboard paste then queries that file:// URI and
+	 * fails with "error getting information about …". Keep ftp:// smb://
+	 * etc. so copies go through GVFS. */
+	if (path == NULL || !g_file_is_native (loc)) {
+		g_free (path);
+		g_object_unref (loc);
 		if (file->details->activation_uri != NULL) {
 			return g_strdup (file->details->activation_uri);
 		}
 		return nemo_file_get_uri (file);
 	}
+	g_object_unref (loc);
 
 	uri = g_filename_to_uri (path, NULL, NULL);
 	g_free (path);

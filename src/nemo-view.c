@@ -7104,6 +7104,11 @@ paste_clipboard_data (NemoView *view,
 	item_uris = nemo_clipboard_get_uri_list_from_selection_data (selection_data, &cut,
 									 copied_files_atom);
 
+	g_warning ("paste_clipboard_data dest=%s n=%u cut=%d first=%s",
+		   destination_uri ? destination_uri : "(null)",
+		   g_list_length (item_uris), cut,
+		   (item_uris && item_uris->data) ? (char *) item_uris->data : "(none)");
+
 	if (item_uris == NULL|| destination_uri == NULL) {
 		nemo_window_slot_set_status (view->details->slot,
 						 _("There is nothing on the clipboard to paste."),
