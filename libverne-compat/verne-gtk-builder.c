@@ -436,8 +436,14 @@ find_matching_object_end (const char *start, const char *limit)
 	while (p < limit && *p) {
 		if (memcmp (p, "<object", 7) == 0) {
 			char next = p[7];
-			if (next == ' ' || next == '\t' || next == '\n' || next == '>')
-				depth++;
+			if (next == ' ' || next == '\t' || next == '\n' || next == '>') {
+				const char *gt = memchr (p, '>', (gsize) (limit - p));
+				if (gt && gt > p && *(gt - 1) == '/') {
+					p = gt;
+				} else {
+					depth++;
+				}
+			}
 		} else if (memcmp (p, "</object>", 9) == 0) {
 			depth--;
 			if (depth == 0)
@@ -553,13 +559,17 @@ verne_restore_builder_stacks (GtkBuilder *builder, const gchar *xml)
 		if (info->stack_id == NULL)
 			continue;
 		obj = gtk_builder_get_object (builder, info->stack_id);
-		if (!GTK_IS_STACK (obj))
+		if (!GTK_IS_STACK (obj)) {
+			g_warning ("Verne: UI stack id '%s' was not constructed", info->stack_id);
 			continue;
+		}
 		stack = GTK_STACK (obj);
 		gtk_widget_set_hexpand (GTK_WIDGET (stack), TRUE);
 		gtk_widget_set_vexpand (GTK_WIDGET (stack), TRUE);
 		model = gtk_stack_get_pages (stack);
 		n = g_list_model_get_n_items (G_LIST_MODEL (model));
+		g_message ("Verne: GtkStack '%s' has %u children, %u titled pages in XML",
+			   info->stack_id, n, info->pages->len);
 		for (j = 0; j < n && j < info->pages->len; j++) {
 			VerneStackPageInfo *pg = g_ptr_array_index (info->pages, j);
 			GtkStackPage *page = g_list_model_get_item (G_LIST_MODEL (model), j);
@@ -582,9 +592,20 @@ verne_restore_builder_stacks (GtkBuilder *builder, const gchar *xml)
 		if (!GTK_IS_STACK_SIDEBAR (l->data))
 			continue;
 		st = gtk_stack_sidebar_get_stack (GTK_STACK_SIDEBAR (l->data));
+		g_message ("Verne: GtkStackSidebar widget, stack=%p", (void *) st);
 		gtk_widget_set_vexpand (GTK_WIDGET (l->data), TRUE);
 		gtk_widget_set_hexpand (GTK_WIDGET (l->data), FALSE);
 		gtk_widget_set_visible (GTK_WIDGET (l->data), TRUE);
+		if (st == NULL && stacks->len > 0) {
+			VerneStackInfo *info0 = g_ptr_array_index (stacks, 0);
+			GObject *fallback;
+
+			if (info0->stack_id) {
+				fallback = gtk_builder_get_object (builder, info0->stack_id);
+				if (GTK_IS_STACK (fallback))
+					st = GTK_STACK (fallback);
+			}
+		}
 		if (st != NULL)
 			gtk_stack_sidebar_set_stack (GTK_STACK_SIDEBAR (l->data), st);
 	}
