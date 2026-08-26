@@ -57,6 +57,7 @@
 
 #include <libnemo-private/nemo-file-utilities.h>
 #include <libnemo-private/nemo-file-changes-queue.h>
+#include <libnemo-private/nemo-file.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -1532,6 +1533,16 @@ set_drop_target (NemoIconContainer *container,
 	 */
 	old_icon = container->details->drop_target;
 	if (icon == old_icon) {
+		/* Canvas leave-notify can clear highlighted_for_drop while
+		 * drop_target is unchanged. Re-apply so GTK4 still paints. */
+		if (icon != NULL) {
+			gboolean hl = FALSE;
+
+			g_object_get (icon->item, "highlighted_for_drop", &hl, NULL);
+			if (!hl)
+				nemo_icon_container_update_icon (container, icon);
+			gtk_widget_queue_draw (GTK_WIDGET (container));
+		}
 		return;
 	}
 
@@ -1541,8 +1552,18 @@ set_drop_target (NemoIconContainer *container,
 	nemo_icon_container_update_icon (container, icon);
 
     if (icon != NULL) {
+        char *name = NULL;
+        NemoFile *file = NEMO_FILE (icon->data);
+
+        if (file)
+            name = nemo_file_get_display_name (file);
+        g_warning ("icon drop target now %s", name ? name : "(unknown)");
+        g_free (name);
         nemo_icon_container_icon_raise (container, icon);
+    } else if (old_icon != NULL) {
+        g_warning ("icon drop target cleared");
     }
+	gtk_widget_queue_draw (GTK_WIDGET (container));
 }
 
 static void
@@ -1703,24 +1724,28 @@ drag_highlight_draw (GtkWidget *widget,
                      gpointer   user_data)
 {
 	gint width, height;
-	GdkWindow *window;
+	GdkRGBA accent = { 0.208, 0.518, 0.894, 1.0 };
 	GtkStyleContext *style;
 
-        window = gtk_widget_get_window (widget);
-        width = gdk_window_get_width (window);
-        height = gdk_window_get_height (window);
+	(void) user_data;
+	width = gtk_widget_get_width (widget);
+	height = gtk_widget_get_height (widget);
+	if (width < 1)
+		width = 1;
+	if (height < 1)
+		height = 1;
 
 	style = gtk_widget_get_style_context (widget);
+	if (!gtk_style_context_lookup_color (style, "accent_bg_color", &accent))
+		gtk_style_context_lookup_color (style, "theme_selected_bg_color", &accent);
 
-	gtk_style_context_save (style);
-	gtk_style_context_add_class (style, GTK_STYLE_CLASS_DND);
-	gtk_style_context_set_state (style, GTK_STATE_FLAG_FOCUSED);
-
-	gtk_render_frame (style,
-			  cr,
-			  0, 0, width, height);
-
-	gtk_style_context_restore (style);
+	/* GTK4 style-class DND frames do not paint. Draw an accent border. */
+	cairo_save (cr);
+	cairo_set_source_rgba (cr, accent.red, accent.green, accent.blue, 0.95);
+	cairo_set_line_width (cr, 3.0);
+	cairo_rectangle (cr, 1.5, 1.5, width - 3.0, height - 3.0);
+	cairo_stroke (cr);
+	cairo_restore (cr);
 
 	return FALSE;
 }
@@ -1831,8 +1856,8 @@ drag_motion_callback (GtkWidget *widget,
 						 &action);
 	if (action != 0) {
 		start_dnd_highlight (widget);
-        gtk_widget_queue_draw (widget);
 	}
+	gtk_widget_queue_draw (widget);
 
 	gdk_drag_status (context, action, time);
 

@@ -353,7 +353,13 @@ nemo_icon_canvas_item_set_property (GObject        *object,
 			return;
 		}
 		details->is_highlighted_for_drop = g_value_get_boolean (value);
-        nemo_icon_canvas_item_invalidate_label_size (item);
+		if (details->rendered_surface != NULL) {
+			cairo_surface_destroy (details->rendered_surface);
+			details->rendered_surface = NULL;
+		}
+		nemo_icon_canvas_item_invalidate_label_size (item);
+		eel_canvas_item_request_update (EEL_CANVAS_ITEM (item));
+		eel_canvas_item_request_redraw (EEL_CANVAS_ITEM (item));
 
 		break;
 
@@ -1352,6 +1358,63 @@ map_surface (NemoIconCanvasItem *icon_item)
 	return icon_item->details->rendered_surface;
 }
 
+static void
+draw_drop_target_overlay (NemoIconCanvasItem *icon_item,
+			  cairo_t *cr,
+			  EelIRect icon_rect)
+{
+	NemoIconCanvasItemDetails *details;
+	GtkStyleContext *style;
+	GdkRGBA accent = { 0.208, 0.518, 0.894, 1.0 };
+	EelIRect box;
+	double x, y, w, h, r;
+
+	details = icon_item->details;
+	if (!details->is_highlighted_for_drop)
+		return;
+
+	box = icon_rect;
+	if (details->text_rect.x1 > details->text_rect.x0 &&
+	    details->text_rect.y1 > details->text_rect.y0) {
+		box.x0 = MIN (box.x0, details->text_rect.x0);
+		box.y0 = MIN (box.y0, details->text_rect.y0);
+		box.x1 = MAX (box.x1, details->text_rect.x1);
+		box.y1 = MAX (box.y1, details->text_rect.y1);
+	}
+	box.x0 -= 4;
+	box.y0 -= 4;
+	box.x1 += 4;
+	box.y1 += 4;
+
+	style = gtk_widget_get_style_context (GTK_WIDGET (EEL_CANVAS_ITEM (icon_item)->canvas));
+	if (!gtk_style_context_lookup_color (style, "accent_bg_color", &accent))
+		gtk_style_context_lookup_color (style, "theme_selected_bg_color", &accent);
+
+	x = box.x0;
+	y = box.y0;
+	w = box.x1 - box.x0;
+	h = box.y1 - box.y0;
+	r = 8.0;
+	if (r * 2 > w)
+		r = w / 2.0;
+	if (r * 2 > h)
+		r = h / 2.0;
+
+	cairo_save (cr);
+	cairo_new_sub_path (cr);
+	cairo_arc (cr, x + w - r, y + r, r, -G_PI_2, 0);
+	cairo_arc (cr, x + w - r, y + h - r, r, 0, G_PI_2);
+	cairo_arc (cr, x + r, y + h - r, r, G_PI_2, G_PI);
+	cairo_arc (cr, x + r, y + r, r, G_PI, 3 * G_PI_2);
+	cairo_close_path (cr);
+	cairo_set_source_rgba (cr, accent.red, accent.green, accent.blue, 0.28);
+	cairo_fill_preserve (cr);
+	cairo_set_source_rgba (cr, accent.red, accent.green, accent.blue, 0.95);
+	cairo_set_line_width (cr, 3.0);
+	cairo_stroke (cr);
+	cairo_restore (cr);
+}
+
 /* Draw the icon item for non-anti-aliased mode. */
 static void
 nemo_icon_canvas_item_draw (EelCanvasItem *item,
@@ -1392,6 +1455,8 @@ nemo_icon_canvas_item_draw (EelCanvasItem *item,
 
 	/* Draw the label text. */
 	draw_label_text (icon_item, cr, icon_rect);
+
+	draw_drop_target_overlay (icon_item, cr, icon_rect);
 
 	gtk_style_context_restore (context);
 }
@@ -1575,15 +1640,23 @@ nemo_icon_canvas_item_event (EelCanvasItem *item, VerneGdkEvent *event)
 		}
 		return TRUE;
     } else if (event->type == GDK_LEAVE_NOTIFY) {
-        nemo_icon_container_update_tooltip_text (NEMO_ICON_CONTAINER (item->canvas), NULL);
+        NemoIconContainer *leave_container;
+        gboolean keep_drop;
+
+        leave_container = NEMO_ICON_CONTAINER (item->canvas);
+        keep_drop = leave_container->details->drop_target != NULL &&
+                    leave_container->details->drop_target->item == icon_item;
+
+        nemo_icon_container_update_tooltip_text (leave_container, NULL);
 		if (icon_item->details->is_prelit
-		    || icon_item->details->is_highlighted_for_drop) {
-			/* When leaving, turn of the prelight state and the
-			 * higlighted for drop. The latter gets turned on
-			 * by the drag&drop motion callback.
+		    || (icon_item->details->is_highlighted_for_drop && !keep_drop)) {
+			/* When leaving, turn off prelight. Keep drop highlight
+			 * if DnD still targets this icon — canvas repick uses
+			 * stale press coords during a GTK4 local drag.
 			 */
 			icon_item->details->is_prelit = FALSE;
-			icon_item->details->is_highlighted_for_drop = FALSE;
+			if (!keep_drop)
+				icon_item->details->is_highlighted_for_drop = FALSE;
 			nemo_icon_canvas_item_invalidate_label_size (icon_item);
 			eel_canvas_item_request_update (item);
 

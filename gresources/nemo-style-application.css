@@ -86,6 +86,11 @@ NemoDesktopWindow GtkPaned {
     border-radius: 3px;
 }
 
+.nemo-canvas-item:selected {
+    background-color: alpha(#3584e4, 0.45);
+    color: #ffffff;
+}
+
 .nemo-desktop {
     -NemoIconContainer-activate-prelight-icon-label: true;
 }

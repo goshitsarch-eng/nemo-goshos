@@ -635,41 +635,71 @@ verne_point_in_widget (GtkWidget *root, GtkWidget *widget, double px, double py,
 	return TRUE;
 }
 
+/* Pointer coords in a native's widget space using root X11 position.
+ * gdk_surface_get_device_position() only succeeds for the surface the
+ * pointer is currently in, so the drag ghost window would hide file
+ * views and dest motion/highlight would never run. */
+static gboolean
+verne_native_pointer_widget_coords (GtkNative *native, double *px, double *py)
+{
+	GdkSurface *surface;
+	Display *dpy;
+	Window root, child = None;
+	int rx = 0, ry = 0, wx = 0, wy = 0, ox = 0, oy = 0;
+	unsigned int mask = 0;
+	double tx = 0, ty = 0, sx, sy;
+	int sw, sh;
+
+	if (native == NULL)
+		return FALSE;
+	surface = gtk_native_get_surface (native);
+	if (surface == NULL || !GDK_IS_X11_SURFACE (surface))
+		return FALSE;
+	dpy = GDK_DISPLAY_XDISPLAY (gdk_display_get_default ());
+	if (dpy == NULL)
+		return FALSE;
+	if (!XQueryPointer (dpy, DefaultRootWindow (dpy), &root, &child,
+			    &rx, &ry, &wx, &wy, &mask))
+		return FALSE;
+	if (!XTranslateCoordinates (dpy, gdk_x11_surface_get_xid (surface),
+				    DefaultRootWindow (dpy), 0, 0, &ox, &oy, &child))
+		return FALSE;
+	gtk_native_get_surface_transform (native, &tx, &ty);
+	sx = (double) rx - (double) ox;
+	sy = (double) ry - (double) oy;
+	sw = gdk_surface_get_width (surface);
+	sh = gdk_surface_get_height (surface);
+	if (sx < 0 || sy < 0 || sx >= (double) sw || sy >= (double) sh)
+		return FALSE;
+	if (px)
+		*px = sx - tx;
+	if (py)
+		*py = sy - ty;
+	return TRUE;
+}
+
 static GtkWidget *
 verne_local_find_dest (VerneLocalDrag *local, double *x, double *y)
 {
-	GdkSeat *seat;
-	GdkDevice *device;
 	GList *toplevels, *l, *d;
-
-	seat = gdk_display_get_default_seat (gdk_display_get_default ());
-	device = seat ? gdk_seat_get_pointer (seat) : NULL;
-	if (device == NULL)
-		return NULL;
 
 	toplevels = gtk_window_list_toplevels ();
 	for (l = toplevels; l; l = l->next) {
 		GtkWidget *win = l->data;
 		GtkNative *native;
-		GdkSurface *surface;
 		GtkWidget *root, *picked, *w, *best = NULL;
-		double sx = 0, sy = 0, tx = 0, ty = 0, px, py, ox = 0, oy = 0, bx = 0, by = 0;
-		int sw, sh, best_depth = -1;
+		double px = 0, py = 0, ox = 0, oy = 0, bx = 0, by = 0;
+		int best_depth = -1;
 
 		if (win == local->icon_window)
 			continue;
+		if (GTK_IS_MENU (win))
+			continue;
+		if (gtk_widget_get_width (win) <= 1 || gtk_widget_get_height (win) <= 1)
+			continue;
 		native = GTK_NATIVE (win);
-		surface = gtk_native_get_surface (native);
-		if (surface == NULL)
+		if (!verne_native_pointer_widget_coords (native, &px, &py))
 			continue;
-		gdk_surface_get_device_position (surface, device, &sx, &sy, NULL);
-		sw = gdk_surface_get_width (surface);
-		sh = gdk_surface_get_height (surface);
-		if (sx < 0 || sy < 0 || sx >= sw || sy >= sh)
-			continue;
-		gtk_native_get_surface_transform (native, &tx, &ty);
-		px = sx - tx;
-		py = sy - ty;
 		root = GTK_WIDGET (gtk_widget_get_root (win));
 
 		picked = gtk_widget_pick (root, px, py,
@@ -758,6 +788,9 @@ verne_local_update_dest (VerneLocalDrag *local)
 	dest = verne_local_find_dest (local, &x, &y);
 	if (local->current_dest && local->current_dest != dest)
 		g_signal_emit_by_name (local->current_dest, "drag-leave", local, GDK_CURRENT_TIME);
+	if (dest != local->current_dest)
+		g_warning ("local dest now %s at %.0f,%.0f",
+			   dest ? G_OBJECT_TYPE_NAME (dest) : "none", x, y);
 	local->current_dest = dest;
 	local->dest_x = x;
 	local->dest_y = y;
@@ -903,22 +936,12 @@ verne_local_emit_drop (VerneLocalDrag *local)
 static gboolean
 verne_pointer_over_own_toplevel (VerneLocalDrag *local)
 {
-	GdkSeat *seat;
-	GdkDevice *device;
 	GList *toplevels, *l;
-
-	seat = gdk_display_get_default_seat (gdk_display_get_default ());
-	device = seat ? gdk_seat_get_pointer (seat) : NULL;
-	if (device == NULL)
-		return TRUE;
 
 	toplevels = gtk_window_list_toplevels ();
 	for (l = toplevels; l; l = l->next) {
 		GtkWidget *win = l->data;
-		GtkNative *native;
-		GdkSurface *surface;
-		double sx = 0, sy = 0;
-		int sw, sh;
+		double px = 0, py = 0;
 
 		if (win == local->icon_window)
 			continue;
@@ -928,15 +951,7 @@ verne_pointer_over_own_toplevel (VerneLocalDrag *local)
 		 * look like the pointer is inside them when device-position fails. */
 		if (gtk_widget_get_width (win) <= 1 || gtk_widget_get_height (win) <= 1)
 			continue;
-		native = GTK_NATIVE (win);
-		surface = gtk_native_get_surface (native);
-		if (surface == NULL)
-			continue;
-		if (!gdk_surface_get_device_position (surface, device, &sx, &sy, NULL))
-			continue;
-		sw = gdk_surface_get_width (surface);
-		sh = gdk_surface_get_height (surface);
-		if (sx >= 0 && sy >= 0 && sx < sw && sy < sh) {
+		if (verne_native_pointer_widget_coords (GTK_NATIVE (win), &px, &py)) {
 			g_list_free (toplevels);
 			return TRUE;
 		}
