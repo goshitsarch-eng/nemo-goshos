@@ -1233,9 +1233,16 @@ nemo_window_report_location_change (NemoWindow *window)
 static void
 real_setup_loading_floating_bar (NemoWindowSlot *slot)
 {
-	gboolean disable_chrome;
+	gboolean disable_chrome = FALSE;
+	NemoWindow *window;
 
-	g_object_get (nemo_window_slot_get_window (slot),
+	window = nemo_window_slot_get_window (slot);
+	if (!NEMO_IS_WINDOW (window)) {
+		gtk_widget_hide (slot->floating_bar);
+		return;
+	}
+
+	g_object_get (window,
 		      "disable-chrome", &disable_chrome,
 		      NULL);
 

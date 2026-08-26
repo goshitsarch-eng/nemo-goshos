@@ -787,10 +787,15 @@ action_show_hide_search_callback (GtkAction *action,
 				  gpointer user_data)
 {
 	NemoWindowPane *pane = user_data;
-	NemoWindow *window = pane->window;
+	NemoWindow *window;
 	NemoWindowSlot *slot;
 
+	if (!NEMO_IS_WINDOW_PANE (pane) || !NEMO_IS_WINDOW (pane->window))
+		return;
+	window = pane->window;
 	slot = pane->active_slot;
+	if (!NEMO_IS_WINDOW_SLOT (slot))
+		return;
 
 	if (gtk_toggle_action_get_active (GTK_TOGGLE_ACTION (action))) {
 	    remember_focus_widget (pane);
@@ -798,12 +803,12 @@ action_show_hide_search_callback (GtkAction *action,
 	} else {
 		/* Do nothing if the query editor is not visible to begin with,
 		   i.e. if toggle action was due to switching from a search tab */
-		if (nemo_query_editor_get_active (NEMO_QUERY_EDITOR (slot->query_editor))) {
+		if (slot->query_editor != NULL &&
+		    nemo_query_editor_get_active (NEMO_QUERY_EDITOR (slot->query_editor))) {
 			GFile *location = NULL;
 
 			restore_focus_widget (pane);
 
-			if (slot->query_editor != NULL) {
                 /* If closing the search bar, restore the original location */
                 location = g_file_new_for_uri (nemo_query_editor_get_base_uri (slot->query_editor));
 
@@ -814,7 +819,6 @@ action_show_hide_search_callback (GtkAction *action,
 
 				nemo_window_go_to (window, location);
 				g_object_unref (location);
-			}
 
 			nemo_window_slot_set_query_editor_visible (slot, FALSE);
 		}
@@ -828,8 +832,8 @@ setup_search_action (NemoWindowPane *pane)
 	GtkAction *action;
 
 	action = gtk_action_group_get_action (group, NEMO_ACTION_SEARCH);
-	g_signal_connect (action, "toggled",
-			  G_CALLBACK (action_show_hide_search_callback), pane);
+	g_signal_connect_object (action, "toggled",
+			  G_CALLBACK (action_show_hide_search_callback), pane, 0);
 }
 
 static void
@@ -838,6 +842,9 @@ toolbar_action_group_activated_callback (GtkActionGroup *action_group,
 					 gpointer user_data)
 {
 	NemoWindowPane *pane = user_data;
+
+	if (!NEMO_IS_WINDOW_PANE (pane) || !NEMO_IS_WINDOW (pane->window))
+		return;
 	nemo_window_set_active_pane (pane->window, pane);
 }
 
@@ -884,7 +891,19 @@ nemo_window_pane_dispose (GObject *object)
 
 	unset_focus_widget (pane);
 
+	if (pane->action_group != NULL) {
+		GtkAction *search;
+
+		g_signal_handlers_disconnect_by_data (pane->action_group, pane);
+		search = gtk_action_group_get_action (pane->action_group, NEMO_ACTION_SEARCH);
+		if (search != NULL)
+			g_signal_handlers_disconnect_by_data (search, pane);
+	}
+	if (pane->tool_bar != NULL)
+		g_signal_handlers_disconnect_by_data (pane->tool_bar, pane);
+
 	g_clear_object (&pane->action_group);
+	pane->toolbar_action_group = NULL;
 
 	g_assert (pane->slots == NULL);
 
@@ -902,6 +921,9 @@ only_show_active_pane_toolbar_mapping (GValue *value,
 {
     NemoWindowPane *pane = user_data;
 
+    if (!NEMO_IS_WINDOW_PANE (pane) || !NEMO_IS_WINDOW (pane->window))
+        return TRUE;
+
     if (nemo_window_disable_chrome_mapping (value,
                                             variant,
                                             pane->window)) {
@@ -918,6 +940,9 @@ static gboolean
 toolbar_check_admin_cb (NemoToolbar *toolbar, NemoWindowPane *pane)
 {
     NemoWindowSlot *slot;
+
+    if (!NEMO_IS_WINDOW_PANE (pane))
+        return FALSE;
 
     slot = pane->active_slot;
 
@@ -952,8 +977,8 @@ nemo_window_pane_constructed (GObject *obj)
                              G_CALLBACK (location_entry_changed_cb),
                              pane, 0);
 
-    g_signal_connect (pane->tool_bar, "check-admin-location",
-                      G_CALLBACK (toolbar_check_admin_cb), pane);
+    g_signal_connect_object (pane->tool_bar, "check-admin-location",
+                      G_CALLBACK (toolbar_check_admin_cb), pane, 0);
 
 	pane->action_group = action_group;
 
@@ -961,8 +986,8 @@ nemo_window_pane_constructed (GObject *obj)
         setup_search_action (pane);
     }
 
-	g_signal_connect (pane->action_group, "pre-activate",
-			  G_CALLBACK (toolbar_action_group_activated_callback), pane);
+	g_signal_connect_object (pane->action_group, "pre-activate",
+			  G_CALLBACK (toolbar_action_group_activated_callback), pane, 0);
 
 	/* Pack to windows hbox (under the menu */
 	gtk_box_pack_start (GTK_BOX (window->details->toolbar_holder),

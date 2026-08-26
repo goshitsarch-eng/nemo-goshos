@@ -529,6 +529,9 @@ nemo_window_disable_chrome_mapping (GValue *value,
 {
 	NemoWindow *window = user_data;
 
+	if (!NEMO_IS_WINDOW (window))
+		return FALSE;
+
 	g_value_set_boolean (value,
 			     g_variant_get_boolean (variant) &&
 			     !window->details->disable_chrome);
@@ -1885,10 +1888,12 @@ window_set_search_action_text (NemoWindow *window,
 
 	for (l = window->details->panes; l != NULL; l = l->next) {
 		pane = l->data;
+		if (pane->action_group == NULL)
+			continue;
 		action = gtk_action_group_get_action (pane->action_group,
 						      NEMO_ACTION_SEARCH);
-
-		gtk_action_set_is_important (action, setting);
+		if (action != NULL)
+			gtk_action_set_is_important (action, setting);
 	}
 }
 
