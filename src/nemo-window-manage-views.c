@@ -1055,6 +1055,20 @@ create_content_view (NemoWindowSlot *slot,
         slot->new_content_view = view;
         g_object_ref (view);
     } else {
+        /* Unparent and shut down the outgoing view before constructing the
+         * replacement. GTK4 will otherwise snapshot a live GtkTreeView
+         * (or leftover canvas items) while the new view is allocated. */
+        if (slot->content_view != NULL) {
+            GtkWidget *old_widget = GTK_WIDGET (slot->content_view);
+            GtkWidget *parent;
+
+            gtk_widget_hide (old_widget);
+            if (NEMO_VIEW_GET_CLASS (slot->content_view)->shutdown)
+                NEMO_VIEW_GET_CLASS (slot->content_view)->shutdown (slot->content_view);
+            parent = gtk_widget_get_parent (old_widget);
+            if (parent != NULL)
+                gtk_container_remove (parent, old_widget);
+        }
         /* create a new content view */
         view = nemo_view_factory_create (view_id, slot);
         slot->new_content_view = view;
