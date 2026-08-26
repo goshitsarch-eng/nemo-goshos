@@ -765,11 +765,18 @@ verne_pointer_over_own_toplevel (VerneLocalDrag *local)
 
 		if (win == local->icon_window)
 			continue;
+		if (GTK_IS_MENU (win))
+			continue;
+		/* Hidden dummy 1×1 natives (titled "Verne") would otherwise
+		 * look like the pointer is inside them when device-position fails. */
+		if (gtk_widget_get_width (win) <= 1 || gtk_widget_get_height (win) <= 1)
+			continue;
 		native = GTK_NATIVE (win);
 		surface = gtk_native_get_surface (native);
 		if (surface == NULL)
 			continue;
-		gdk_surface_get_device_position (surface, device, &sx, &sy, NULL);
+		if (!gdk_surface_get_device_position (surface, device, &sx, &sy, NULL))
+			continue;
 		sw = gdk_surface_get_width (surface);
 		sh = gdk_surface_get_height (surface);
 		if (sx >= 0 && sy >= 0 && sx < sw && sy < sh) {
@@ -1179,12 +1186,15 @@ verne_local_handover_native (VerneLocalDrag *local)
 
 	native = gtk_widget_get_native (local->source);
 	surface = native ? gtk_native_get_surface (native) : NULL;
-	local->xdnd_source = surface ? gdk_x11_surface_get_xid (surface) : None;
-	local->xdnd_created_window = FALSE;
-	if (local->xdnd_source == None) {
+	(void) surface;
+	/* Always use a dedicated source window. If XdndSelection is owned by
+	 * the GTK4 file-manager surface, GDK swallows XdndStatus and
+	 * SelectionRequest and the foreign drop target never gets data. */
+	{
 		XSetWindowAttributes swa;
+
 		swa.override_redirect = True;
-		swa.event_mask = PropertyChangeMask;
+		swa.event_mask = PropertyChangeMask | StructureNotifyMask;
 		gdk_x11_display_error_trap_push (gdk_dpy);
 		local->xdnd_source = XCreateWindow (dpy, DefaultRootWindow (dpy),
 						    0, 0, 1, 1, 0, CopyFromParent, InputOutput,
@@ -1330,6 +1340,15 @@ verne_dnd_gesture_end (GtkWidget *widget)
 		}
 		if (local->handed_over)
 			return;
+		/* Button already up: if we never hit a local dest, still try XDND
+		 * so a drop over another app is not cancelled as dest=none. */
+		if (local->current_dest == NULL && !verne_pointer_over_own_toplevel (local)) {
+			verne_local_handover_native (local);
+			if (local->handed_over) {
+				verne_xdnd_send_drop (local);
+				return;
+			}
+		}
 		verne_local_emit_drop (local);
 		return;
 	}
