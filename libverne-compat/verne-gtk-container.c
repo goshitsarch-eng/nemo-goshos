@@ -111,6 +111,11 @@ gtk_container_add (gpointer container_ptr, GtkWidget *child)
 		gtk_action_bar_set_center_widget (GTK_ACTION_BAR (container), child);
 	} else if (GTK_IS_HEADER_BAR (container)) {
 		gtk_header_bar_set_title_widget (GTK_HEADER_BAR (container), child);
+	} else if (GTK_IS_BUTTON (container)) {
+		/* GTK4 GtkButton owns a single child; gtk_widget_set_parent
+		 * leaves that child unaccounted for and aborts on dispose
+		 * (pathbar Home/xdg buttons pack a GtkBox of image+label). */
+		gtk_button_set_child (GTK_BUTTON (container), child);
 	} else if (GTK_IS_BIN (container)) {
 		GtkBin *bin = GTK_BIN (container);
 		if (bin->child)
@@ -186,6 +191,9 @@ gtk_container_remove (gpointer container_ptr, GtkWidget *child)
 			gtk_paned_set_start_child (GTK_PANED (container), NULL);
 		else if (gtk_paned_get_end_child (GTK_PANED (container)) == child)
 			gtk_paned_set_end_child (GTK_PANED (container), NULL);
+	} else if (GTK_IS_BUTTON (container)) {
+		if (gtk_button_get_child (GTK_BUTTON (container)) == child)
+			gtk_button_set_child (GTK_BUTTON (container), NULL);
 	} else if (GTK_IS_BIN (container)) {
 		GtkBin *bin = GTK_BIN (container);
 		if (bin->child == child) {
