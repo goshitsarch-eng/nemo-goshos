@@ -81,6 +81,7 @@ struct NemoDesktopIconGridViewDetails
 	 */
 	gulong delayed_init_signal;
 	guint reload_desktop_timeout;
+	guint delayed_init_idle;
 	guint ensure_icons_timeout;
 	guint ensure_icons_timeout2;
 	gboolean pending_rescan;
@@ -350,6 +351,10 @@ nemo_desktop_icon_grid_view_dispose (GObject *object)
 	if (icon_view->details->reload_desktop_timeout != 0) {
 		g_source_remove (icon_view->details->reload_desktop_timeout);
 		icon_view->details->reload_desktop_timeout = 0;
+	}
+	if (icon_view->details->delayed_init_idle != 0) {
+		g_source_remove (icon_view->details->delayed_init_idle);
+		icon_view->details->delayed_init_idle = 0;
 	}
 	if (icon_view->details->ensure_icons_timeout != 0) {
 		g_source_remove (icon_view->details->ensure_icons_timeout);
@@ -723,7 +728,17 @@ delayed_init (NemoDesktopIconGridView *desktop_icon_grid_view)
 	GFile *dir;
 	char *path;
 
+	if (desktop_icon_grid_view->details->reload_desktop_timeout != 0) {
+		return;
+	}
+
 	model = nemo_view_get_model (NEMO_VIEW (desktop_icon_grid_view));
+	if (model == NULL) {
+		return;
+	}
+
+	g_warning ("desktop delayed_init monitor path will be %s",
+		   desktop_directory ? desktop_directory : "(unset)");
 
 	/* Keep track of the load time. */
 	g_signal_connect_object (model,
@@ -755,11 +770,24 @@ delayed_init (NemoDesktopIconGridView *desktop_icon_grid_view)
 	desktop_icon_grid_view->details->reload_desktop_timeout =
 		g_timeout_add_seconds (RESCAN_TIMEOUT, do_desktop_rescan, desktop_icon_grid_view);
 
-	g_signal_handler_disconnect (desktop_icon_grid_view,
-				     desktop_icon_grid_view->details->delayed_init_signal);
+	if (desktop_icon_grid_view->details->delayed_init_signal != 0) {
+		g_signal_handler_disconnect (desktop_icon_grid_view,
+					     desktop_icon_grid_view->details->delayed_init_signal);
+		desktop_icon_grid_view->details->delayed_init_signal = 0;
+	}
 
-	desktop_icon_grid_view->details->delayed_init_signal = 0;
-    desktop_icon_grid_view->details->updating_menus = FALSE;
+	desktop_icon_grid_view->details->updating_menus = FALSE;
+	desktop_ensure_icons_from_model (NEMO_VIEW (desktop_icon_grid_view));
+}
+
+static gboolean
+desktop_delayed_init_idle (gpointer data)
+{
+	NemoDesktopIconGridView *grid = NEMO_DESKTOP_ICON_GRID_VIEW (data);
+
+	grid->details->delayed_init_idle = 0;
+	delayed_init (grid);
+	return FALSE;
 }
 
 static void
@@ -825,6 +853,8 @@ nemo_desktop_icon_grid_view_constructed (GObject *object)
     desktop_icon_grid_view->details->delayed_init_signal = g_signal_connect_object
         (desktop_icon_grid_view, "begin_loading",
          G_CALLBACK (delayed_init), desktop_icon_grid_view, 0);
+    desktop_icon_grid_view->details->delayed_init_idle =
+        g_idle_add (desktop_delayed_init_idle, desktop_icon_grid_view);
 
     nemo_icon_container_set_is_fixed_size (icon_container, TRUE);
     nemo_icon_container_set_is_desktop (icon_container, TRUE);

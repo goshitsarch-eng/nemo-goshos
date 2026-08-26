@@ -5855,10 +5855,16 @@ nemo_icon_container_add (NemoIconContainer *container,
 void
 nemo_icon_container_layout_now (NemoIconContainer *container)
 {
-	if (container->details->idle_id != 0) {
+	if (container->details->idle_id != 0 || container->details->new_icons != NULL) {
 		unschedule_redo_layout (container);
 		redo_layout_internal (container);
 	}
+
+	/* Also need to make sure we're properly resized, for instance
+	 * newly added files may trigger a change in the size allocation and
+	 * thus toggle scrollbars on */
+	gtk_container_check_resize (GTK_CONTAINER (gtk_widget_get_parent (GTK_WIDGET (container))));
+}
 
 	/* Also need to make sure we're properly resized, for instance
 	 * newly added files may trigger a change in the size allocation and
