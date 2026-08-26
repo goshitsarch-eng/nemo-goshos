@@ -1739,7 +1739,7 @@ display_view_selection_failure (NemoWindow *window, NemoFile *file,
 				(_("Could not display \"%s\"."),
 				 uri_for_display);
 			detail_message = g_strdup
-				(_("Nemo has no installed viewer capable of displaying the folder."));
+				(_("Verne has no installed viewer capable of displaying the folder."));
 		} else {
 			error_message = g_strdup_printf
 				(_("Could not display \"%s\"."),
@@ -1762,10 +1762,10 @@ display_view_selection_failure (NemoWindow *window, NemoFile *file,
 			error_message = g_strdup_printf (_("Could not display \"%s\"."),
 							 uri_for_display);
 			if (scheme_string != NULL) {
-				detail_message = g_strdup_printf (_("Nemo cannot handle \"%s\" locations."),
+				detail_message = g_strdup_printf (_("Verne cannot handle \"%s\" locations."),
 								  scheme_string);
 			} else {
-				detail_message = g_strdup (_("Nemo cannot handle this kind of location."));
+				detail_message = g_strdup (_("Verne cannot handle this kind of location."));
 			}
 			g_free (scheme_string);
 			break;
