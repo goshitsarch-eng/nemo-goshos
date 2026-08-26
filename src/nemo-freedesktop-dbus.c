@@ -33,11 +33,18 @@
 
 #include <gio/gio.h>
 
+enum {
+	PROP_0,
+	PROP_OWNER_FLAGS
+};
+
 struct _NemoFreedesktopDBus {
 	GObject parent;
 
 	/* Id from g_dbus_own_name() */
 	guint owner_id;
+
+	GBusNameOwnerFlags owner_flags;
 
 	/* DBus paraphernalia */
 	GDBusObjectManagerServer *object_manager;
@@ -196,24 +203,64 @@ nemo_freedesktop_dbus_dispose (GObject *object)
 }
 
 static void
-nemo_freedesktop_dbus_class_init (NemoFreedesktopDBusClass *klass)
+nemo_freedesktop_dbus_set_property (GObject      *object,
+				    guint         prop_id,
+				    const GValue *value,
+				    GParamSpec   *pspec)
 {
-	GObjectClass *object_class = G_OBJECT_CLASS (klass);
+	NemoFreedesktopDBus *fdb = (NemoFreedesktopDBus *) object;
 
-	object_class->dispose = nemo_freedesktop_dbus_dispose;
+	switch (prop_id) {
+	case PROP_OWNER_FLAGS:
+		fdb->owner_flags = g_value_get_uint (value);
+		break;
+	default:
+		G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
+		break;
+	}
 }
 
 static void
-nemo_freedesktop_dbus_init (NemoFreedesktopDBus *fdb)
+nemo_freedesktop_dbus_constructed (GObject *object)
 {
+	NemoFreedesktopDBus *fdb = (NemoFreedesktopDBus *) object;
+
+	G_OBJECT_CLASS (nemo_freedesktop_dbus_parent_class)->constructed (object);
+
 	fdb->owner_id = g_bus_own_name (G_BUS_TYPE_SESSION,
 					"org.freedesktop.FileManager1",
-					G_BUS_NAME_OWNER_FLAGS_NONE,
+					fdb->owner_flags,
 					bus_acquired_cb,
 					name_acquired_cb,
 					name_lost_cb,
 					fdb,
 					NULL);
+}
+
+static void
+nemo_freedesktop_dbus_class_init (NemoFreedesktopDBusClass *klass)
+{
+	GObjectClass *object_class = G_OBJECT_CLASS (klass);
+
+	object_class->dispose = nemo_freedesktop_dbus_dispose;
+	object_class->set_property = nemo_freedesktop_dbus_set_property;
+	object_class->constructed = nemo_freedesktop_dbus_constructed;
+
+	g_object_class_install_property (object_class,
+					 PROP_OWNER_FLAGS,
+					 g_param_spec_uint ("owner-flags",
+							    "Owner flags",
+							    "g_bus_own_name() flags for org.freedesktop.FileManager1",
+							    0, G_MAXUINT,
+							    G_BUS_NAME_OWNER_FLAGS_NONE,
+							    G_PARAM_CONSTRUCT_ONLY | G_PARAM_WRITABLE | G_PARAM_STATIC_STRINGS));
+}
+
+static void
+nemo_freedesktop_dbus_init (NemoFreedesktopDBus *fdb)
+{
+	fdb->owner_id = 0;
+	fdb->owner_flags = G_BUS_NAME_OWNER_FLAGS_NONE;
 }
 
 void
@@ -225,10 +272,23 @@ nemo_freedesktop_dbus_set_open_locations (NemoFreedesktopDBus *fdb,
 	nemo_freedesktop_file_manager1_set_open_locations (fdb->skeleton, locations);
 }
 
-/* Tries to own the org.freedesktop.FileManager1 service name */
+/* File manager: take FileManager1 even if the desktop process already owns it. */
 NemoFreedesktopDBus *
 nemo_freedesktop_dbus_new (void)
-{	
+{
 	return g_object_new (nemo_freedesktop_dbus_get_type (),
-                             NULL);
+			     "owner-flags",
+			     G_BUS_NAME_OWNER_FLAGS_REPLACE |
+			     G_BUS_NAME_OWNER_FLAGS_ALLOW_REPLACEMENT,
+			     NULL);
+}
+
+/* Desktop: own FileManager1 only while the file manager is not running. */
+NemoFreedesktopDBus *
+nemo_freedesktop_dbus_new_for_desktop (void)
+{
+	return g_object_new (nemo_freedesktop_dbus_get_type (),
+			     "owner-flags",
+			     G_BUS_NAME_OWNER_FLAGS_ALLOW_REPLACEMENT,
+			     NULL);
 }

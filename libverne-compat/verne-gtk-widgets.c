@@ -812,13 +812,22 @@ typedef struct {
 static void
 verne_menu_unmap_surface (GtkWidget *w)
 {
+	GdkSurface *s;
+
+	if (w == NULL || !GTK_IS_NATIVE (w))
+		return;
+	s = gtk_native_get_surface (GTK_NATIVE (w));
+	if (s == NULL)
+		return;
+	gdk_surface_hide (s);
 #ifdef GDK_WINDOWING_X11
-	GdkSurface *s = gtk_native_get_surface (GTK_NATIVE (w));
-	if (s && GDK_IS_X11_SURFACE (s))
-		XUnmapWindow (gdk_x11_display_get_xdisplay (gdk_surface_get_display (s)),
-			      gdk_x11_surface_get_xid (s));
+	if (GDK_IS_X11_SURFACE (s)) {
+		Display *dpy = gdk_x11_display_get_xdisplay (gdk_surface_get_display (s));
+		Window xid = gdk_x11_surface_get_xid (s);
+		XUnmapWindow (dpy, xid);
+		XFlush (dpy);
+	}
 #endif
-	(void) w;
 }
 
 static void
@@ -828,9 +837,49 @@ verne_menu_hide_others (GtkMenu *keep)
 	guint i, n = g_list_model_get_n_items (model);
 	for (i = 0; i < n; i++) {
 		gpointer w = g_list_model_get_item (model, i);
-		if (GTK_IS_MENU (w) && w != keep) {
-			gtk_widget_set_visible (GTK_WIDGET (w), FALSE);
-			verne_menu_unmap_surface (GTK_WIDGET (w));
+		if (GTK_IS_MENU (w) && w != keep)
+			gtk_menu_popdown (GTK_MENU (w));
+		if (w)
+			g_object_unref (w);
+	}
+}
+
+static void
+verne_toplevel_dismiss_menus (GtkGestureClick *gesture, gint n_press, gdouble x, gdouble y, gpointer data)
+{
+	GtkWidget *toplevel;
+	GtkWidget *picked;
+
+	(void) n_press; (void) data;
+	toplevel = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (gesture));
+	if (toplevel == NULL)
+		return;
+	picked = gtk_widget_pick (toplevel, x, y, GTK_PICK_DEFAULT);
+	if (picked != NULL &&
+	    (GTK_IS_MENU_ITEM (picked) || GTK_IS_MENU_BAR (picked) ||
+	     gtk_widget_get_ancestor (picked, GTK_TYPE_MENU_ITEM) != NULL ||
+	     gtk_widget_get_ancestor (picked, GTK_TYPE_MENU_BAR) != NULL))
+		return;
+	verne_menu_hide_others (NULL);
+}
+
+static void
+verne_menu_attach_dismiss_on_toplevels (void)
+{
+	GListModel *model = gtk_window_get_toplevels ();
+	guint i, n = g_list_model_get_n_items (model);
+	for (i = 0; i < n; i++) {
+		gpointer w = g_list_model_get_item (model, i);
+		if (w && GTK_IS_WINDOW (w) && !GTK_IS_MENU (w) &&
+		    g_object_get_data (w, "verne-menu-dismiss-hooked") == NULL) {
+			GtkGesture *click = gtk_gesture_click_new ();
+			gtk_gesture_single_set_button (GTK_GESTURE_SINGLE (click), 0);
+			gtk_event_controller_set_propagation_phase (GTK_EVENT_CONTROLLER (click),
+								    GTK_PHASE_CAPTURE);
+			g_signal_connect (click, "pressed",
+					  G_CALLBACK (verne_toplevel_dismiss_menus), NULL);
+			gtk_widget_add_controller (GTK_WIDGET (w), GTK_EVENT_CONTROLLER (click));
+			g_object_set_data (w, "verne-menu-dismiss-hooked", GINT_TO_POINTER (1));
 		}
 		if (w)
 			g_object_unref (w);
@@ -846,6 +895,11 @@ verne_menu_popup_idle (gpointer data)
 	int nat_w = 180, nat_h = 32;
 
 	if (!GTK_IS_MENU (p->menu)) {
+		g_object_unref (p->menu);
+		g_free (p);
+		return G_SOURCE_REMOVE;
+	}
+	if (g_object_get_data (G_OBJECT (p->menu), "verne-dismissed")) {
 		g_object_unref (p->menu);
 		g_free (p);
 		return G_SOURCE_REMOVE;
@@ -868,6 +922,8 @@ verne_menu_popup_idle (gpointer data)
 		g_object_set_data (G_OBJECT (w), "verne-popup-y", GINT_TO_POINTER (p->y));
 	}
 	g_object_set_data (G_OBJECT (w), "verne-menu-hold", GINT_TO_POINTER (1));
+	g_object_set_data (G_OBJECT (w), "verne-dismissed", NULL);
+	verne_menu_attach_dismiss_on_toplevels ();
 	verne_menu_hide_others (p->menu);
 	gtk_widget_set_opacity (w, 1.0);
 	gtk_widget_set_visible (w, TRUE);
@@ -893,6 +949,7 @@ verne_menu_popup_now (GtkMenu *menu, int root_x, int root_y, gboolean has_pos)
 	p->x = root_x;
 	p->y = root_y;
 	p->has_pos = has_pos;
+	g_object_set_data (G_OBJECT (menu), "verne-dismissed", NULL);
 	g_idle_add (verne_menu_popup_idle, p);
 }
 
@@ -932,8 +989,13 @@ void gtk_menu_popdown (GtkMenu *menu) {
 	GtkWidget *attach;
 	if (menu == NULL)
 		return;
+	if (g_object_get_data (G_OBJECT (menu), "verne-popping"))
+		return;
+	g_object_set_data (G_OBJECT (menu), "verne-popping", GINT_TO_POINTER (1));
 	g_object_set_data (G_OBJECT (menu), "verne-menu-hold", NULL);
+	g_object_set_data (G_OBJECT (menu), "verne-dismissed", GINT_TO_POINTER (1));
 	gtk_widget_set_visible (GTK_WIDGET (menu), FALSE);
+	gtk_widget_set_opacity (GTK_WIDGET (menu), 0.0);
 	verne_menu_unmap_surface (GTK_WIDGET (menu));
 	attach = menu->attach;
 	if (attach) {
@@ -941,6 +1003,7 @@ void gtk_menu_popdown (GtkMenu *menu) {
 		if (parent_menu && parent_menu != GTK_WIDGET (menu))
 			gtk_menu_popdown (GTK_MENU (parent_menu));
 	}
+	g_object_set_data (G_OBJECT (menu), "verne-popping", NULL);
 }
 void gtk_menu_attach_to_widget (GtkMenu *menu, GtkWidget *attach, gpointer detacher) {
 	(void) detacher;
@@ -949,6 +1012,14 @@ void gtk_menu_attach_to_widget (GtkMenu *menu, GtkWidget *attach, gpointer detac
 }
 GtkWidget *gtk_menu_get_attach_widget (GtkMenu *menu) { return menu->attach; }
 GtkWidget *gtk_menu_get_box (GtkMenu *menu) { return menu->box; }
+
+GtkWidget *
+gtk_menu_shell_get_selected_item (gpointer menu_shell)
+{
+	if (menu_shell == NULL)
+		return NULL;
+	return g_object_get_data (G_OBJECT (menu_shell), "verne-selected-item");
+}
 
 void gtk_menu_shell_append (gpointer menu_shell, GtkWidget *child) {
 	if (GTK_IS_MENU (menu_shell))
@@ -970,6 +1041,7 @@ void gtk_menu_shell_insert (gpointer menu_shell, GtkWidget *child, gint position
 typedef struct _GtkMenuBarClass { GtkBoxClass parent_class; } GtkMenuBarClass;
 struct _GtkMenuBar { GtkBox parent; };
 G_DEFINE_TYPE (GtkMenuBar, gtk_menu_bar, GTK_TYPE_BOX)
+static void verne_menubar_visible (GObject *obj, GParamSpec *pspec, gpointer data);
 static void
 gtk_menu_bar_snapshot (GtkWidget *widget, GtkSnapshot *snapshot)
 {
@@ -984,8 +1056,17 @@ gtk_menu_bar_class_init (GtkMenuBarClass *c)
 static void gtk_menu_bar_init (GtkMenuBar *bar) {
 	gtk_orientable_set_orientation (GTK_ORIENTABLE (bar), GTK_ORIENTATION_HORIZONTAL);
 	gtk_widget_add_css_class (GTK_WIDGET (bar), "menubar");
+	g_signal_connect (bar, "notify::visible", G_CALLBACK (verne_menubar_visible), NULL);
 }
 GtkWidget *gtk_menu_bar_new (void) { return g_object_new (GTK_TYPE_MENU_BAR, NULL); }
+
+static void
+verne_menubar_visible (GObject *obj, GParamSpec *pspec, gpointer data)
+{
+	(void) pspec; (void) data;
+	if (!gtk_widget_get_visible (GTK_WIDGET (obj)))
+		verne_menu_hide_others (NULL);
+}
 
 G_DEFINE_TYPE (GtkMenuItem, gtk_menu_item, GTK_TYPE_BUTTON)
 static void gtk_menu_item_dispose (GObject *o) {
@@ -994,9 +1075,32 @@ static void gtk_menu_item_dispose (GObject *o) {
 	G_OBJECT_CLASS (gtk_menu_item_parent_class)->dispose (o);
 }
 static void gtk_menu_item_class_init (GtkMenuItemClass *c) { G_OBJECT_CLASS (c)->dispose = gtk_menu_item_dispose; }
+static void
+verne_menu_item_set_selected_shell (GtkWidget *item)
+{
+	GtkWidget *shell;
+
+	shell = gtk_widget_get_ancestor (item, GTK_TYPE_MENU);
+	if (shell == NULL)
+		shell = gtk_widget_get_ancestor (item, GTK_TYPE_MENU_BAR);
+	if (shell)
+		g_object_set_data (G_OBJECT (shell), "verne-selected-item", item);
+}
+
+static void
+verne_menu_item_enter (GtkEventControllerMotion *motion, gdouble x, gdouble y, gpointer data)
+{
+	(void) motion; (void) x; (void) y;
+	verne_menu_item_set_selected_shell (GTK_WIDGET (data));
+}
+
 static void gtk_menu_item_init (GtkMenuItem *item) {
+	GtkEventController *motion;
 	gtk_button_set_has_frame (GTK_BUTTON (item), FALSE);
 	gtk_widget_set_halign (GTK_WIDGET (item), GTK_ALIGN_FILL);
+	motion = GTK_EVENT_CONTROLLER (gtk_event_controller_motion_new ());
+	g_signal_connect (motion, "enter", G_CALLBACK (verne_menu_item_enter), item);
+	gtk_widget_add_controller (GTK_WIDGET (item), motion);
 }
 GtkWidget *gtk_menu_item_new (void) { return g_object_new (GTK_TYPE_MENU_ITEM, NULL); }
 GtkWidget *gtk_menu_item_new_with_label (const gchar *label) {
@@ -1014,9 +1118,19 @@ verne_submenu_clicked (GtkButton *item, gpointer data)
 
 	if (!GTK_IS_MENU (submenu))
 		return;
+	if (gtk_widget_get_visible (submenu) &&
+	    g_object_get_data (G_OBJECT (submenu), "verne-dismissed") == NULL) {
+		gtk_menu_popdown (GTK_MENU (submenu));
+		return;
+	}
 	parent_menu = gtk_widget_get_ancestor (GTK_WIDGET (item), GTK_TYPE_MENU);
 	if (parent_menu)
 		g_object_set_data (G_OBJECT (parent_menu), "verne-menu-hold", GINT_TO_POINTER (1));
+	{
+		GtkWidget *bar = gtk_widget_get_ancestor (GTK_WIDGET (item), GTK_TYPE_MENU_BAR);
+		if (bar)
+			g_object_set_data (G_OBJECT (bar), "verne-selected-item", item);
+	}
 	gtk_menu_attach_to_widget (GTK_MENU (submenu), GTK_WIDGET (item), NULL);
 	verne_widget_root_xy (GTK_WIDGET (item), &x, &y);
 	/* Menubar items drop down; nested items open to the right. */
@@ -1110,6 +1224,11 @@ gtk_check_menu_item_clicked (GtkButton *button)
 	parent_button = GTK_BUTTON_CLASS (gtk_check_menu_item_parent_class);
 	if (parent_button != NULL && parent_button->clicked != NULL)
 		parent_button->clicked (button);
+	{
+		GtkWidget *menu = gtk_widget_get_ancestor (GTK_WIDGET (button), GTK_TYPE_MENU);
+		if (menu)
+			gtk_menu_popdown (GTK_MENU (menu));
+	}
 }
 
 static void

@@ -42,6 +42,7 @@ typedef struct _NemoFreedesktopDBusClass NemoFreedesktopDBusClass;
 
 GType nemo_freedesktop_dbus_get_type (void);
 NemoFreedesktopDBus * nemo_freedesktop_dbus_new (void);
+NemoFreedesktopDBus * nemo_freedesktop_dbus_new_for_desktop (void);
 
 void nemo_freedesktop_dbus_set_open_locations (NemoFreedesktopDBus *fdb, const gchar **locations);
 
