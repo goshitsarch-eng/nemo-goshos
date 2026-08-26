@@ -666,7 +666,7 @@ gtk_drag_dest_set_target_list (GtkWidget *widget, GtkTargetList *list)
 	GdkContentFormats *formats;
 
 	if (list)
-		list->ref++;
+		gtk_target_list_ref (list);
 	g_object_set_qdata_full (G_OBJECT (widget), dest_targets_quark (), list, (GDestroyNotify) gtk_target_list_unref);
 	if (async && list) {
 		formats = formats_from_list (list);
@@ -1063,7 +1063,7 @@ gtk_drag_source_set_target_list (GtkWidget *widget, GtkTargetList *list)
 	GdkContentProvider *provider;
 
 	if (list)
-		list->ref++;
+		gtk_target_list_ref (list);
 	g_object_set_qdata_full (G_OBJECT (widget), source_targets_quark (), list,
 				 (GDestroyNotify) gtk_target_list_unref);
 	if (src && list) {

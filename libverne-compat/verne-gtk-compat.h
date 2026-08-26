@@ -860,6 +860,7 @@ typedef struct {
 
 typedef struct _GtkTargetList GtkTargetList;
 GtkTargetList *gtk_target_list_new (const GtkTargetEntry *targets, guint ntarget);
+void gtk_target_list_ref (GtkTargetList *list);
 void gtk_target_list_unref (GtkTargetList *list);
 void gtk_target_list_add (GtkTargetList *list, GdkAtom target, guint flags, guint info);
 void gtk_target_list_add_uri_targets (GtkTargetList *list, guint info);

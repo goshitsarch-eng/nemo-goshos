@@ -32,15 +32,36 @@ GtkTargetList *
 gtk_target_list_new (const GtkTargetEntry *targets, guint ntarget)
 {
 	GtkTargetList *list = g_new0 (GtkTargetList, 1);
+	list->magic = VERNE_TARGET_LIST_MAGIC;
 	list->ref = 1;
 	list->entries = g_array_new (FALSE, TRUE, sizeof (GtkTargetEntry));
 	if (targets && ntarget)
 		g_array_append_vals (list->entries, targets, ntarget);
 	return list;
 }
-void gtk_target_list_unref (GtkTargetList *list) {
-	if (!list || --list->ref) return;
-	g_array_free (list->entries, TRUE);
+
+void
+gtk_target_list_ref (GtkTargetList *list)
+{
+	if (list != NULL && list->magic == VERNE_TARGET_LIST_MAGIC)
+		list->ref++;
+}
+
+void
+gtk_target_list_unref (GtkTargetList *list)
+{
+	if (list == NULL)
+		return;
+	/* qdata destroy on pathbar buttons was invoking this on GObjects
+	 * (GTypeInstance at offset 0), which then g_array_free'd an unaligned
+	 * interior pointer and aborted in malloc. */
+	if (list->magic != VERNE_TARGET_LIST_MAGIC)
+		return;
+	if (--list->ref)
+		return;
+	list->magic = 0;
+	if (list->entries)
+		g_array_free (list->entries, TRUE);
 	g_free (list);
 }
 void gtk_target_list_add (GtkTargetList *list, GdkAtom target, guint flags, guint info) {
