@@ -1620,47 +1620,48 @@ gtk_widget_set_allocation (GtkWidget *widget, const GtkAllocation *allocation)
 	(void) allocation;
 }
 
+static GdkMonitor *
+verne_default_monitor (void)
+{
+	GdkDisplay *d = gdk_display_get_default ();
+	GListModel *list;
+
+	if (d == NULL)
+		return NULL;
+	list = gdk_display_get_monitors (d);
+	if (g_list_model_get_n_items (list) == 0)
+		return NULL;
+	return g_list_model_get_item (list, 0);
+}
+
 int
 verne_screen_width (void)
 {
-	GdkDisplay *d = gdk_display_get_default ();
-	GdkMonitor *m = d ? gdk_display_get_monitor_at_surface (d, NULL) : NULL;
+	GdkMonitor *m = verne_default_monitor ();
 	GdkRectangle r;
+	int width = 1920;
 
-	if (m == NULL && d != NULL) {
-		GListModel *list = gdk_display_get_monitors (d);
-		if (g_list_model_get_n_items (list) > 0)
-			m = g_list_model_get_item (list, 0);
-		if (m) {
-			gdk_monitor_get_geometry (m, &r);
-			g_object_unref (m);
-			return r.width;
-		}
-	}
 	if (m) {
 		gdk_monitor_get_geometry (m, &r);
-		return r.width;
+		width = r.width;
+		g_object_unref (m);
 	}
-	return 1920;
+	return width;
 }
 
 int
 verne_screen_height (void)
 {
-	GdkDisplay *d = gdk_display_get_default ();
-	GListModel *list;
-	GdkMonitor *m;
+	GdkMonitor *m = verne_default_monitor ();
 	GdkRectangle r;
+	int height = 1080;
 
-	if (d == NULL)
-		return 1080;
-	list = gdk_display_get_monitors (d);
-	if (g_list_model_get_n_items (list) == 0)
-		return 1080;
-	m = g_list_model_get_item (list, 0);
-	gdk_monitor_get_geometry (m, &r);
-	g_object_unref (m);
-	return r.height;
+	if (m) {
+		gdk_monitor_get_geometry (m, &r);
+		height = r.height;
+		g_object_unref (m);
+	}
+	return height;
 }
 
 int
