@@ -165,7 +165,9 @@ on_motion (GtkEventControllerMotion *motion, gdouble x, gdouble y, gpointer data
 	GdkEventMotion ev;
 	GdkEvent *ge;
 
-	if (!GTK_IS_WIDGET (widget) || !gtk_widget_get_realized (widget))
+	if (!GTK_IS_WIDGET (widget) || !gtk_widget_get_realized (widget) ||
+	    !gtk_widget_get_mapped (widget) ||
+	    g_object_get_data (G_OBJECT (widget), "verne-destroyed"))
 		return;
 	v = lookup_vfuncs_type (G_OBJECT_TYPE (widget));
 
@@ -187,8 +189,13 @@ static void
 on_enter (GtkEventControllerMotion *motion, gdouble x, gdouble y, gpointer data)
 {
 	GtkWidget *widget = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (motion));
-	VerneVfuncs *v = lookup_vfuncs_type (G_OBJECT_TYPE (widget));
+	VerneVfuncs *v;
 	GdkEventCrossing ev;
+
+	if (!GTK_IS_WIDGET (widget) || !gtk_widget_get_mapped (widget) ||
+	    g_object_get_data (G_OBJECT (widget), "verne-destroyed"))
+		return;
+	v = lookup_vfuncs_type (G_OBJECT_TYPE (widget));
 
 	memset (&ev, 0, sizeof (ev));
 	ev.type = GDK_ENTER_NOTIFY;
@@ -203,8 +210,13 @@ static void
 on_leave (GtkEventControllerMotion *motion, gpointer data)
 {
 	GtkWidget *widget = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (motion));
-	VerneVfuncs *v = lookup_vfuncs_type (G_OBJECT_TYPE (widget));
+	VerneVfuncs *v;
 	GdkEventCrossing ev;
+
+	if (!GTK_IS_WIDGET (widget) ||
+	    g_object_get_data (G_OBJECT (widget), "verne-destroyed"))
+		return;
+	v = lookup_vfuncs_type (G_OBJECT_TYPE (widget));
 
 	memset (&ev, 0, sizeof (ev));
 	ev.type = GDK_LEAVE_NOTIFY;

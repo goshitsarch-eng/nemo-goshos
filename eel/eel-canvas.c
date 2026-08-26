@@ -2438,6 +2438,7 @@ eel_canvas_destroy (GtkWidget *object)
 	/* remember, destroy can be run multiple times! */
 
 	canvas = EEL_CANVAS (object);
+	canvas->destroying = TRUE;
 
 	/* Drop item pointers before tearing down the tree so in-flight
 	 * motion/button handlers cannot touch disposed items. */
@@ -2725,7 +2726,7 @@ emit_event (EelCanvas *canvas, VerneGdkEvent *event)
 	guint mask;
 
 	/* Could be an old pick event */
-	if (!gtk_widget_get_realized (GTK_WIDGET (canvas)) || canvas->root == NULL) {
+	if (!gtk_widget_get_realized (GTK_WIDGET (canvas)) || canvas->root == NULL || canvas->destroying) {
 		return FALSE;
 	}
 
@@ -2862,7 +2863,7 @@ pick_current_item (EelCanvas *canvas, VerneGdkEvent *event)
 
 	retval = FALSE;
 
-	if (canvas->root == NULL)
+	if (canvas->root == NULL || canvas->destroying)
 		return retval;
 
 	/* If a button is down, we'll perform enter and leave events on the
@@ -3009,7 +3010,7 @@ eel_canvas_button (GtkWidget *widget, GdkEventButton *event)
 
 	canvas = EEL_CANVAS (widget);
 
-	if (canvas->root == NULL)
+	if (canvas->root == NULL || canvas->destroying)
 		return FALSE;
 
 	/*
@@ -3084,7 +3085,7 @@ eel_canvas_motion (GtkWidget *widget, GdkEventMotion *event)
 
 	canvas = EEL_CANVAS (widget);
 
-	if (canvas->root == NULL)
+	if (canvas->root == NULL || canvas->destroying)
 		return FALSE;
 
 	if (event->window != gtk_layout_get_bin_window (GTK_LAYOUT (canvas)))
@@ -3105,7 +3106,10 @@ eel_canvas_key (GtkWidget *widget, GdkEventKey *event)
 	g_return_val_if_fail (event != NULL, FALSE);
 
 	canvas = EEL_CANVAS (widget);
-	
+
+	if (canvas->root == NULL || canvas->destroying)
+		return FALSE;
+
 	if (emit_event (canvas, (VerneGdkEvent *) event))
 		return TRUE;
 	if (event->type == GDK_KEY_RELEASE)
@@ -3318,6 +3322,9 @@ eel_canvas_draw_background (EelCanvas *canvas,
 static void
 do_update (EelCanvas *canvas)
 {
+	if (canvas->destroying || canvas->root == NULL)
+		return;
+
 	/* Cause the update if necessary */
 
 update_again:

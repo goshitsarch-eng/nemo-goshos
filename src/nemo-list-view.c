@@ -4158,11 +4158,11 @@ nemo_list_view_using_manual_layout (NemoView *view)
 }
 
 static void
-nemo_list_view_destroy (GtkWidget *object)
+nemo_list_view_shutdown (NemoView *view)
 {
 	NemoListView *list_view;
 
-	list_view = NEMO_LIST_VIEW (object);
+	list_view = NEMO_LIST_VIEW (view);
 
 	/* Detach the tree before NemoView unrefs the directory. Otherwise
 	 * overlay unparent snapshots the list against freed NemoFile rows
@@ -4178,8 +4178,6 @@ nemo_list_view_destroy (GtkWidget *object)
 	}
 	if (list_view->details->model != NULL)
 		nemo_list_model_set_drag_view (list_view->details->model, NULL, 0, 0);
-
-	verne_widget_chain_destroy (nemo_list_view_parent_class, object);
 }
 
 static void
@@ -4423,7 +4421,8 @@ nemo_list_view_class_init (NemoListViewClass *class)
 
 	G_OBJECT_CLASS (class)->dispose = nemo_list_view_dispose;
 	G_OBJECT_CLASS (class)->finalize = nemo_list_view_finalize;
-	verne_widget_class_set_destroy (GTK_WIDGET_CLASS (class), nemo_list_view_destroy);
+
+	nemo_view_class->shutdown = nemo_list_view_shutdown;
 
 	nemo_view_class->add_file = nemo_list_view_add_file;
 	nemo_view_class->begin_loading = nemo_list_view_begin_loading;

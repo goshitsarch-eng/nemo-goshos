@@ -2934,6 +2934,9 @@ nemo_view_destroy (GtkWidget *object)
 
 	view = NEMO_VIEW (object);
 
+	if (NEMO_VIEW_GET_CLASS (view)->shutdown)
+		NEMO_VIEW_GET_CLASS (view)->shutdown (view);
+
 	disconnect_model_handlers (view);
 
     if (view->details->bookmarks_changed_id != 0) {

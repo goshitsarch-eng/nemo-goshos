@@ -210,6 +210,16 @@ nemo_icon_view_destroy (GtkWidget *object)
 
 	icon_view = NEMO_ICON_VIEW (object);
 
+	if (icon_view->details->icon_container) {
+		EelCanvas *canvas = EEL_CANVAS (icon_view->details->icon_container);
+		canvas->destroying = TRUE;
+		canvas->current_item = NULL;
+		canvas->new_current_item = NULL;
+		canvas->focused_item = NULL;
+		canvas->grabbed_item = NULL;
+		g_object_set_data (G_OBJECT (canvas), "verne-destroyed", GINT_TO_POINTER (1));
+	}
+
 	nemo_icon_view_clear_full (NEMO_VIEW (object), TRUE);
 
         if (icon_view->details->react_to_icon_change_idle_id != 0) {
