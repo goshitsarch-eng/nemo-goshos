@@ -179,9 +179,11 @@ on_released (GtkGestureClick *click, gint n_press, gdouble x, gdouble y, gpointe
 	GdkEventButton ev;
 
 	/* A live GdkDrag owns the pointer; synthesizing BUTTON_RELEASE here
-	 * cancels GTK4 DND before GtkDropTargetAsync can emit "drop". */
-	if (g_object_get_data (G_OBJECT (widget), "verne-active-drag"))
+	 * would cancel GTK4 DND. Complete the in-process drop instead. */
+	if (g_object_get_data (G_OBJECT (widget), "verne-active-drag")) {
+		verne_dnd_gesture_end (widget);
 		return;
+	}
 
 	fill_button_event (&ev, click, n_press, x, y);
 	ev.type = GDK_BUTTON_RELEASE;

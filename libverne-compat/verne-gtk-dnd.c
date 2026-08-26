@@ -6,6 +6,8 @@
 #include <string.h>
 #include <gio/gio.h>
 #include <gtk/gtk.h>
+#include <gdk/x11/gdkx.h>
+#include <X11/Xlib.h>
 
 static GQuark
 dest_quark (void)
@@ -296,6 +298,29 @@ verne_dnd_gesture_end (GtkWidget *widget)
 	g_debug ("completing drop from gesture-end on %s -> %s",
 		 G_OBJECT_TYPE_NAME (widget), G_OBJECT_TYPE_NAME (pending_drop_widget));
 	on_async_drop (NULL, pending_drop, pending_drop_x, pending_drop_y, pending_drop_widget);
+}
+
+static gboolean
+verne_poll_drag_release (gpointer data)
+{
+	GtkWidget *widget = data;
+	Display *dpy;
+	Window root, child;
+	int rx, ry, wx, wy;
+	unsigned int mask = 0;
+
+	if (g_object_get_data (G_OBJECT (widget), "verne-active-drag") == NULL)
+		return G_SOURCE_REMOVE;
+	dpy = GDK_DISPLAY_XDISPLAY (gdk_display_get_default ());
+	if (dpy == NULL)
+		return G_SOURCE_REMOVE;
+	if (!XQueryPointer (dpy, DefaultRootWindow (dpy), &root, &child, &rx, &ry, &wx, &wy, &mask))
+		return G_SOURCE_CONTINUE;
+	if (mask & Button1Mask)
+		return G_SOURCE_CONTINUE;
+	g_debug ("pointer button1 up, completing drop");
+	verne_dnd_gesture_end (widget);
+	return G_SOURCE_REMOVE;
 }
 
 static gboolean
@@ -767,6 +792,7 @@ gtk_drag_begin_with_coordinates (GtkWidget *widget, GtkTargetList *targets, GdkD
 	if (drag) {
 		g_object_set_qdata (G_OBJECT (drag), source_widget_quark (), widget);
 		g_object_set_data (G_OBJECT (widget), "verne-active-drag", drag);
+		g_timeout_add (50, verne_poll_drag_release, widget);
 		g_signal_connect (drag, "dnd-finished", G_CALLBACK (on_dnd_finished), widget);
 		g_signal_connect (drag, "cancel", G_CALLBACK (on_drag_cancel), widget);
 		g_signal_connect (drag, "drop-performed", G_CALLBACK (on_drop_performed), widget);
