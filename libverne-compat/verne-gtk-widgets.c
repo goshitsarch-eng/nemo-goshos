@@ -810,14 +810,28 @@ typedef struct {
 } VernePopupData;
 
 static void
+verne_menu_unmap_surface (GtkWidget *w)
+{
+#ifdef GDK_WINDOWING_X11
+	GdkSurface *s = gtk_native_get_surface (GTK_NATIVE (w));
+	if (s && GDK_IS_X11_SURFACE (s))
+		XUnmapWindow (gdk_x11_display_get_xdisplay (gdk_surface_get_display (s)),
+			      gdk_x11_surface_get_xid (s));
+#endif
+	(void) w;
+}
+
+static void
 verne_menu_hide_others (GtkMenu *keep)
 {
 	GListModel *model = gtk_window_get_toplevels ();
 	guint i, n = g_list_model_get_n_items (model);
 	for (i = 0; i < n; i++) {
 		gpointer w = g_list_model_get_item (model, i);
-		if (GTK_IS_MENU (w) && w != keep)
+		if (GTK_IS_MENU (w) && w != keep) {
 			gtk_widget_set_visible (GTK_WIDGET (w), FALSE);
+			verne_menu_unmap_surface (GTK_WIDGET (w));
+		}
 		if (w)
 			g_object_unref (w);
 	}
@@ -920,6 +934,7 @@ void gtk_menu_popdown (GtkMenu *menu) {
 		return;
 	g_object_set_data (G_OBJECT (menu), "verne-menu-hold", NULL);
 	gtk_widget_set_visible (GTK_WIDGET (menu), FALSE);
+	verne_menu_unmap_surface (GTK_WIDGET (menu));
 	attach = menu->attach;
 	if (attach) {
 		GtkWidget *parent_menu = gtk_widget_get_ancestor (attach, GTK_TYPE_MENU);
