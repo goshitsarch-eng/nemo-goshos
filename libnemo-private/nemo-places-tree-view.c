@@ -103,6 +103,10 @@ nemo_places_tree_view_dispose (GObject *object)
 static void
 nemo_places_tree_view_finalize (GObject *object)
 {
-    if (G_OBJECT_CLASS (parent_class)->finalize)
-        G_OBJECT_CLASS (parent_class)->finalize (object);
+	/* GTK4 GtkTreeViewClass.finalize assumes GTK4 widget teardown. After
+	 * gtk_widget_destroy() it can SIGSEGV; skip to GtkWidget finalize. */
+	GObjectClass *widget_class = G_OBJECT_CLASS (g_type_class_peek (GTK_TYPE_WIDGET));
+
+	if (widget_class != NULL && widget_class->finalize != NULL)
+		widget_class->finalize (object);
 }
