@@ -204,6 +204,22 @@ verne_content_provider_new_for_clipboard (GtkClipboard *clipboard)
 }
 
 /* ---------- destination: GtkDropTargetAsync -> GTK3 drag-* signals ---------- */
+static GtkWidget *pending_drop_widget;
+static GdkDrop *pending_drop;
+static double pending_drop_x, pending_drop_y;
+static gboolean drop_already_emitted;
+
+static void
+clear_pending_drop (void)
+{
+	if (pending_drop)
+		g_object_unref (pending_drop);
+	pending_drop = NULL;
+	pending_drop_widget = NULL;
+	pending_drop_x = pending_drop_y = 0;
+	drop_already_emitted = FALSE;
+}
+
 static GdkDragAction
 on_async_motion (GtkDropTargetAsync *self, GdkDrop *drop, double x, double y, gpointer data)
 {
@@ -221,6 +237,22 @@ on_async_motion (GtkDropTargetAsync *self, GdkDrop *drop, double x, double y, gp
 		selected = GDK_ACTION_COPY;
 	if (selected)
 		gdk_drop_status (drop, gdk_drop_get_actions (drop), selected);
+	{
+		GdkDrag *src_drag = gdk_drop_get_drag (drop);
+		if (src_drag) {
+			gpointer src = g_object_get_qdata (G_OBJECT (src_drag), source_widget_quark ());
+			if (src)
+				g_object_set_qdata (G_OBJECT (drop), source_widget_quark (), src);
+		}
+	}
+	if (pending_drop != drop) {
+		if (pending_drop)
+			g_object_unref (pending_drop);
+		pending_drop = g_object_ref (drop);
+	}
+	pending_drop_widget = widget;
+	pending_drop_x = x;
+	pending_drop_y = y;
 	return selected;
 }
 
@@ -238,12 +270,32 @@ on_async_drop (GtkDropTargetAsync *self, GdkDrop *drop, double x, double y, gpoi
 	gboolean handled = FALSE;
 
 	(void) self;
+	if (drop_already_emitted && drop == pending_drop)
+		return TRUE;
+	drop_already_emitted = TRUE;
 	g_object_set_qdata (G_OBJECT (drop), drop_xy_quark (),
 			    GINT_TO_POINTER (((int) x & 0xffff) | (((int) y & 0xffff) << 16)));
 	g_debug ("drop at %.0f,%.0f on %s", x, y, G_OBJECT_TYPE_NAME (widget));
 	g_signal_emit_by_name (widget, "drag-drop", drop, (int) x, (int) y, GDK_CURRENT_TIME, &handled);
 	g_debug ("drag-drop handled=%d", handled);
 	return handled;
+}
+
+void
+verne_dnd_gesture_end (GtkWidget *widget)
+{
+	GdkDrag *drag;
+
+	if (widget == NULL)
+		return;
+	drag = g_object_get_data (G_OBJECT (widget), "verne-active-drag");
+	if (drag == NULL || drop_already_emitted)
+		return;
+	if (pending_drop == NULL || pending_drop_widget == NULL)
+		return;
+	g_debug ("completing drop from gesture-end on %s -> %s",
+		 G_OBJECT_TYPE_NAME (widget), G_OBJECT_TYPE_NAME (pending_drop_widget));
+	on_async_drop (NULL, pending_drop, pending_drop_x, pending_drop_y, pending_drop_widget);
 }
 
 static gboolean
@@ -407,7 +459,8 @@ void
 gtk_drag_finish (gpointer context, gboolean success, gboolean del, guint32 time)
 {
 	GdkDragAction action = 0;
-	GtkWidget *source;
+	GtkWidget *source = NULL;
+	GdkDrag *drag = NULL;
 
 	(void) time;
 	if (!context)
@@ -415,13 +468,23 @@ gtk_drag_finish (gpointer context, gboolean success, gboolean del, guint32 time)
 	action = (GdkDragAction) GPOINTER_TO_INT (g_object_get_qdata (G_OBJECT (context), selected_action_quark ()));
 	if (success && action == 0)
 		action = GDK_ACTION_COPY;
-	if (GDK_IS_DROP (context))
+	if (GDK_IS_DROP (context)) {
+		drag = gdk_drop_get_drag (GDK_DROP (context));
 		gdk_drop_finish (GDK_DROP (context), success ? action : 0);
-	source = g_object_get_qdata (G_OBJECT (context), source_widget_quark ());
+	} else if (GDK_IS_DRAG (context)) {
+		drag = GDK_DRAG (context);
+	}
+	if (drag)
+		source = g_object_get_qdata (G_OBJECT (drag), source_widget_quark ());
+	if (source == NULL)
+		source = g_object_get_qdata (G_OBJECT (context), source_widget_quark ());
 	if (del && source)
-		g_signal_emit_by_name (source, "drag-data-delete", context);
-	if (GDK_IS_DRAG (context))
-		gdk_drag_drop_done (GDK_DRAG (context), success);
+		g_signal_emit_by_name (source, "drag-data-delete", drag ? (gpointer) drag : context);
+	if (drag)
+		gdk_drag_drop_done (drag, success);
+	if (source)
+		g_object_set_data (G_OBJECT (source), "verne-active-drag", NULL);
+	clear_pending_drop ();
 }
 
 void
@@ -644,6 +707,7 @@ on_dnd_finished (GdkDrag *drag, gpointer widget)
 	g_debug ("dnd-finished on %s", widget ? G_OBJECT_TYPE_NAME (widget) : "?");
 	if (widget)
 		g_object_set_data (G_OBJECT (widget), "verne-active-drag", NULL);
+	clear_pending_drop ();
 	g_signal_emit_by_name (widget, "drag-end", drag);
 }
 
@@ -654,6 +718,7 @@ on_drag_cancel (GdkDrag *drag, GdkDragCancelReason reason, gpointer widget)
 	g_debug ("drag cancel reason=%d on %s", (int) reason, widget ? G_OBJECT_TYPE_NAME (widget) : "?");
 	if (widget)
 		g_object_set_data (G_OBJECT (widget), "verne-active-drag", NULL);
+	clear_pending_drop ();
 	g_signal_emit_by_name (widget, "drag-failed", drag, (int) reason, &handled);
 	g_signal_emit_by_name (widget, "drag-end", drag);
 }

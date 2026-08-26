@@ -913,6 +913,7 @@ void gtk_drag_source_unset (GtkWidget *widget);
 void gtk_drag_source_set_target_list (GtkWidget *widget, GtkTargetList *list);
 void gtk_drag_finish (gpointer context, gboolean success, gboolean del, guint32 time);
 GdkDragContext *gtk_drag_begin_with_coordinates (GtkWidget *widget, GtkTargetList *targets, GdkDragAction actions, gint button, GdkEvent *event, gint x, gint y);
+void verne_dnd_gesture_end (GtkWidget *widget);
 void gtk_drag_set_icon_pixbuf (GdkDragContext *context, GdkPixbuf *pixbuf, gint hot_x, gint hot_y);
 void gtk_drag_set_icon_name (GdkDragContext *context, const gchar *name, gint hot_x, gint hot_y);
 void gtk_drag_set_icon_default (GdkDragContext *context);

@@ -232,6 +232,17 @@ on_drag_update (GtkGestureDrag *drag, gdouble offset_x, gdouble offset_y, gpoint
 }
 
 static void
+on_local_drag_end (GtkGestureDrag *drag, gdouble offset_x, gdouble offset_y, gpointer data)
+{
+	GtkWidget *widget = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (drag));
+
+	(void) offset_x;
+	(void) offset_y;
+	(void) data;
+	verne_dnd_gesture_end (widget);
+}
+
+static void
 on_enter (GtkEventControllerMotion *motion, gdouble x, gdouble y, gpointer data)
 {
 	GtkWidget *widget = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (motion));
@@ -413,6 +424,7 @@ ensure_controllers (GtkWidget *widget)
 		gtk_gesture_single_set_button (GTK_GESTURE_SINGLE (drag), 0);
 		gtk_event_controller_set_propagation_phase (GTK_EVENT_CONTROLLER (drag), GTK_PHASE_CAPTURE);
 		g_signal_connect (drag, "drag-update", G_CALLBACK (on_drag_update), NULL);
+		g_signal_connect (drag, "drag-end", G_CALLBACK (on_local_drag_end), NULL);
 		gtk_widget_add_controller (widget, GTK_EVENT_CONTROLLER (drag));
 		gtk_gesture_group (click, drag);
 	}
