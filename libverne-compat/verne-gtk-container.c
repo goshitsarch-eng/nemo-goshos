@@ -338,11 +338,13 @@ gtk_widget_destroy (GtkWidget *widget)
 	if (widget == NULL)
 		return;
 
-	/* Hold a ref across unparent so dispose matches GTK3 gtk_widget_destroy. */
+	/* Hold a ref across unparent so dispose matches GTK3 gtk_widget_destroy.
+	 * Windows must run the GTK3 destroy vfunc too (e.g. NemoPropertiesWindow
+	 * removes itself from the reuse hash); skipping that left gtk_window_present
+	 * calling into a disposed dialog on the next ShowItemProperties. */
 	g_object_ref (widget);
 
-	if (!GTK_IS_WINDOW (widget))
-		verne_widget_invoke_destroy (widget);
+	verne_widget_invoke_destroy (widget);
 
 	parent = gtk_widget_get_parent (widget);
 	if (parent != NULL)
