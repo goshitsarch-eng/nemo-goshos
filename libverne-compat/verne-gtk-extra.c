@@ -1985,6 +1985,14 @@ void gdk_window_set_transient_for (GdkSurface *window, GdkSurface *parent) { (vo
 GdkWindowTypeHint gdk_window_get_type_hint (GdkSurface *window) { (void) window; return GDK_WINDOW_TYPE_HINT_NORMAL; }
 cairo_surface_t *gdk_window_create_similar_surface (GdkSurface *window, cairo_content_t content, int w, int h) {
 	(void) window;
+	if (w < 1)
+		w = 1;
+	if (h < 1)
+		h = 1;
+	if (w > 8192)
+		w = 8192;
+	if (h > 8192)
+		h = 8192;
 	return cairo_image_surface_create (content == CAIRO_CONTENT_COLOR ? CAIRO_FORMAT_RGB24 : CAIRO_FORMAT_ARGB32, w, h);
 }
 cairo_surface_t *gdk_window_create_similar_image_surface (GdkSurface *window, cairo_format_t format, int w, int h, int scale) {

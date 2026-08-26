@@ -4800,7 +4800,10 @@ menu_item_show_image (GtkUIManager *ui_manager,
     g_free (path);
 
     if (!ignore_gtk_pref) {
-        g_object_get (gtk_settings_get_default (), "gtk-menu-images", &show, NULL);
+        GtkSettings *settings = gtk_settings_get_default ();
+        if (settings != NULL &&
+            g_object_class_find_property (G_OBJECT_GET_CLASS (settings), "gtk-menu-images") != NULL)
+            g_object_get (settings, "gtk-menu-images", &show, NULL);
 
         if (!show && !gtk_image_menu_item_get_always_show_image (menuitem)) {
             return;

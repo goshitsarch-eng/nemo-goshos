@@ -187,6 +187,7 @@ build_menu_item_for_action (GtkUIManager *self, UiNode *node)
 					 G_CALLBACK (on_action_notify_sensitive), item, 0);
 		g_signal_connect_object (action, "notify::label",
 					 G_CALLBACK (on_action_notify_label), item, 0);
+		g_object_set_data (G_OBJECT (item), "verne-action", action);
 		{
 			const gchar *accel_path = gtk_action_get_accel_path (action);
 			if (accel_path)

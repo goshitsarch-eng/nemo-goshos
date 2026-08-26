@@ -959,13 +959,33 @@ verne_toplevel_escape_menus (GtkEventControllerKey *controller, guint keyval, gu
 	return TRUE;
 }
 
+static void
+verne_menu_refresh_accels (GtkMenu *menu)
+{
+	GtkWidget *box, *child;
+	const gchar *path;
+
+	if (menu == NULL)
+		return;
+	box = gtk_menu_get_box (menu);
+	if (box == NULL)
+		return;
+	for (child = gtk_widget_get_first_child (box); child; child = gtk_widget_get_next_sibling (child)) {
+		if (!GTK_IS_MENU_ITEM (child))
+			continue;
+		path = g_object_get_data (G_OBJECT (child), "verne-accel-path");
+		if (path)
+			gtk_menu_item_set_accel_path (GTK_MENU_ITEM (child), path);
+	}
+}
+
 static gboolean
 verne_menu_popup_idle (gpointer data)
 {
 	VernePopupData *p = data;
 	GtkWidget *w = GTK_WIDGET (p->menu);
 	GtkWidget *box;
-	int nat_w = 180, nat_h = 32;
+	int nat_w = 220, nat_h = 32;
 
 	if (!GTK_IS_MENU (p->menu)) {
 		g_object_unref (p->menu);
@@ -978,14 +998,15 @@ verne_menu_popup_idle (gpointer data)
 		return G_SOURCE_REMOVE;
 	}
 	verne_ensure_menu_attach (p->menu, NULL);
+	verne_menu_refresh_accels (p->menu);
 	box = gtk_menu_get_box (p->menu);
 	verne_menu_hook_leaf_items (p->menu);
 	if (box) {
 		gtk_widget_measure (box, GTK_ORIENTATION_HORIZONTAL, -1, NULL, &nat_w, NULL, NULL);
 		gtk_widget_measure (box, GTK_ORIENTATION_VERTICAL, nat_w, NULL, &nat_h, NULL, NULL);
 	}
-	if (nat_w < 180)
-		nat_w = 180;
+	if (nat_w < 240)
+		nat_w = 240;
 	if (nat_h < 24)
 		nat_h = 24;
 	gtk_window_set_default_size (GTK_WINDOW (p->menu), nat_w, nat_h);
@@ -1289,19 +1310,30 @@ void
 gtk_menu_item_set_accel_path (GtkMenuItem *item, const gchar *accel_path)
 {
 	GtkAccelKey key;
-	gchar *accel_label, *combined;
+	gchar *accel_label = NULL, *combined;
 	const gchar *base;
+	GtkAction *action;
 
 	if (item == NULL)
 		return;
 	g_object_set_data_full (G_OBJECT (item), "verne-accel-path",
 				g_strdup (accel_path), g_free);
-	if (accel_path == NULL || accel_path[0] == '\0')
-		return;
 	memset (&key, 0, sizeof key);
-	if (!gtk_accel_map_lookup_entry (accel_path, &key) || key.accel_key == 0)
-		return;
-	accel_label = gtk_accelerator_get_label (key.accel_key, key.accel_mods);
+	if (accel_path && accel_path[0] && gtk_accel_map_lookup_entry (accel_path, &key) && key.accel_key)
+		accel_label = gtk_accelerator_get_label (key.accel_key, key.accel_mods);
+	if (accel_label == NULL || accel_label[0] == '\0') {
+		g_free (accel_label);
+		accel_label = NULL;
+		action = g_object_get_data (G_OBJECT (item), "verne-action");
+		if (action && action->accelerator && action->accelerator[0]) {
+			guint accel_key = 0;
+			GdkModifierType accel_mods = 0;
+
+			gtk_accelerator_parse (action->accelerator, &accel_key, &accel_mods);
+			if (accel_key)
+				accel_label = gtk_accelerator_get_label (accel_key, accel_mods);
+		}
+	}
 	if (accel_label == NULL || accel_label[0] == '\0') {
 		g_free (accel_label);
 		return;

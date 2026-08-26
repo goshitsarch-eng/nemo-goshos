@@ -57,7 +57,63 @@ typedef struct {
 } VerneVfuncs;
 
 static void (*orig_gtk_widget_realize) (GtkWidget *);
+static void (*orig_tree_view_snapshot) (GtkWidget *, GtkSnapshot *);
 static gboolean event_signals_registered;
+static guint verne_draw_signal_id;
+
+static gboolean
+verne_widget_has_draw_handlers (GtkWidget *widget)
+{
+	if (verne_draw_signal_id == 0)
+		verne_draw_signal_id = g_signal_lookup ("draw", GTK_TYPE_WIDGET);
+	if (verne_draw_signal_id == 0 || widget == NULL)
+		return FALSE;
+	return g_signal_has_handler_pending (widget, verne_draw_signal_id, 0, FALSE);
+}
+
+static void
+verne_emit_draw_signal (GtkWidget *widget, cairo_t *cr)
+{
+	gboolean handled = FALSE;
+
+	if (widget == NULL || cr == NULL || !verne_widget_has_draw_handlers (widget))
+		return;
+	g_signal_emit (widget, verne_draw_signal_id, 0, cr, &handled);
+}
+
+static void
+verne_emit_draw_from_snapshot (GtkWidget *widget, GtkSnapshot *snapshot)
+{
+	int w, h;
+	cairo_t *cr;
+
+	if (!verne_widget_has_draw_handlers (widget) || snapshot == NULL)
+		return;
+	w = gtk_widget_get_width (widget);
+	h = gtk_widget_get_height (widget);
+	if (w < 1 || h < 1)
+		return;
+	cr = gtk_snapshot_append_cairo (snapshot, &GRAPHENE_RECT_INIT (0, 0, (float) w, (float) h));
+	verne_emit_draw_signal (widget, cr);
+	cairo_destroy (cr);
+}
+
+static void
+verne_drawing_area_draw (GtkDrawingArea *area, cairo_t *cr, int width, int height, gpointer data)
+{
+	(void) width;
+	(void) height;
+	(void) data;
+	verne_emit_draw_signal (GTK_WIDGET (area), cr);
+}
+
+static void
+verne_tree_view_snapshot (GtkWidget *widget, GtkSnapshot *snapshot)
+{
+	if (orig_tree_view_snapshot)
+		orig_tree_view_snapshot (widget, snapshot);
+	verne_emit_draw_from_snapshot (widget, snapshot);
+}
 
 static GHashTable *vfunc_table;
 static GQuark verne_controllers_quark;
@@ -712,10 +768,12 @@ wrapped_snapshot (GtkWidget *widget, GtkSnapshot *snapshot)
 
 	verne_paint_desktop_wallpaper (widget, snapshot, w, h);
 
-	if (draw && w > 0 && h > 0) {
+	if (w > 0 && h > 0 && (draw || verne_widget_has_draw_handlers (widget))) {
 		cr = gtk_snapshot_append_cairo (snapshot, &GRAPHENE_RECT_INIT (0, 0, w, h));
 		verne_paint_desktop_wallpaper_cairo (widget, cr, w, h);
-		draw (widget, cr);
+		if (draw)
+			draw (widget, cr);
+		verne_emit_draw_signal (widget, cr);
 		cairo_destroy (cr);
 	}
 
@@ -1152,6 +1210,12 @@ static void
 global_widget_realize (GtkWidget *widget)
 {
 	ensure_controllers (widget);
+	if (GTK_IS_DRAWING_AREA (widget) &&
+	    g_object_get_data (G_OBJECT (widget), "verne-draw-func") == NULL) {
+		gtk_drawing_area_set_draw_func (GTK_DRAWING_AREA (widget),
+						verne_drawing_area_draw, NULL, NULL);
+		g_object_set_data (G_OBJECT (widget), "verne-draw-func", GINT_TO_POINTER (1));
+	}
 	if (orig_gtk_widget_realize)
 		orig_gtk_widget_realize (widget);
 }
@@ -1182,6 +1246,7 @@ register_event_signals (void)
 		{ "event_after", 1 },
 		{ "focus", 1 },
 		{ "size-allocate", 1 },
+		{ "draw", 1 },
 	};
 	static const struct {
 		const char *name;
@@ -1240,6 +1305,15 @@ register_event_signals (void)
 	}
 	orig_gtk_widget_realize = wclass->realize;
 	wclass->realize = global_widget_realize;
+	verne_draw_signal_id = g_signal_lookup ("draw", GTK_TYPE_WIDGET);
+	{
+		GtkWidgetClass *tv = GTK_WIDGET_CLASS (g_type_class_ref (GTK_TYPE_TREE_VIEW));
+		if (tv->snapshot != verne_tree_view_snapshot) {
+			orig_tree_view_snapshot = tv->snapshot;
+			tv->snapshot = verne_tree_view_snapshot;
+		}
+		g_type_class_unref (tv);
+	}
 }
 
 static void

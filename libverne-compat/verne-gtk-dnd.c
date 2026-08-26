@@ -270,6 +270,7 @@ typedef struct _VerneLocalDrag {
 	gboolean xdnd_dropped;
 	gboolean xdnd_finished;
 	gboolean xdnd_created_window;
+	gboolean dest_finished;
 } VerneLocalDrag;
 
 typedef struct _VerneLocalDragClass {
@@ -644,6 +645,19 @@ verne_xdnd_teardown (VerneLocalDrag *local)
 	local->xdnd_target = None;
 }
 
+static gboolean
+verne_idle_destroy_window (gpointer data)
+{
+	GtkWidget *window = data;
+
+	if (GTK_IS_WINDOW (window))
+		gtk_window_destroy (GTK_WINDOW (window));
+	else if (GTK_IS_WIDGET (window))
+		gtk_widget_unparent (window);
+	g_object_unref (window);
+	return G_SOURCE_REMOVE;
+}
+
 static void
 verne_local_cleanup (VerneLocalDrag *local)
 {
@@ -657,9 +671,12 @@ verne_local_cleanup (VerneLocalDrag *local)
 		local->poll_id = 0;
 	}
 	if (local->icon_window) {
-		gtk_window_destroy (GTK_WINDOW (local->icon_window));
+		GtkWidget *icon = local->icon_window;
+
 		local->icon_window = NULL;
 		local->picture = NULL;
+		gtk_widget_set_visible (icon, FALSE);
+		g_idle_add (verne_idle_destroy_window, g_object_ref (icon));
 	}
 	if (source)
 		g_object_set_data (G_OBJECT (source), "verne-active-drag", NULL);
@@ -675,31 +692,34 @@ static void
 verne_local_emit_drop (VerneLocalDrag *local)
 {
 	gboolean handled = FALSE;
+	GtkWidget *source;
+	GtkWidget *dest;
 
 	if (local->drop_emitted)
 		return;
 	local->drop_emitted = TRUE;
+	g_object_ref (local);
 	if (local->current_dest == NULL)
 		verne_local_update_dest (local);
-	if (local->current_dest) {
-		GtkWidget *source = local->source;
-
+	source = local->source;
+	dest = local->current_dest;
+	if (dest) {
 		g_warning ("completing local drop on %s at %.0f,%.0f",
-			   G_OBJECT_TYPE_NAME (local->current_dest), local->dest_x, local->dest_y);
+			   G_OBJECT_TYPE_NAME (dest), local->dest_x, local->dest_y);
 		pack_drop_xy (local, local->dest_x, local->dest_y);
-		g_signal_emit_by_name (local->current_dest, "drag-drop", local,
+		g_signal_emit_by_name (dest, "drag-drop", local,
 				       (int) local->dest_x, (int) local->dest_y, GDK_CURRENT_TIME, &handled);
 		g_warning ("local drag-drop handled=%d", handled);
-		if (source && g_object_get_data (G_OBJECT (source), "verne-active-drag") == (gpointer) local) {
-			g_signal_emit_by_name (source, "drag-end", local);
-			verne_local_cleanup (local);
-		}
+		g_signal_emit_by_name (dest, "drag-leave", local, GDK_CURRENT_TIME);
 	} else {
 		g_warning ("local drop with no dest, cancelling");
-		g_signal_emit_by_name (local->source, "drag-failed", local, 0, &handled);
-		g_signal_emit_by_name (local->source, "drag-end", local);
-		verne_local_cleanup (local);
+		if (source)
+			g_signal_emit_by_name (source, "drag-failed", local, 0, &handled);
 	}
+	if (source && g_object_get_data (G_OBJECT (source), "verne-active-drag") == (gpointer) local)
+		g_signal_emit_by_name (source, "drag-end", local);
+	verne_local_cleanup (local);
+	g_object_unref (local);
 }
 
 static gboolean
@@ -1518,9 +1538,9 @@ gtk_drag_finish (gpointer context, gboolean success, gboolean del, guint32 time)
 		g_warning ("gtk_drag_finish local success=%d del=%d", success, del);
 		if (del && local->source)
 			g_signal_emit_by_name (local->source, "drag-data-delete", local);
-		if (local->source)
-			g_signal_emit_by_name (local->source, "drag-end", local);
-		verne_local_cleanup (local);
+		local->dest_finished = TRUE;
+		/* Do not unref here: Nemo finishes from drag-data-received while
+		 * still inside drag-drop. Cleanup runs in verne_local_emit_drop. */
 		return;
 	}
 	action = (GdkDragAction) GPOINTER_TO_INT (g_object_get_qdata (G_OBJECT (context), selected_action_quark ()));

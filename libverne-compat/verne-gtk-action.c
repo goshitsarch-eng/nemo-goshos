@@ -13,6 +13,7 @@ enum {
 	ACTION_PROP_STOCK_ID,
 	ACTION_PROP_SHORT_LABEL,
 	ACTION_PROP_IS_IMPORTANT,
+	ACTION_PROP_GICON,
 	ACTION_N_PROPS
 };
 
@@ -58,6 +59,9 @@ gtk_action_set_property (GObject *object, guint prop_id, const GValue *value, GP
 	case ACTION_PROP_IS_IMPORTANT:
 		action->is_important = g_value_get_boolean (value);
 		break;
+	case ACTION_PROP_GICON:
+		gtk_action_set_gicon (action, g_value_get_object (value));
+		break;
 	default:
 		G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
 		break;
@@ -95,6 +99,9 @@ gtk_action_get_property (GObject *object, guint prop_id, GValue *value, GParamSp
 		break;
 	case ACTION_PROP_IS_IMPORTANT:
 		g_value_set_boolean (value, action->is_important);
+		break;
+	case ACTION_PROP_GICON:
+		g_value_set_object (value, action->gicon);
 		break;
 	default:
 		G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
@@ -163,6 +170,8 @@ gtk_action_class_init (GtkActionClass *klass)
 		g_param_spec_string ("short_label", NULL, NULL, NULL, G_PARAM_READWRITE));
 	g_object_class_install_property (oclass, ACTION_PROP_IS_IMPORTANT,
 		g_param_spec_boolean ("is-important", NULL, NULL, FALSE, G_PARAM_READWRITE));
+	g_object_class_install_property (oclass, ACTION_PROP_GICON,
+		g_param_spec_object ("gicon", NULL, NULL, G_TYPE_ICON, G_PARAM_READWRITE));
 }
 
 static void
@@ -227,8 +236,12 @@ void gtk_action_set_icon_name (GtkAction *action, const gchar *icon_name) {
 }
 const gchar *gtk_action_get_icon_name (GtkAction *action) { return action ? action->icon_name : NULL; }
 void gtk_action_set_gicon (GtkAction *action, GIcon *icon) {
+	if (action == NULL)
+		return;
 	g_clear_object (&action->gicon);
-	if (icon) action->gicon = g_object_ref (icon);
+	if (icon)
+		action->gicon = g_object_ref (icon);
+	g_object_notify (G_OBJECT (action), "gicon");
 }
 GIcon *gtk_action_get_gicon (GtkAction *action) { return action ? action->gicon : NULL; }
 void gtk_action_set_stock_id (GtkAction *action, const gchar *stock_id) {
