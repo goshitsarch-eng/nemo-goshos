@@ -408,8 +408,8 @@ ensure_controllers (GtkWidget *widget)
 		gtk_gesture_single_set_button (GTK_GESTURE_SINGLE (drag), 0);
 		gtk_event_controller_set_propagation_phase (GTK_EVENT_CONTROLLER (drag), GTK_PHASE_CAPTURE);
 		g_signal_connect (drag, "drag-update", G_CALLBACK (on_drag_update), NULL);
-		gtk_gesture_group (click, drag);
 		gtk_widget_add_controller (widget, GTK_EVENT_CONTROLLER (drag));
+		gtk_gesture_group (click, drag);
 	}
 
 	motion = gtk_event_controller_motion_new ();

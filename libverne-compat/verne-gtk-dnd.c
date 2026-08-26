@@ -95,6 +95,7 @@ typedef struct {
 	GtkWidget *widget;
 	GtkClipboard *clipboard;
 	GtkTargetList *targets;
+	GdkDrag *drag;
 } VerneContentProvider;
 
 typedef struct {
@@ -133,7 +134,7 @@ verne_content_provider_write_mime_type_async (GdkContentProvider *provider,
 	if (self->clipboard && self->clipboard->get_func) {
 		self->clipboard->get_func (self->clipboard, &sel, info, self->clipboard->user_data);
 	} else if (self->widget) {
-		g_signal_emit_by_name (self->widget, "drag-data-get", NULL, &sel, info, 0U);
+		g_signal_emit_by_name (self->widget, "drag-data-get", self->drag, &sel, info, 0U);
 	}
 
 	if (sel.data && sel.length > 0)
@@ -546,7 +547,7 @@ verne_content_provider_get_value (GdkContentProvider *provider, GValue *value, G
 	if (self->clipboard && self->clipboard->get_func)
 		self->clipboard->get_func (self->clipboard, &sel, info, self->clipboard->user_data);
 	else if (self->widget)
-		g_signal_emit_by_name (self->widget, "drag-data-get", NULL, &sel, info, 0U);
+		g_signal_emit_by_name (self->widget, "drag-data-get", self->drag, &sel, info, 0U);
 
 	if (sel.data == NULL || sel.length <= 0) {
 		g_free (sel.data);
@@ -679,6 +680,8 @@ gtk_drag_begin_with_coordinates (GtkWidget *widget, GtkTargetList *targets, GdkD
 	drag = gdk_drag_begin (surface, device, provider,
 			       actions ? actions : (GDK_ACTION_COPY | GDK_ACTION_MOVE | GDK_ACTION_LINK),
 			       0.0, 0.0);
+	if (drag)
+		((VerneContentProvider *) provider)->drag = drag;
 	g_object_unref (provider);
 	if (drag) {
 		g_object_set_qdata (G_OBJECT (drag), source_widget_quark (), widget);
