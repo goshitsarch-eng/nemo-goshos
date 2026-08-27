@@ -90,6 +90,7 @@ static char * nemo_icon_container_find_drop_target (NemoIconContainer *container
 							GdkDragContext *context,
 							int x, int y, gboolean *icon_hit,
 							gboolean rewrite_desktop);
+static gboolean drop_icon_is_live (NemoIconContainer *container, NemoIcon *icon);
 
 static void
 initialize_dnd_grid (NemoIconContainer *container)
