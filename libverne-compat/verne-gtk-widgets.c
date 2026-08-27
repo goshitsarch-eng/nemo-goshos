@@ -794,12 +794,19 @@ verne_menu_popup_dest_overlay (GtkMenu *menu, int root_x, int root_y)
 	if (ly < 8)
 		ly = 8;
 
+	if (!GTK_IS_WIDGET (box))
+		return FALSE;
+	g_object_ref (box);
 	if (gtk_window_get_child (GTK_WINDOW (menu)) == box)
 		gtk_window_set_child (GTK_WINDOW (menu), NULL);
-	if (gtk_widget_get_parent (box) != overlay) {
+	if (GTK_IS_WIDGET (box) && gtk_widget_get_parent (box) != overlay) {
 		if (gtk_widget_get_parent (box) != NULL)
 			gtk_widget_unparent (box);
 		gtk_overlay_add_overlay (GTK_OVERLAY (overlay), box);
+	}
+	if (!GTK_IS_WIDGET (box)) {
+		g_object_unref (box);
+		return FALSE;
 	}
 	gtk_widget_add_css_class (box, "verne-dest-menu");
 	gtk_widget_set_halign (box, GTK_ALIGN_START);
@@ -809,6 +816,7 @@ verne_menu_popup_dest_overlay (GtkMenu *menu, int root_x, int root_y)
 	gtk_widget_set_visible (box, TRUE);
 	gtk_widget_set_visible (GTK_WIDGET (menu), FALSE);
 	g_object_set_data (G_OBJECT (menu), "verne-dest-overlay", overlay);
+	g_object_unref (box);
 	g_warning ("verne: dest menu overlay at %d,%d", lx, ly);
 	return TRUE;
 }
@@ -1385,7 +1393,22 @@ verne_ensure_menu_attach (GtkMenu *menu, GtkWidget *fallback)
 
 static void gtk_menu_dispose (GObject *object)
 {
-	verne_menu_set_attach (GTK_MENU (object), NULL);
+	GtkMenu *menu = GTK_MENU (object);
+
+	verne_menu_set_attach (menu, NULL);
+	if (menu->box != NULL) {
+		GtkWidget *parent = gtk_widget_get_parent (menu->box);
+
+		if (parent != NULL) {
+			if (GTK_IS_WINDOW (parent))
+				gtk_window_set_child (GTK_WINDOW (parent), NULL);
+			else if (GTK_IS_POPOVER (parent))
+				gtk_popover_set_child (GTK_POPOVER (parent), NULL);
+			else
+				gtk_widget_unparent (menu->box);
+		}
+		g_clear_object (&menu->box);
+	}
 	G_OBJECT_CLASS (gtk_menu_parent_class)->dispose (object);
 }
 
@@ -1408,6 +1431,7 @@ gtk_menu_init (GtkMenu *menu)
 	gtk_widget_add_css_class (GTK_WIDGET (menu), "popup");
 	gtk_widget_add_css_class (GTK_WIDGET (menu), "menu");
 	menu->box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
+	g_object_ref_sink (menu->box);
 	gtk_widget_add_css_class (menu->box, "menu");
 	gtk_window_set_child (GTK_WINDOW (menu), menu->box);
 	g_signal_connect (menu, "realize", G_CALLBACK (verne_menu_set_override_redirect), NULL);
