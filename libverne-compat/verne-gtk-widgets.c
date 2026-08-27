@@ -1376,10 +1376,17 @@ static void
 verne_x11_lower_desktop_windows (void)
 {
 #ifdef GDK_WINDOWING_X11
+	GdkDisplay *gdpy = gdk_display_get_default ();
 	GListModel *model = gtk_window_get_toplevels ();
 	guint i, n = g_list_model_get_n_items (model);
 	Display *dpy = NULL;
 	Window canvas;
+
+	/* File-manager windows live in a different process from dest.
+	 * Use the default X display so we can still XLowerWindow dest's
+	 * canvas (class nemo-desktop) and keep File/Edit menus on top. */
+	if (gdpy != NULL && GDK_IS_X11_DISPLAY (gdpy))
+		dpy = gdk_x11_display_get_xdisplay (gdpy);
 
 	for (i = 0; i < n; i++) {
 		gpointer w = g_list_model_get_item (model, i);
@@ -1402,6 +1409,71 @@ verne_x11_lower_desktop_windows (void)
 		if (canvas)
 			XLowerWindow (dpy, canvas);
 	}
+#endif
+}
+
+static void
+verne_menu_log_layout (GtkMenu *menu, const char *kind, int x, int y, int nat_w, int nat_h)
+{
+	GtkWidget *box;
+	GtkWidget *ch;
+	GString *dump;
+	double cy = 0;
+	int box_w;
+
+	box = gtk_menu_get_box (menu);
+	box_w = nat_w > 0 ? nat_w : 240;
+	dump = g_string_new (NULL);
+	g_string_printf (dump, "verne: %s menu at %d,%d size %dx%d",
+			 kind ? kind : "menu", x, y, nat_w, nat_h);
+	for (ch = box ? gtk_widget_get_first_child (box) : NULL; ch;
+	     ch = gtk_widget_get_next_sibling (ch)) {
+		int nat_item = 0;
+
+		if (!gtk_widget_get_visible (ch))
+			continue;
+		gtk_widget_measure (ch, GTK_ORIENTATION_VERTICAL, box_w,
+				    NULL, &nat_item, NULL, NULL);
+		if (nat_item < 1 || nat_item > 48)
+			nat_item = GTK_IS_SEPARATOR_MENU_ITEM (ch) ? 9 : 28;
+		g_string_append_printf (dump, " | %.0f-%.0f %s '%s'",
+					cy, cy + nat_item,
+					G_OBJECT_TYPE_NAME (ch),
+					verne_dest_item_label (ch));
+		cy += nat_item;
+	}
+	g_warning ("%s", dump->str);
+	g_string_free (dump, TRUE);
+}
+
+static void
+verne_menu_restack_file_popup (GtkWidget *w)
+{
+#ifdef GDK_WINDOWING_X11
+	GdkSurface *s;
+	Display *dpy;
+	Window xid;
+	Window canvas;
+
+	if (w == NULL || verne_menu_dest_attach_window (w) != NULL)
+		return;
+	s = verne_menu_x11_surface (w);
+	if (s == NULL)
+		return;
+	dpy = gdk_x11_display_get_xdisplay (gdk_surface_get_display (s));
+	xid = gdk_x11_surface_get_xid (s);
+	canvas = verne_x11_find_dest_canvas (dpy, xid);
+	if (canvas)
+		XLowerWindow (dpy, canvas);
+	if (g_object_get_data (G_OBJECT (w), "verne-popup-pos") != NULL)
+		verne_x11_move (GTK_WINDOW (w),
+				GPOINTER_TO_INT (g_object_get_data (G_OBJECT (w), "verne-popup-x")),
+				GPOINTER_TO_INT (g_object_get_data (G_OBJECT (w), "verne-popup-y")));
+	XMapRaised (dpy, xid);
+	XRaiseWindow (dpy, xid);
+	XFlush (dpy);
+#else
+	(void) w;
 #endif
 }
 
@@ -1505,10 +1577,45 @@ verne_menu_keep_above (gpointer data)
 		g_object_unref (w);
 		return G_SOURCE_REMOVE;
 	}
-	if (g_object_get_data (G_OBJECT (w), "verne-embed-canvas") == NULL)
-		verne_x11_lower_desktop_windows ();
+	if (verne_menu_dest_attach_window (w) != NULL) {
+		verne_menu_set_override_redirect (w);
+		verne_menu_embed_on_desktop (w);
+		return G_SOURCE_CONTINUE;
+	}
+	verne_x11_lower_desktop_windows ();
 	verne_menu_set_override_redirect (w);
-	verne_menu_embed_on_desktop (w);
+	verne_menu_restack_file_popup (w);
+	if (g_object_get_data (G_OBJECT (w), "verne-menu-hold") == NULL) {
+#ifdef GDK_WINDOWING_X11
+		GdkSurface *s = verne_menu_x11_surface (w);
+
+		if (s != NULL) {
+			Display *dpy = gdk_x11_display_get_xdisplay (gdk_surface_get_display (s));
+			Window root_ret = 0, child = 0;
+			int rx = 0, ry = 0, wx = 0, wy = 0;
+			unsigned int mask = 0;
+			int mx = GPOINTER_TO_INT (g_object_get_data (G_OBJECT (w), "verne-popup-x"));
+			int my = GPOINTER_TO_INT (g_object_get_data (G_OBJECT (w), "verne-popup-y"));
+			int mw = gtk_widget_get_width (w);
+			int mh = gtk_widget_get_height (w);
+
+			if (mw < 1)
+				mw = 240;
+			if (mh < 1)
+				mh = 32;
+			if (XQueryPointer (dpy, DefaultRootWindow (dpy), &root_ret, &child,
+					   &rx, &ry, &wx, &wy, &mask) &&
+			    (mask & (Button1Mask | Button3Mask)) &&
+			    (rx < mx || ry < my || rx > mx + mw || ry > my + mh)) {
+				g_warning ("verne: file menu click-outside %d,%d menu=%d,%d %dx%d",
+					   rx, ry, mx, my, mw, mh);
+				gtk_menu_popdown (GTK_MENU (w));
+				g_object_unref (w);
+				return G_SOURCE_REMOVE;
+			}
+		}
+#endif
+	}
 	return G_SOURCE_CONTINUE;
 }
 
@@ -1566,7 +1673,10 @@ verne_menu_mapped (GtkWidget *w, gpointer data)
 				GPOINTER_TO_INT (g_object_get_data (G_OBJECT (w), "verne-popup-x")),
 				GPOINTER_TO_INT (g_object_get_data (G_OBJECT (w), "verne-popup-y")));
 	verne_menu_set_override_redirect (w);
-	verne_menu_embed_on_desktop (w);
+	if (verne_menu_dest_attach_window (w) != NULL)
+		verne_menu_embed_on_desktop (w);
+	else
+		verne_menu_restack_file_popup (w);
 }
 
 static gboolean
@@ -1590,8 +1700,11 @@ verne_menu_is_active (GObject *obj, GParamSpec *pspec, gpointer data)
 		return;
 	if (g_object_get_data (obj, "verne-menu-hold"))
 		return;
-	if (!gtk_window_is_active (GTK_WINDOW (menu)))
-		gtk_menu_popdown (menu);
+	/* Dest's full-screen canvas steals is-active from override-redirect
+	 * file File/Edit menus, which parked them at -20000 before the user
+	 * could click Preferences or Connect to Server. Dismiss via Escape,
+	 * leaf activate, and click-outside instead. */
+	(void) menu;
 }
 
 static gboolean
@@ -2225,7 +2338,13 @@ verne_menu_popup_idle (gpointer data)
 	if (p->has_pos)
 		verne_x11_move (GTK_WINDOW (p->menu), p->x, p->y);
 	verne_menu_set_override_redirect (w);
-	verne_menu_embed_on_desktop (w);
+	if (verne_menu_dest_attach_window (w) != NULL) {
+		verne_menu_embed_on_desktop (w);
+	} else {
+		verne_x11_lower_desktop_windows ();
+		verne_menu_restack_file_popup (w);
+		verne_menu_log_layout (p->menu, "file", p->x, p->y, nat_w, nat_h);
+	}
 	if (g_object_get_data (G_OBJECT (w), "verne-keep-above") == NULL) {
 		g_object_set_data (G_OBJECT (w), "verne-keep-above", GINT_TO_POINTER (1));
 		g_timeout_add (50, verne_menu_keep_above, g_object_ref (w));
