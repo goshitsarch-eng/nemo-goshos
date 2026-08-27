@@ -1038,12 +1038,10 @@ verne_menu_popup_dest_overlay (GtkMenu *menu, int root_x, int root_y)
 		}
 	}
 #endif
-	if (lx < 8)
-		lx = 8;
-	if (ly < 8)
-		ly = 8;
 	{
 		int nat_w = 240, nat_h = 80;
+		int dest_w = 0, dest_h = 0;
+		GdkSurface *ds;
 
 		gtk_widget_measure (box, GTK_ORIENTATION_HORIZONTAL, -1, NULL, &nat_w, NULL, NULL);
 		gtk_widget_measure (box, GTK_ORIENTATION_VERTICAL, nat_w > 0 ? nat_w : 240,
@@ -1052,12 +1050,37 @@ verne_menu_popup_dest_overlay (GtkMenu *menu, int root_x, int root_y)
 			nat_w = 240;
 		if (nat_h < 80)
 			nat_h = 80;
+		ds = gtk_native_get_surface (GTK_NATIVE (dest));
+		if (ds != NULL) {
+			dest_w = gdk_surface_get_width (ds);
+			dest_h = gdk_surface_get_height (ds);
+		}
+		if (dest_w < 64)
+			dest_w = gtk_widget_get_width (GTK_WIDGET (dest));
+		if (dest_h < 64)
+			dest_h = gtk_widget_get_height (GTK_WIDGET (dest));
+		if (dest_w < 64)
+			dest_w = 1920;
+		if (dest_h < 64)
+			dest_h = 1200;
+		/* Keep the whole menu on the dest canvas. Right-edge clicks
+		 * otherwise place a 258x392 menu mostly off-screen so Open as
+		 * Root / Customize cannot be hit. */
+		if (lx + nat_w > dest_w - 8)
+			lx = dest_w - 8 - nat_w;
+		if (ly + nat_h > dest_h - 8)
+			ly = dest_h - 8 - nat_h;
+		if (lx < 8)
+			lx = 8;
+		if (ly < 8)
+			ly = 8;
 		gtk_widget_set_size_request (box, nat_w, nat_h);
 		g_object_set_data (G_OBJECT (box), "verne-dest-menu-x", GINT_TO_POINTER (lx));
 		g_object_set_data (G_OBJECT (box), "verne-dest-menu-y", GINT_TO_POINTER (ly));
 		g_object_set_data (G_OBJECT (box), "verne-dest-menu-w", GINT_TO_POINTER (nat_w));
 		g_object_set_data (G_OBJECT (box), "verne-dest-menu-h", GINT_TO_POINTER (nat_h));
-		g_warning ("verne: dest menu overlay at %d,%d size %dx%d", lx, ly, nat_w, nat_h);
+		g_warning ("verne: dest menu overlay at %d,%d size %dx%d dest=%dx%d",
+			   lx, ly, nat_w, nat_h, dest_w, dest_h);
 	}
 	gtk_overlay_set_clip_overlay (GTK_OVERLAY (overlay), box, FALSE);
 	gtk_widget_set_margin_start (box, lx);

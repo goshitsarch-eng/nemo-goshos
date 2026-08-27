@@ -744,7 +744,7 @@
     </key>
     <key name="disabled-actions" type="as">
       <default>[]</default>
-      <summary>List of NemoActions -not- to load.</summary>
+      <summary>List of Verne actions not to load.</summary>
       <description>List of action files you do -not- want loaded.  This maintains the behavior of an installed action being enabled by default.</description>
     </key>
     <key name="disabled-scripts" type="as">
