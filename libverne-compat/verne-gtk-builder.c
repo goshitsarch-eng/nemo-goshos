@@ -115,6 +115,44 @@ strip_placeholders (GString *s)
 	replace_all (s, "<placeholder />", "");
 }
 
+/* GTK4 GtkBuilder resolves handler="..." while parsing. GTK3 deferred
+ * that until gtk_builder_connect_signals, so strip signals here and
+ * reconnect them later from the original XML. */
+static void
+strip_signal_tags (GString *s)
+{
+	for (;;) {
+		const char *found = strstr (s->str, "<signal");
+		const char *end;
+		gsize pos, n;
+
+		if (found == NULL)
+			break;
+		if (found[7] != ' ' && found[7] != '\t' && found[7] != '\n' && found[7] != '\r') {
+			found = strstr (found + 7, "<signal");
+			if (found == NULL)
+				break;
+		}
+		end = strchr (found, '>');
+		if (end == NULL)
+			break;
+		if (end > found && *(end - 1) == '/') {
+			end += 1;
+		} else {
+			const char *close = strstr (end, "</signal>");
+			if (close)
+				end = close + strlen ("</signal>");
+			else
+				end += 1;
+		}
+		while (*end == '\n' || *end == '\r')
+			end++;
+		pos = (gsize) (found - s->str);
+		n = (gsize) (end - found);
+		g_string_erase (s, pos, (gssize) n);
+	}
+}
+
 static void
 strip_empty_child_tags (GString *s)
 {
@@ -823,6 +861,7 @@ verne_transform_gtk3_ui (const gchar *xml, gssize len)
 	remove_property (s, "n-columns");
 	remove_property (s, "draw-indicator");
 
+	strip_signal_tags (s);
 	strip_empty_child_tags (s);
 	return g_string_free (s, FALSE);
 }
