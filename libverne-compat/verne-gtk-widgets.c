@@ -655,7 +655,9 @@ static void verne_menu_popdown_dest_popover (GtkMenu *menu);
 static void verne_menu_open_submenu (GtkWidget *item, GtkWidget *submenu);
 static void verne_menu_popup_submenu (GtkWidget *item, GtkWidget *submenu, gboolean toggle);
 static void verne_menu_hide_others (GtkMenu *keep);
+static void verne_menu_hide_others_later (void);
 static void verne_menu_item_cancel_submenu_timeout (GtkWidget *item);
+static void verne_widget_clear_active (GtkWidget *w);
 
 static void
 verne_menu_ensure_css (void)
@@ -963,6 +965,7 @@ verne_dest_menu_button_at (GtkWidget *box, double lx, double ly)
 	double nearest_dist = G_MAXDOUBLE;
 	double y = 0;
 	int box_w;
+	gboolean in_separator = FALSE;
 	GString *dump;
 
 	(void) lx;
@@ -994,8 +997,11 @@ verne_dest_menu_button_at (GtkWidget *box, double lx, double ly)
 					y0, y1, G_OBJECT_TYPE_NAME (ch),
 					verne_dest_item_label (ch));
 
-		if (GTK_IS_SEPARATOR_MENU_ITEM (ch))
+		if (GTK_IS_SEPARATOR_MENU_ITEM (ch)) {
+			if (ly >= y0 && ly < y1)
+				in_separator = TRUE;
 			continue;
+		}
 
 		mid = (y0 + y1) / 2.0;
 		dist = ly < mid ? (mid - ly) : (ly - mid);
@@ -1007,32 +1013,66 @@ verne_dest_menu_button_at (GtkWidget *box, double lx, double ly)
 			hit = ch;
 	}
 
-	g_warning ("%s ly=%.0f hit=%s", dump->str, ly, verne_dest_item_label (hit ? hit : nearest));
+	g_warning ("%s ly=%.0f hit=%s", dump->str, ly,
+		   verne_dest_item_label (hit ? hit : (in_separator ? NULL : nearest)));
 	g_string_free (dump, TRUE);
 
 	if (hit != NULL)
 		return hit;
-	return nearest;
+	/* A click on the separator between Vim and Other Application must
+	 * not snap to the nearest row. */
+	if (in_separator)
+		return NULL;
+	if (nearest != NULL && nearest_dist <= 6.0)
+		return nearest;
+	return NULL;
+}
+
+static void
+verne_widget_clear_active (GtkWidget *w)
+{
+	GtkWidget *ch;
+
+	if (!GTK_IS_WIDGET (w))
+		return;
+	gtk_widget_unset_state_flags (w, GTK_STATE_FLAG_ACTIVE);
+	for (ch = gtk_widget_get_first_child (w); ch;
+	     ch = gtk_widget_get_next_sibling (ch))
+		verne_widget_clear_active (ch);
+}
+
+static guint verne_hide_others_idle_id;
+
+static gboolean
+verne_menu_hide_others_idle (gpointer data)
+{
+	(void) data;
+	verne_hide_others_idle_id = 0;
+	verne_menu_hide_others (NULL);
+	return G_SOURCE_REMOVE;
+}
+
+static void
+verne_menu_hide_others_later (void)
+{
+	if (verne_hide_others_idle_id != 0)
+		return;
+	verne_hide_others_idle_id = g_idle_add (verne_menu_hide_others_idle, NULL);
 }
 
 static void
 verne_dest_overlay_pressed (GtkGestureClick *gesture, gint n_press, gdouble x, gdouble y, gpointer data)
 {
 	GtkWidget *box = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (gesture));
-	GtkWidget *pick;
 	GtkWidget *btn;
 	GtkMenu *menu = GTK_IS_MENU (data) ? GTK_MENU (data) : NULL;
 
 	(void) n_press;
 	if (box == NULL)
 		return;
-	pick = gtk_widget_pick (box, x, y, GTK_PICK_DEFAULT);
-	btn = pick;
-	while (btn != NULL && btn != box &&
-	       !GTK_IS_BUTTON (btn) && !GTK_IS_CHECK_BUTTON (btn))
-		btn = gtk_widget_get_parent (btn);
-	if (btn == NULL || btn == box || GTK_IS_SEPARATOR_MENU_ITEM (btn))
-		btn = verne_dest_menu_button_at (box, x, y);
+	/* Overlay children are often unallocated; gtk_widget_pick hits the
+	 * wrong row. Stacked measure heights match the painted labels. */
+	btn = verne_dest_menu_button_at (box, x, y);
 	if (btn == NULL || btn == box || GTK_IS_SEPARATOR_MENU_ITEM (btn))
 		return;
 	gtk_gesture_set_state (GTK_GESTURE (gesture), GTK_EVENT_SEQUENCE_CLAIMED);
@@ -1045,7 +1085,7 @@ verne_dest_overlay_pressed (GtkGestureClick *gesture, gint n_press, gdouble x, g
 	g_signal_emit_by_name (btn, "clicked");
 	g_warning ("verne: dest overlay activate %s label=%s",
 		   G_OBJECT_TYPE_NAME (btn), verne_dest_item_label (btn));
-	verne_menu_hide_others (NULL);
+	verne_menu_hide_others_later ();
 	(void) menu;
 }
 
@@ -1079,9 +1119,17 @@ verne_menu_popup_dest_overlay (GtkMenu *menu, int root_x, int root_y)
 	if (gtk_window_get_child (GTK_WINDOW (menu)) == box)
 		gtk_window_set_child (GTK_WINDOW (menu), NULL);
 	if (GTK_IS_WIDGET (box) && gtk_widget_get_parent (box) != overlay) {
-		if (gtk_widget_get_parent (box) != NULL)
-			gtk_widget_unparent (box);
-		gtk_overlay_add_overlay (GTK_OVERLAY (overlay), box);
+		GtkWidget *parent = gtk_widget_get_parent (box);
+
+		if (parent != NULL) {
+			verne_widget_clear_active (box);
+			if (GTK_IS_OVERLAY (parent))
+				gtk_overlay_remove_overlay (GTK_OVERLAY (parent), box);
+			else
+				gtk_widget_unparent (box);
+		}
+		if (gtk_widget_get_parent (box) == NULL)
+			gtk_overlay_add_overlay (GTK_OVERLAY (overlay), box);
 	}
 	if (!GTK_IS_WIDGET (box)) {
 		g_object_unref (box);
@@ -1227,9 +1275,23 @@ static void
 verne_menu_popdown_dest_popover (GtkMenu *menu)
 {
 	GtkWidget *popover;
+	GtkWidget *box;
+	GtkWidget *parent;
 
 	if (!GTK_IS_MENU (menu))
 		return;
+	box = menu->box;
+	parent = GTK_IS_WIDGET (box) ? gtk_widget_get_parent (box) : NULL;
+	if (GTK_IS_OVERLAY (parent)) {
+		/* Leave the box parented. Unparenting during a click gesture
+		 * breaks GTK's active-state accounting and SIGSEGVs the next
+		 * File-menu overlay popup. */
+		verne_widget_clear_active (box);
+		gtk_widget_set_visible (box, FALSE);
+		gtk_widget_set_can_target (box, FALSE);
+		g_object_set_data (G_OBJECT (menu), "verne-dest-overlay", NULL);
+		return;
+	}
 	popover = g_object_get_data (G_OBJECT (menu), "verne-dest-popover");
 	verne_menu_restore_box_to_window (menu);
 	if (GTK_IS_POPOVER (popover)) {
@@ -1910,6 +1972,8 @@ static void gtk_menu_dispose (GObject *object)
 				gtk_window_set_child (GTK_WINDOW (parent), NULL);
 			else if (GTK_IS_POPOVER (parent))
 				gtk_popover_set_child (GTK_POPOVER (parent), NULL);
+			else if (GTK_IS_OVERLAY (parent))
+				gtk_overlay_remove_overlay (GTK_OVERLAY (parent), menu->box);
 			else
 				gtk_widget_unparent (menu->box);
 		}
@@ -1993,7 +2057,7 @@ verne_menu_leaf_clicked (GtkWidget *item, gpointer data)
 	/* Dismiss the whole cascade. gtk_menu_popdown() only closes this
 	 * menu and its children so a parent File/View menu can stay open
 	 * while a nested submenu is showing. */
-	verne_menu_hide_others (NULL);
+	verne_menu_hide_others_later ();
 	g_object_unref (menu);
 }
 
@@ -2282,12 +2346,12 @@ verne_toplevel_dismiss_menus (GtkGestureClick *gesture, gint n_press, gdouble x,
 						return;
 					}
 					g_signal_emit_by_name (btn, "clicked");
-					verne_menu_hide_others (NULL);
+					verne_menu_hide_others_later ();
 					return;
 				}
 				if (w)
 					g_object_unref (w);
-				verne_menu_hide_others (NULL);
+				verne_menu_hide_others_later ();
 				return;
 			}
 			if (w)
@@ -2322,10 +2386,10 @@ verne_toplevel_dismiss_menus (GtkGestureClick *gesture, gint n_press, gdouble x,
 						return;
 					}
 					g_signal_emit_by_name (btn, "clicked");
-					verne_menu_hide_others (NULL);
+					verne_menu_hide_others_later ();
 					return;
 				}
-				verne_menu_hide_others (NULL);
+				verne_menu_hide_others_later ();
 				return;
 			}
 			if (gtk_widget_has_css_class (walk, "menu") && GTK_IS_BOX (walk))
@@ -2343,7 +2407,7 @@ verne_toplevel_dismiss_menus (GtkGestureClick *gesture, gint n_press, gdouble x,
 		     gtk_widget_get_ancestor (picked, GTK_TYPE_NOTEBOOK) != NULL))
 			return;
 	}
-	verne_menu_hide_others (NULL);
+	verne_menu_hide_others_later ();
 }
 
 static gboolean verne_toplevel_escape_menus (GtkEventControllerKey *controller, guint keyval, guint keycode,
@@ -2488,6 +2552,10 @@ verne_menu_popup_idle (gpointer data)
 	g_object_set_data (G_OBJECT (w), "verne-menu-hold", GINT_TO_POINTER (1));
 	g_object_set_data (G_OBJECT (w), "verne-dismissed", NULL);
 	verne_menu_attach_dismiss_on_toplevels ();
+	if (verne_hide_others_idle_id != 0) {
+		g_source_remove (verne_hide_others_idle_id);
+		verne_hide_others_idle_id = 0;
+	}
 	verne_menu_hide_others (p->menu);
 	if (verne_menu_popup_dest_overlay (p->menu, p->x, p->y) ||
 	    verne_menu_popup_dest_popover (p->menu, p->x, p->y)) {
@@ -2915,6 +2983,10 @@ verne_menu_popup_submenu (GtkWidget *item, GtkWidget *submenu, gboolean toggle)
 		gtk_menu_attach_to_widget (GTK_MENU (submenu), item, NULL);
 	g_object_set_data (G_OBJECT (submenu), "verne-submenu-item", item);
 	g_object_set_data (G_OBJECT (submenu), "verne-dismissed", NULL);
+	if (verne_hide_others_idle_id != 0) {
+		g_source_remove (verne_hide_others_idle_id);
+		verne_hide_others_idle_id = 0;
+	}
 	verne_menu_hide_others (GTK_MENU (submenu));
 	if (verne_menu_popup_dest_overlay (GTK_MENU (submenu), x, y) ||
 	    verne_menu_popup_dest_popover (GTK_MENU (submenu), x, y))
@@ -3091,7 +3163,7 @@ gtk_check_menu_item_clicked (GtkButton *button)
 	{
 		GtkWidget *menu = gtk_widget_get_ancestor (GTK_WIDGET (button), GTK_TYPE_MENU);
 		if (menu)
-			verne_menu_hide_others (NULL);
+			verne_menu_hide_others_later ();
 	}
 }
 
