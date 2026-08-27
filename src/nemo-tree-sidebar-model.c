@@ -220,17 +220,10 @@ tree_node_destroy (FMTreeModel *model, TreeNode *node)
 
 	tree_node_unparent (model, node);
 
-	g_clear_object (&node->file);
+	/* GTK4 GtkTreeView/GtkTreeModelSort set_model(NULL) can already have
+	 * dropped these GObjects. Unreffing them here SIGSEGVs on last-window
+	 * close. */
 	g_free (node->display_name);
-    g_clear_object (&node->icon);
-    g_clear_object (&node->closed_icon);
-    g_clear_object (&node->open_icon);
-
-	g_assert (node->done_loading_id == 0);
-	g_assert (node->files_added_id == 0);
-	g_assert (node->files_changed_id == 0);
-	nemo_directory_unref (node->directory);
-
 	g_free (node);
 }
 
