@@ -1346,7 +1346,7 @@ verne_menu_popup_dest_overlay (GtkMenu *menu, int root_x, int root_y)
 	{
 		int nat_w = 240, nat_h = 80;
 		int dest_w = 0, dest_h = 0;
-		int view_w, view_h, space_below, space_above;
+		int view_w, view_h;
 		gboolean need_scroll = FALSE;
 		GtkWidget *extra;
 		GdkSurface *ds;
@@ -1375,19 +1375,14 @@ verne_menu_popup_dest_overlay (GtkMenu *menu, int root_x, int root_y)
 			lx = dest_w - 8 - nat_w;
 		if (lx < 8)
 			lx = 8;
-		/* Keep the menu attached to the click. If it is taller than the
-		 * remaining window, clamp height and scroll (GTK3 GtkMenu).
-		 * Shifting ly to 8 would cover the menubar so Edit hits Redo. */
-		space_below = dest_h - 8 - ly;
-		space_above = ly - 8;
-		if (space_below < 120 && space_above > space_below) {
-			view_h = MIN (nat_h, MAX (space_above, 80));
-			ly = ly - view_h;
-			if (ly < 8)
-				ly = 8;
-		} else {
-			view_h = MIN (nat_h, MAX (space_below, 80));
-		}
+		/* Fit in the host window. Prefer keeping the click Y; if the
+		 * menu is taller than the remaining space, clamp height and
+		 * slide up (and scroll) so the last items stay reachable. */
+		view_h = MIN (nat_h, MAX (dest_h - 16, 80));
+		if (ly + view_h > dest_h - 8)
+			ly = dest_h - 8 - view_h;
+		if (ly < 8)
+			ly = 8;
 		view_w = nat_w;
 		need_scroll = nat_h > view_h + 4;
 		if (need_scroll)
