@@ -1745,12 +1745,51 @@ verne_toplevel_dismiss_menus (GtkGestureClick *gesture, gint n_press, gdouble x,
 				   x, y, mx, my, mw, mh);
 			if (mw > 0 && mh > 0 &&
 			    x >= mx && x < mx + mw && y >= my && y < my + mh) {
-				GtkWidget *item = gtk_widget_pick (box, x - mx, y - my, GTK_PICK_DEFAULT);
-				GtkWidget *btn = item;
+				GtkWidget *ch;
+				GtkWidget *btn = NULL;
+				double lx = x - mx, ly = y - my;
 
+				for (ch = gtk_widget_get_first_child (box); ch;
+				     ch = gtk_widget_get_next_sibling (ch)) {
+					graphene_rect_t r;
+
+					if (!gtk_widget_compute_bounds (ch, box, &r))
+						continue;
+					g_warning ("verne: dest menu child %s %.0f,%.0f %.0fx%.0f",
+						   G_OBJECT_TYPE_NAME (ch),
+						   r.origin.x, r.origin.y, r.size.width, r.size.height);
+					if (lx >= r.origin.x && lx < r.origin.x + r.size.width &&
+					    ly >= r.origin.y && ly < r.origin.y + r.size.height)
+						btn = ch;
+				}
 				while (btn != NULL && btn != box &&
 				       !GTK_IS_BUTTON (btn) && !GTK_IS_CHECK_BUTTON (btn))
 					btn = gtk_widget_get_parent (btn);
+				if (btn == NULL || btn == box) {
+					guint idx = 0, want;
+					guint nbtn = 0;
+
+					for (ch = gtk_widget_get_first_child (box); ch;
+					     ch = gtk_widget_get_next_sibling (ch)) {
+						if (GTK_IS_BUTTON (ch) || GTK_IS_CHECK_BUTTON (ch))
+							nbtn++;
+					}
+					want = nbtn > 0 ? (guint) (ly * nbtn / mh) : 0;
+					if (want >= nbtn && nbtn > 0)
+						want = nbtn - 1;
+					for (ch = gtk_widget_get_first_child (box); ch;
+					     ch = gtk_widget_get_next_sibling (ch)) {
+						if (!GTK_IS_BUTTON (ch) && !GTK_IS_CHECK_BUTTON (ch))
+							continue;
+						if (idx == want) {
+							btn = ch;
+							break;
+						}
+						idx++;
+					}
+					g_warning ("verne: dest menu y-index want=%u nbtn=%u btn=%s",
+						   want, nbtn, btn ? G_OBJECT_TYPE_NAME (btn) : "NULL");
+				}
 				if (button == 1 && btn != NULL && btn != box &&
 				    (GTK_IS_BUTTON (btn) || GTK_IS_CHECK_BUTTON (btn))) {
 					g_signal_emit_by_name (btn, "clicked");
