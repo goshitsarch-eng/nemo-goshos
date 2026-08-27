@@ -1373,6 +1373,7 @@ register_event_signals (void)
 		{ "focus-in-event", 1 },
 		{ "focus-out-event", 1 },
 		{ "delete-event", 1 },
+		{ "configure-event", 1 },
 		{ "window-state-event", 1 },
 		{ "popup-menu", 0 },
 		{ "selection-done", 0 },

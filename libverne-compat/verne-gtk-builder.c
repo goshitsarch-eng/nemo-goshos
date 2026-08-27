@@ -677,6 +677,75 @@ verne_bind_action_widgets (GtkBuilder *builder, const gchar *xml)
 	}
 }
 
+static void
+hyphenate_property_names (GString *s)
+{
+	const char *pat = "<property name=\"";
+	gsize plen = strlen (pat);
+	gsize i = 0;
+
+	while (i + plen < s->len) {
+		if (memcmp (s->str + i, pat, plen) == 0) {
+			gsize j = i + plen;
+			while (j < s->len && s->str[j] != '"') {
+				if (s->str[j] == '_')
+					s->str[j] = '-';
+				j++;
+			}
+			i = j;
+		} else {
+			i++;
+		}
+	}
+}
+
+/* GTK3 GtkImage icon-size was a GtkIconSize enum (menu=1 … dialog=6).
+ * GTK4 only accepts inherit/normal/large. */
+static void
+convert_numeric_icon_size (GString *s)
+{
+	const char *pat = "<property name=\"icon-size\">";
+	gsize plen = strlen (pat);
+	gsize i = 0;
+
+	while (i + plen < s->len) {
+		if (memcmp (s->str + i, pat, plen) == 0) {
+			char *end = strstr (s->str + i, "</property>");
+			gchar *raw;
+			const char *nick = NULL;
+			long val;
+			char *endp;
+
+			if (end == NULL)
+				break;
+			raw = g_strndup (s->str + i + plen,
+					 (gsize) (end - (s->str + i + plen)));
+			g_strstrip (raw);
+			val = strtol (raw, &endp, 10);
+			if (endp != raw && *endp == '\0') {
+				if (val >= 5)
+					nick = "large";
+				else if (val >= 3)
+					nick = "large";
+				else
+					nick = "normal";
+			}
+			g_free (raw);
+			if (nick) {
+				gchar *repl = g_strdup_printf ("%s%s</property>", pat, nick);
+				gsize n = (gsize) (end + strlen ("</property>") - (s->str + i));
+
+				g_string_erase (s, i, (gssize) n);
+				g_string_insert (s, i, repl);
+				i += strlen (repl);
+				g_free (repl);
+				continue;
+			}
+		}
+		i++;
+	}
+}
+
 static gchar *
 verne_transform_gtk3_ui (const gchar *xml, gssize len)
 {
@@ -709,6 +778,7 @@ verne_transform_gtk3_ui (const gchar *xml, gssize len)
 	replace_all (s, "GtkViewport", "GtkBox");
 	replace_all (s, "class=\"GtkInfoBar\"", "class=\"GtkBox\"");
 
+	hyphenate_property_names (s);
 	replace_all (s, " name=\"can-focus\"", " name=\"focusable\"");
 	replace_all (s, " name=\"margin-left\"", " name=\"margin-start\"");
 	replace_all (s, " name=\"margin-right\"", " name=\"margin-end\"");
@@ -725,6 +795,7 @@ verne_transform_gtk3_ui (const gchar *xml, gssize len)
 	convert_numeric_align (s, "xalign", "halign");
 	convert_numeric_align (s, "yalign", "valign");
 	convert_border_width (s);
+	convert_numeric_icon_size (s);
 	rewrite_packing_blocks (s);
 	strip_xml_block (s, "<action-widgets>", "</action-widgets>");
 	strip_xml_block (s, "<accel-groups>", "</accel-groups>");
@@ -737,6 +808,8 @@ verne_transform_gtk3_ui (const gchar *xml, gssize len)
 	remove_property (s, "use-stock");
 	remove_property (s, "can-default");
 	remove_property (s, "shadow-type");
+	remove_property (s, "label-yalign");
+	remove_property (s, "relief");
 	remove_property (s, "ignore-hidden");
 	remove_property (s, "caps-lock-warning");
 	remove_property (s, "primary-icon-activatable");
