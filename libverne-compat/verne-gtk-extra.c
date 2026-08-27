@@ -2440,12 +2440,6 @@ verne_dialog_add_buttons (GtkDialog *dialog, const gchar *first_text, ...)
 }
 
 void
-gtk_builder_add_callback_symbols (GtkBuilder *builder, const char *first, ...)
-{
-	(void) builder; (void) first;
-}
-
-void
 gtk_style_context_get_border_color (GtkStyleContext *context, GtkStateFlags state, GdkRGBA *color)
 {
 	(void) state;

@@ -754,6 +754,238 @@ verne_transform_gtk3_ui (const gchar *xml, gssize len)
 	return g_string_free (s, FALSE);
 }
 
+#define VERNE_BUILDER_CALLBACKS_KEY "verne-builder-callbacks"
+#define VERNE_BUILDER_SIGNALS_KEY "verne-builder-signals"
+#define VERNE_BUILDER_CONNECTED_KEY "verne-builder-signals-connected"
+
+typedef struct {
+	gchar *object_id;
+	gchar *name;
+	gchar *handler;
+	gchar *connect_object;
+	gboolean swapped;
+	gboolean after;
+} VerneUiSignal;
+
+static void
+verne_ui_signal_free (gpointer data)
+{
+	VerneUiSignal *sig = data;
+
+	g_free (sig->object_id);
+	g_free (sig->name);
+	g_free (sig->handler);
+	g_free (sig->connect_object);
+	g_free (sig);
+}
+
+static gchar *
+xml_attr_value (const char *tag, const char *gt, const char *attr)
+{
+	gchar *pat;
+	const char *p, *end, *q1;
+	gsize alen;
+
+	pat = g_strdup_printf ("%s=\"", attr);
+	alen = strlen (pat);
+	p = tag;
+	while (p < gt) {
+		p = strstr (p, pat);
+		if (p == NULL || p >= gt) {
+			g_free (pat);
+			return NULL;
+		}
+		q1 = p + alen;
+		end = memchr (q1, '"', (gsize) (gt - q1));
+		g_free (pat);
+		if (end == NULL)
+			return NULL;
+		return g_strndup (q1, (gsize) (end - q1));
+	}
+	g_free (pat);
+	return NULL;
+}
+
+static void
+verne_collect_builder_signals (GtkBuilder *builder, const char *xml)
+{
+	GPtrArray *id_stack;
+	GPtrArray *signals;
+	const char *p;
+
+	if (xml == NULL)
+		return;
+
+	id_stack = g_ptr_array_new_with_free_func (g_free);
+	signals = g_ptr_array_new_with_free_func (verne_ui_signal_free);
+	p = xml;
+	while (*p) {
+		if (strncmp (p, "<object", 7) == 0 &&
+		    (p[7] == ' ' || p[7] == '\t' || p[7] == '\n' || p[7] == '\r')) {
+			const char *gt = strchr (p, '>');
+			gchar *id;
+
+			if (gt == NULL)
+				break;
+			id = xml_attr_value (p, gt, "id");
+			if (gt > p && *(gt - 1) == '/') {
+				g_free (id);
+			} else {
+				g_ptr_array_add (id_stack, id ? id : g_strdup (""));
+			}
+			p = gt + 1;
+		} else if (strncmp (p, "</object>", 9) == 0) {
+			if (id_stack->len > 0)
+				g_ptr_array_remove_index (id_stack, id_stack->len - 1);
+			p += 9;
+		} else if (strncmp (p, "<signal", 7) == 0 &&
+			   (p[7] == ' ' || p[7] == '\t' || p[7] == '\n' || p[7] == '\r')) {
+			const char *gt = strchr (p, '>');
+			VerneUiSignal *sig;
+			gchar *swapped, *after;
+			const gchar *cur_id = "";
+
+			if (gt == NULL)
+				break;
+			if (id_stack->len > 0)
+				cur_id = g_ptr_array_index (id_stack, id_stack->len - 1);
+			sig = g_new0 (VerneUiSignal, 1);
+			sig->object_id = g_strdup (cur_id);
+			sig->name = xml_attr_value (p, gt, "name");
+			sig->handler = xml_attr_value (p, gt, "handler");
+			sig->connect_object = xml_attr_value (p, gt, "object");
+			swapped = xml_attr_value (p, gt, "swapped");
+			after = xml_attr_value (p, gt, "after");
+			sig->swapped = swapped && g_strcmp0 (swapped, "no") != 0 &&
+				       g_strcmp0 (swapped, "FALSE") != 0 &&
+				       g_strcmp0 (swapped, "false") != 0;
+			sig->after = after && g_strcmp0 (after, "no") != 0 &&
+				     g_strcmp0 (after, "FALSE") != 0 &&
+				     g_strcmp0 (after, "false") != 0;
+			g_free (swapped);
+			g_free (after);
+			if (sig->object_id[0] != '\0' && sig->name && sig->handler)
+				g_ptr_array_add (signals, sig);
+			else
+				verne_ui_signal_free (sig);
+			p = gt + 1;
+		} else {
+			p++;
+		}
+	}
+	g_ptr_array_unref (id_stack);
+	g_object_set_data_full (G_OBJECT (builder), VERNE_BUILDER_SIGNALS_KEY,
+				signals, (GDestroyNotify) g_ptr_array_unref);
+}
+
+static GHashTable *
+verne_builder_callbacks (GtkBuilder *builder)
+{
+	GHashTable *table;
+
+	table = g_object_get_data (G_OBJECT (builder), VERNE_BUILDER_CALLBACKS_KEY);
+	if (table == NULL) {
+		table = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
+		g_object_set_data_full (G_OBJECT (builder), VERNE_BUILDER_CALLBACKS_KEY,
+					table, (GDestroyNotify) g_hash_table_unref);
+	}
+	return table;
+}
+
+void
+gtk_builder_add_callback_symbols (GtkBuilder *builder, const char *first, ...)
+{
+	va_list args;
+	const char *name;
+	GtkBuilderScope *scope;
+	GtkBuilderCScope *cscope = NULL;
+
+	if (builder == NULL || first == NULL)
+		return;
+
+	scope = gtk_builder_get_scope (builder);
+	if (GTK_IS_BUILDER_CSCOPE (scope))
+		cscope = GTK_BUILDER_CSCOPE (scope);
+	else {
+		scope = gtk_builder_cscope_new ();
+		gtk_builder_set_scope (builder, scope);
+		cscope = GTK_BUILDER_CSCOPE (scope);
+		g_object_unref (scope);
+	}
+
+	va_start (args, first);
+	name = first;
+	while (name != NULL) {
+		GCallback cb = va_arg (args, GCallback);
+
+		g_hash_table_insert (verne_builder_callbacks (builder), g_strdup (name), (gpointer) cb);
+		if (cscope && cb)
+			gtk_builder_cscope_add_callback_symbol (cscope, name, cb);
+		name = va_arg (args, const char *);
+	}
+	va_end (args);
+}
+
+void
+gtk_builder_connect_signals (GtkBuilder *builder, gpointer user_data)
+{
+	GPtrArray *signals;
+	GHashTable *cbs;
+	guint i;
+
+	if (builder == NULL)
+		return;
+	if (g_object_get_data (G_OBJECT (builder), VERNE_BUILDER_CONNECTED_KEY))
+		return;
+
+	signals = g_object_get_data (G_OBJECT (builder), VERNE_BUILDER_SIGNALS_KEY);
+	cbs = g_object_get_data (G_OBJECT (builder), VERNE_BUILDER_CALLBACKS_KEY);
+	if (signals == NULL)
+		return;
+
+	gtk_builder_set_current_object (builder, (user_data && G_IS_OBJECT (user_data))
+						 ? G_OBJECT (user_data) : NULL);
+
+	for (i = 0; i < signals->len; i++) {
+		VerneUiSignal *sig = g_ptr_array_index (signals, i);
+		GObject *obj;
+		GCallback cb = NULL;
+		gpointer data = user_data;
+		gulong id;
+
+		obj = gtk_builder_get_object (builder, sig->object_id);
+		if (cbs)
+			cb = g_hash_table_lookup (cbs, sig->handler);
+		if (cb == NULL) {
+			GtkBuilderScope *scope = gtk_builder_get_scope (builder);
+
+			if (GTK_IS_BUILDER_CSCOPE (scope))
+				cb = gtk_builder_cscope_lookup_callback_symbol (GTK_BUILDER_CSCOPE (scope),
+									       sig->handler);
+		}
+		if (obj == NULL || cb == NULL) {
+			g_warning ("Verne: could not connect %s::%s to %s",
+				   sig->object_id, sig->name, sig->handler);
+			continue;
+		}
+		if (sig->connect_object) {
+			GObject *other = gtk_builder_get_object (builder, sig->connect_object);
+
+			if (other)
+				data = other;
+		}
+		if (sig->swapped)
+			id = g_signal_connect_data (obj, sig->name, cb, data, NULL, G_CONNECT_SWAPPED);
+		else if (sig->after)
+			id = g_signal_connect_data (obj, sig->name, cb, data, NULL, G_CONNECT_AFTER);
+		else
+			id = g_signal_connect (obj, sig->name, cb, data);
+		(void) id;
+	}
+
+	g_object_set_data (G_OBJECT (builder), VERNE_BUILDER_CONNECTED_KEY, GINT_TO_POINTER (TRUE));
+}
+
 gboolean
 verne_gtk_builder_add_from_string (GtkBuilder *builder, const gchar *buffer, gssize length, GError **error)
 {
@@ -774,6 +1006,7 @@ verne_gtk_builder_add_from_string (GtkBuilder *builder, const gchar *buffer, gss
 	if (ok) {
 		verne_bind_action_widgets (builder, buffer);
 		verne_restore_builder_stacks (builder, buffer);
+		verne_collect_builder_signals (builder, buffer);
 	}
 	g_free (transformed);
 	return ok;

@@ -1894,7 +1894,7 @@ verne_gtk_tree_view_get_tooltip_context (GtkTreeView *tree_view, gint *x, gint *
 #define gtk_paned_get_child2(p) gtk_paned_get_end_child (p)
 #define gtk_menu_bar_get_child_pack_direction(m) 0
 #define gtk_image_menu_item_get_always_show_image(i) TRUE
-#define gtk_builder_connect_signals(b, d) ((void)0)
+void gtk_builder_connect_signals (GtkBuilder *builder, gpointer user_data);
 #define gtk_action_set_always_show_image(a, b) ((void)0)
 #define gdk_window_get_state(w) 0
 gboolean gdk_event_get_scroll_deltas (const GdkEvent *event, gdouble *delta_x, gdouble *delta_y);
