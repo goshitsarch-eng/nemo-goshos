@@ -833,6 +833,36 @@ verne_menu_popup_dest_popover (GtkMenu *menu, int root_x, int root_y)
 	gtk_popover_set_pointing_to (GTK_POPOVER (popover), &rect);
 	gtk_widget_set_visible (GTK_WIDGET (menu), FALSE);
 	gtk_popover_popup (GTK_POPOVER (popover));
+#ifdef GDK_WINDOWING_X11
+	{
+		GdkSurface *ps = GTK_IS_NATIVE (popover) ? gtk_native_get_surface (GTK_NATIVE (popover)) : NULL;
+		GdkSurface *ds = gtk_native_get_surface (GTK_NATIVE (dest));
+		if (ps && ds && GDK_IS_X11_SURFACE (ps) && GDK_IS_X11_SURFACE (ds)) {
+			Display *dpy = gdk_x11_display_get_xdisplay (gdk_surface_get_display (ps));
+			Window pop_xid = gdk_x11_surface_get_xid (ps);
+			Window dest_xid = gdk_x11_surface_get_xid (ds);
+			XSetWindowAttributes attrs;
+			Window root = 0, parent = 0, *children = NULL;
+			unsigned n = 0;
+
+			attrs.override_redirect = True;
+			XChangeWindowAttributes (dpy, pop_xid, CWOverrideRedirect, &attrs);
+			if (XQueryTree (dpy, pop_xid, &root, &parent, &children, &n)) {
+				if (children)
+					XFree (children);
+			}
+			if (parent != dest_xid) {
+				XReparentWindow (dpy, pop_xid, dest_xid, lx, ly);
+				g_warning ("verne: dest popover reparent 0x%lx -> dest 0x%lx at %d,%d (was parent 0x%lx)",
+					   (unsigned long) pop_xid, (unsigned long) dest_xid, lx, ly,
+					   (unsigned long) parent);
+			}
+			XMapRaised (dpy, pop_xid);
+			XRaiseWindow (dpy, pop_xid);
+			XFlush (dpy);
+		}
+	}
+#endif
 	g_warning ("verne: dest menu popover at %d,%d parent=%s",
 		   lx, ly, G_OBJECT_TYPE_NAME (parent));
 	return TRUE;
