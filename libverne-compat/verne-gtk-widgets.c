@@ -870,8 +870,9 @@ verne_dest_item_label (GtkWidget *w)
 	return lab ? lab : "";
 }
 
-/* Dest overlay menus often have unallocated children (pick hits the box).
- * Map clicks from measured heights and never activate separators. */
+/* Dest overlay menus often have unallocated or overlay-sized children
+ * (pick hits the box; compute_bounds may return the whole menu). Map
+ * clicks by stacking gtk_widget_measure heights and skip separators. */
 static GtkWidget *
 verne_dest_menu_button_at (GtkWidget *box, double lx, double ly)
 {
@@ -881,6 +882,7 @@ verne_dest_menu_button_at (GtkWidget *box, double lx, double ly)
 	double nearest_dist = G_MAXDOUBLE;
 	double y = 0;
 	int box_w;
+	GString *dump;
 
 	(void) lx;
 	if (box == NULL)
@@ -888,46 +890,31 @@ verne_dest_menu_button_at (GtkWidget *box, double lx, double ly)
 	box_w = gtk_widget_get_width (box);
 	if (box_w < 1)
 		box_w = 240;
+	dump = g_string_new ("verne: dest menu layout");
 
 	for (ch = gtk_widget_get_first_child (box); ch;
 	     ch = gtk_widget_get_next_sibling (ch)) {
-		graphene_rect_t r;
 		double y0, y1, mid, dist;
 		int nat_h = 0;
-		gboolean have_bounds = FALSE;
 
 		if (!gtk_widget_get_visible (ch))
 			continue;
 		if (!GTK_IS_BUTTON (ch) && !GTK_IS_CHECK_BUTTON (ch))
 			continue;
 
-		if (gtk_widget_compute_bounds (ch, box, &r) &&
-		    r.size.height >= 4 && r.size.width >= 8)
-			have_bounds = TRUE;
-		if (have_bounds) {
-			y0 = r.origin.y;
-			y1 = y0 + r.size.height;
-			/* Bounds in overlay/window space: fold back into the box. */
-			if (y0 > y + 80) {
-				y0 = y;
-				y1 = y + r.size.height;
-			}
-			y = y1;
-		} else {
-			gtk_widget_measure (ch, GTK_ORIENTATION_VERTICAL, box_w,
-					    NULL, &nat_h, NULL, NULL);
-			if (nat_h < 1)
-				nat_h = GTK_IS_SEPARATOR_MENU_ITEM (ch) ? 9 : 28;
-			y0 = y;
-			y1 = y + nat_h;
-			y = y1;
-		}
+		gtk_widget_measure (ch, GTK_ORIENTATION_VERTICAL, box_w,
+				    NULL, &nat_h, NULL, NULL);
+		if (nat_h < 1 || nat_h > 48)
+			nat_h = GTK_IS_SEPARATOR_MENU_ITEM (ch) ? 9 : 28;
+		y0 = y;
+		y1 = y + nat_h;
+		y = y1;
+		g_string_append_printf (dump, " | %.0f-%.0f %s '%s'",
+					y0, y1, G_OBJECT_TYPE_NAME (ch),
+					verne_dest_item_label (ch));
 
-		if (GTK_IS_SEPARATOR_MENU_ITEM (ch)) {
-			if (ly >= y0 && ly < y1 && hit == NULL)
-				hit = ch;
+		if (GTK_IS_SEPARATOR_MENU_ITEM (ch))
 			continue;
-		}
 
 		mid = (y0 + y1) / 2.0;
 		dist = ly < mid ? (mid - ly) : (ly - mid);
@@ -939,7 +926,10 @@ verne_dest_menu_button_at (GtkWidget *box, double lx, double ly)
 			hit = ch;
 	}
 
-	if (hit != NULL && !GTK_IS_SEPARATOR_MENU_ITEM (hit))
+	g_warning ("%s ly=%.0f hit=%s", dump->str, ly, verne_dest_item_label (hit ? hit : nearest));
+	g_string_free (dump, TRUE);
+
+	if (hit != NULL)
 		return hit;
 	return nearest;
 }
@@ -1962,29 +1952,10 @@ verne_toplevel_dismiss_menus (GtkGestureClick *gesture, gint n_press, gdouble x,
 				   x, y, mx, my, mw, mh);
 			if (mw > 0 && mh > 0 &&
 			    x >= mx && x < mx + mw && y >= my && y < my + mh) {
-				GtkWidget *ch;
-				GtkWidget *btn = NULL;
+				GtkWidget *btn;
 				double lx = x - mx, ly = y - my;
 
-				for (ch = gtk_widget_get_first_child (box); ch;
-				     ch = gtk_widget_get_next_sibling (ch)) {
-					graphene_rect_t r;
-
-					if (!gtk_widget_compute_bounds (ch, box, &r))
-						continue;
-					if (r.size.width < 8 || r.size.height < 4)
-						continue;
-					if (GTK_IS_SEPARATOR_MENU_ITEM (ch))
-						continue;
-					if (lx >= r.origin.x && lx < r.origin.x + r.size.width &&
-					    ly >= r.origin.y && ly < r.origin.y + r.size.height)
-						btn = ch;
-				}
-				while (btn != NULL && btn != box &&
-				       !GTK_IS_BUTTON (btn) && !GTK_IS_CHECK_BUTTON (btn))
-					btn = gtk_widget_get_parent (btn);
-				if (btn == NULL || btn == box || GTK_IS_SEPARATOR_MENU_ITEM (btn))
-					btn = verne_dest_menu_button_at (box, lx, ly);
+				btn = verne_dest_menu_button_at (box, lx, ly);
 				g_warning ("verne: dest menu hit ly=%.0f btn=%s label=%s",
 					   ly,
 					   btn ? G_OBJECT_TYPE_NAME (btn) : "NULL",
