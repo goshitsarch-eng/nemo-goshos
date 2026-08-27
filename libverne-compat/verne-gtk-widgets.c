@@ -1193,6 +1193,17 @@ verne_dest_overlay_pressed (GtkGestureClick *gesture, gint n_press, gdouble x, g
 	(void) n_press;
 	if (box == NULL)
 		return;
+	{
+		GtkWidget *parent = gtk_widget_get_parent (box);
+		int sw = 0;
+
+		if (GTK_IS_SCROLLED_WINDOW (parent))
+			sw = gtk_widget_get_width (parent);
+		if (sw > 48 && x >= sw - 20) {
+			g_warning ("verne: overlay press in scrollbar gutter x=%.0f sw=%d", x, sw);
+			return;
+		}
+	}
 	/* Overlay children are often unallocated; gtk_widget_pick hits the
 	 * wrong row. Stacked measure heights match the painted labels. */
 	btn = verne_dest_menu_button_at (box, x, y);
