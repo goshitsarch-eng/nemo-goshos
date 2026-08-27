@@ -1390,6 +1390,30 @@ drive_changed_callback (GVolumeMonitor *volume_monitor,
 	update_places_on_idle (sidebar);
 }
 
+/* GTK4 GestureClick/Motion report widget-relative coordinates. GtkTreeView
+ * get_path_at_pos expects bin-window coords, matching the list-view helper. */
+static void
+places_translate_xy (GtkTreeView *tree_view, gdouble *x, gdouble *y)
+{
+	int bx, by;
+
+	gtk_tree_view_convert_widget_to_bin_window_coords (tree_view,
+							   (int) *x, (int) *y,
+							   &bx, &by);
+	*x = bx;
+	*y = by;
+}
+
+static void
+places_translate_xy_int (GtkTreeView *tree_view, int *x, int *y)
+{
+	int bx, by;
+
+	gtk_tree_view_convert_widget_to_bin_window_coords (tree_view, *x, *y, &bx, &by);
+	*x = bx;
+	*y = by;
+}
+
 static gboolean
 over_eject_button (NemoPlacesSidebar *sidebar,
 		   gint x,
@@ -1805,6 +1829,8 @@ drag_motion_callback (GtkTreeView *tree_view,
 
     action = 0;
 
+	places_translate_xy_int (tree_view, &x, &y);
+
 	if (!sidebar->drag_data_received) {
 		if (!get_drag_data (tree_view, context, time)) {
 			return FALSE;
@@ -2076,6 +2102,7 @@ drag_data_received_callback (GtkWidget *widget,
 	gboolean success;
 
 	tree_view = GTK_TREE_VIEW (widget);
+	places_translate_xy_int (tree_view, &x, &y);
 
 	if (!sidebar->drag_data_received) {
 		GdkAtom received_target = gtk_selection_data_get_target (selection_data);
@@ -3621,10 +3648,13 @@ bookmarks_button_release_event_cb (GtkWidget *widget,
 
 	tree_view = GTK_TREE_VIEW (widget);
 	model = gtk_tree_view_get_model (tree_view);
+	places_translate_xy (tree_view, &event->x, &event->y);
 
 	if (event->button == GDK_BUTTON_PRIMARY) {
 
-		if (event->window != gtk_tree_view_get_bin_window (tree_view)) {
+		if (event->window != NULL &&
+		    event->window != gtk_tree_view_get_bin_window (tree_view) &&
+		    event->window != gtk_widget_get_window (GTK_WIDGET (tree_view))) {
 			return FALSE;
 		}
 
@@ -3665,6 +3695,7 @@ bookmarks_button_press_event_cb (GtkWidget             *widget,
 
 	tree_view = GTK_TREE_VIEW (widget);
 	model = gtk_tree_view_get_model (tree_view);
+	places_translate_xy (tree_view, &event->x, &event->y);
 	gtk_tree_view_get_path_at_pos (tree_view, (int) event->x, (int) event->y,
 				       &path, NULL, NULL, NULL);
 
@@ -3752,6 +3783,8 @@ motion_notify_cb (GtkWidget         *widget,
     if (editing) {
         return GDK_EVENT_PROPAGATE;
     }
+
+    places_translate_xy (GTK_TREE_VIEW (widget), &event->x, &event->y);
 
     model = gtk_tree_view_get_model (GTK_TREE_VIEW (sidebar->tree_view));
 
