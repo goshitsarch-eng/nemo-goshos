@@ -856,7 +856,10 @@ verne_dest_overlay_pressed (GtkGestureClick *gesture, gint n_press, gdouble x, g
 	gtk_gesture_set_state (GTK_GESTURE (gesture), GTK_EVENT_SEQUENCE_CLAIMED);
 	g_signal_emit_by_name (btn, "clicked");
 	g_warning ("verne: dest overlay activate %s", G_OBJECT_TYPE_NAME (btn));
-	if (menu != NULL)
+	/* Submenu clicks schedule a follow-up overlay popup. Popping the
+	 * parent here is fine; popping the new submenu is not. */
+	if (menu != NULL &&
+	    !(GTK_IS_MENU_ITEM (btn) && gtk_menu_item_get_submenu (GTK_MENU_ITEM (btn))))
 		gtk_menu_popdown (menu);
 }
 
@@ -906,26 +909,9 @@ verne_menu_popup_dest_overlay (GtkMenu *menu, int root_x, int root_y)
 	gtk_widget_set_margin_top (box, 0);
 	gtk_widget_set_margin_end (box, 0);
 	gtk_widget_set_margin_bottom (box, 0);
+	/* Place at the popup coords captured at click time. Re-querying the
+	 * live pointer here moves the menu if the pointer moved during idle. */
 #ifdef GDK_WINDOWING_X11
-	{
-		GdkDisplay *gdpy = gdk_display_get_default ();
-
-		if (gdpy && GDK_IS_X11_DISPLAY (gdpy)) {
-			Display *dpy = gdk_x11_display_get_xdisplay (gdpy);
-			Window root_ret = 0, child = 0;
-			int rx = 0, ry = 0, wx = 0, wy = 0;
-			unsigned int mask = 0;
-
-			if (XQueryPointer (dpy, DefaultRootWindow (dpy), &root_ret, &child,
-					   &rx, &ry, &wx, &wy, &mask) &&
-			    (rx > 0 || ry > 0)) {
-				root_x = rx;
-				root_y = ry;
-				lx = rx;
-				ly = ry;
-			}
-		}
-	}
 	{
 		GdkSurface *s = gtk_native_get_surface (GTK_NATIVE (dest));
 		if (s && GDK_IS_X11_SURFACE (s)) {
@@ -1755,9 +1741,6 @@ verne_toplevel_dismiss_menus (GtkGestureClick *gesture, gint n_press, gdouble x,
 			}
 		}
 	}
-	/* Never claim the sequence: this is a click-outside dismiss, not a grab. */
-	gtk_gesture_set_state (GTK_GESTURE (gesture), GTK_EVENT_SEQUENCE_DENIED);
-
 	dest_overlay_open = verne_any_dest_overlay_visible ();
 	picked = gtk_widget_pick (toplevel, x, y, GTK_PICK_DEFAULT);
 	if (dest_overlay_open && GTK_IS_WIDGET (toplevel)) {
@@ -1836,10 +1819,21 @@ verne_toplevel_dismiss_menus (GtkGestureClick *gesture, gint n_press, gdouble x,
 				if (button == 1 && btn != NULL && btn != box &&
 				    (GTK_IS_BUTTON (btn) || GTK_IS_CHECK_BUTTON (btn))) {
 					const gchar *lab = gtk_button_get_label (GTK_BUTTON (btn));
+					gboolean has_sub = GTK_IS_MENU_ITEM (btn) &&
+							   gtk_menu_item_get_submenu (GTK_MENU_ITEM (btn)) != NULL;
 
+					gtk_gesture_set_state (GTK_GESTURE (gesture),
+							       GTK_EVENT_SEQUENCE_CLAIMED);
 					g_signal_emit_by_name (btn, "clicked");
 					g_warning ("verne: dest overlay rect-activate %s label=%s",
 						   G_OBJECT_TYPE_NAME (btn), lab ? lab : "");
+					if (w)
+						g_object_unref (w);
+					/* hide_others(NULL) sets dismissed on the submenu
+					 * scheduled by clicked, so the dest overlay idle bails. */
+					if (!has_sub)
+						verne_menu_hide_others (NULL);
+					return;
 				}
 				if (w)
 					g_object_unref (w);
@@ -1850,6 +1844,8 @@ verne_toplevel_dismiss_menus (GtkGestureClick *gesture, gint n_press, gdouble x,
 				g_object_unref (w);
 		}
 	}
+	/* Click-outside dismiss must not grab the sequence. */
+	gtk_gesture_set_state (GTK_GESTURE (gesture), GTK_EVENT_SEQUENCE_DENIED);
 	if (picked != NULL && GTK_IS_WIDGET (picked)) {
 		GtkWidget *walk;
 		for (walk = picked; walk != NULL; walk = gtk_widget_get_parent (walk)) {
@@ -1862,9 +1858,17 @@ verne_toplevel_dismiss_menus (GtkGestureClick *gesture, gint n_press, gdouble x,
 					btn = gtk_widget_get_parent (btn);
 				if (button == 1 && btn != NULL && btn != walk &&
 				    (GTK_IS_BUTTON (btn) || GTK_IS_CHECK_BUTTON (btn))) {
+					gboolean has_sub = GTK_IS_MENU_ITEM (btn) &&
+							   gtk_menu_item_get_submenu (GTK_MENU_ITEM (btn)) != NULL;
+
+					gtk_gesture_set_state (GTK_GESTURE (gesture),
+							       GTK_EVENT_SEQUENCE_CLAIMED);
 					g_signal_emit_by_name (btn, "clicked");
 					g_warning ("verne: dest overlay dismiss-activate %s",
 						   G_OBJECT_TYPE_NAME (btn));
+					if (!has_sub)
+						verne_menu_hide_others (NULL);
+					return;
 				}
 				verne_menu_hide_others (NULL);
 				return;
