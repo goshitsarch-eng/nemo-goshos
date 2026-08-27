@@ -373,7 +373,14 @@ verne_dest_for_native_xy (GtkNative *native, double x, double y, double *out_x, 
 		if (g_object_get_qdata (G_OBJECT (dest), forwarder_quark ()))
 			continue;
 		if (verne_point_in_widget (root, dest, x, y, &ox, &oy)) {
+			const char *tn = G_OBJECT_TYPE_NAME (dest);
+
 			depth = verne_widget_depth (dest);
+			if (tn && (strstr (tn, "Icon") || strstr (tn, "Canvas") ||
+				   strstr (tn, "TreeView") || strstr (tn, "Places")))
+				depth += 1000;
+			else if (GTK_IS_BUTTON (dest))
+				depth -= 100;
 			if (depth >= best_depth) {
 				best = dest;
 				bx = ox;
@@ -2031,6 +2038,9 @@ drop_read_done (GObject *source, GAsyncResult *result, gpointer data)
 	}
 	if (rd->mime == NULL)
 		rd->mime = g_strdup (mime ? mime : "text/uri-list");
+	if (rd->widget && rd->mime)
+		rd->info = info_for_target (gtk_drag_dest_get_target_list (rd->widget),
+					    (GdkAtom) rd->mime);
 	if (rd->completed) {
 		if (stream)
 			g_object_unref (stream);
@@ -2054,7 +2064,6 @@ void
 gtk_drag_get_data (GtkWidget *widget, GdkDragContext *context, GdkAtom target, guint32 time)
 {
 	VerneDropRead *rd;
-	const char *mimes[2];
 
 	if (!context)
 		return;
@@ -2092,12 +2101,60 @@ gtk_drag_get_data (GtkWidget *widget, GdkDragContext *context, GdkAtom target, g
 	 * dest after mouse-up (source already sent XdndLeave) so live icons
 	 * never appear. Time out so dest keeps rescanning. */
 	rd->timeout_id = g_timeout_add (1500, drop_read_timeout, rd);
-	mimes[0] = target ? (const char *) target : "text/uri-list";
-	mimes[1] = NULL;
-	g_warning ("drop-read async target=%s dest=%s",
-		   mimes[0], widget ? G_OBJECT_TYPE_NAME (widget) : "(null)");
-	gdk_drop_read_async (GDK_DROP (context), mimes, G_PRIORITY_DEFAULT,
-			     rd->cancellable, drop_read_done, rd);
+	{
+		GdkContentFormats *formats = gdk_drop_get_formats (GDK_DROP (context));
+		const char *wanted[] = {
+			target ? (const char *) target : NULL,
+			"x-special/gnome-icon-list",
+			"text/uri-list",
+			"x-special/gnome-copied-files",
+			"text/plain",
+			NULL
+		};
+		const char *mimes[8];
+		guint n = 0, i, j;
+
+		for (i = 0; wanted[i] && n < 6; i++) {
+			gboolean dup = FALSE;
+
+			if (wanted[i] == NULL || wanted[i][0] == '\0')
+				continue;
+			for (j = 0; j < n; j++) {
+				if (g_strcmp0 (mimes[j], wanted[i]) == 0)
+					dup = TRUE;
+			}
+			if (dup)
+				continue;
+			if (formats == NULL ||
+			    gdk_content_formats_contain_mime_type (formats, wanted[i]))
+				mimes[n++] = wanted[i];
+		}
+		if (n == 0 && formats) {
+			gsize n_mime = 0;
+			const char * const *all = gdk_content_formats_get_mime_types (formats, &n_mime);
+			guint k;
+
+			for (k = 0; all && k < n_mime && n < 6; k++) {
+				if (all[k] && all[k][0])
+					mimes[n++] = all[k];
+			}
+		}
+		if (n == 0) {
+			mimes[n++] = "x-special/gnome-icon-list";
+			mimes[n++] = "text/uri-list";
+		}
+		mimes[n] = NULL;
+		{
+			char *fmt = formats ? gdk_content_formats_to_string (formats) : NULL;
+
+			g_warning ("drop-read async dest=%s n=%u first=%s formats=%s",
+				   widget ? G_OBJECT_TYPE_NAME (widget) : "(null)", n,
+				   mimes[0], fmt ? fmt : "(null)");
+			g_free (fmt);
+		}
+		gdk_drop_read_async (GDK_DROP (context), mimes, G_PRIORITY_DEFAULT,
+				     rd->cancellable, drop_read_done, rd);
+	}
 }
 
 void
