@@ -500,10 +500,14 @@ gint gtk_dialog_run (GtkDialog *dialog);
 const gchar *verne_dialog_button_label (const gchar *text);
 GtkWidget *verne_dialog_add_button (GtkDialog *dialog, const gchar *text, gint response);
 void verne_dialog_add_buttons (GtkDialog *dialog, const gchar *first_text, ...);
+GtkWidget *verne_dialog_new_with_buttons (const gchar *title, GtkWindow *parent, GtkDialogFlags flags,
+					  const gchar *first_button_text, ...);
 #undef gtk_dialog_add_button
 #define gtk_dialog_add_button(d, t, r) verne_dialog_add_button ((d), (t), (r))
 #undef gtk_dialog_add_buttons
 #define gtk_dialog_add_buttons verne_dialog_add_buttons
+#undef gtk_dialog_new_with_buttons
+#define gtk_dialog_new_with_buttons verne_dialog_new_with_buttons
 
 /* stock / about */
 #define GTK_STOCK_OK "ok"

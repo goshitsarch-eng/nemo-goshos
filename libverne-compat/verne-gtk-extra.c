@@ -2448,6 +2448,37 @@ verne_dialog_add_buttons (GtkDialog *dialog, const gchar *first_text, ...)
 	va_end (args);
 }
 
+GtkWidget *
+verne_dialog_new_with_buttons (const gchar *title, GtkWindow *parent, GtkDialogFlags flags,
+			       const gchar *first_button_text, ...)
+{
+	GtkWidget *dialog;
+	va_list args;
+	const gchar *text;
+
+	dialog = gtk_dialog_new ();
+	if (title != NULL)
+		gtk_window_set_title (GTK_WINDOW (dialog), title);
+	if (parent != NULL)
+		gtk_window_set_transient_for (GTK_WINDOW (dialog), parent);
+	if (flags & GTK_DIALOG_MODAL)
+		gtk_window_set_modal (GTK_WINDOW (dialog), TRUE);
+	if (parent != NULL && (flags & GTK_DIALOG_DESTROY_WITH_PARENT))
+		gtk_window_set_destroy_with_parent (GTK_WINDOW (dialog), TRUE);
+	verne_prepare_dialog (dialog);
+
+	va_start (args, first_button_text);
+	text = first_button_text;
+	while (text != NULL) {
+		gint response = va_arg (args, gint);
+
+		verne_dialog_add_button (GTK_DIALOG (dialog), text, response);
+		text = va_arg (args, const gchar *);
+	}
+	va_end (args);
+	return dialog;
+}
+
 void
 gtk_style_context_get_border_color (GtkStyleContext *context, GtkStateFlags state, GdkRGBA *color)
 {

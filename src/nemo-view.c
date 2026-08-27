@@ -1801,10 +1801,10 @@ select_pattern (NemoView *view)
 	grid = gtk_grid_new ();
 	g_object_set (grid,
 		      "orientation", GTK_ORIENTATION_VERTICAL,
-		      "border-width", 6,
 		      "row-spacing", 6,
 		      "column-spacing", 12,
 		      NULL);
+	gtk_container_set_border_width (GTK_CONTAINER (grid), 6);
 
 	gtk_container_add (GTK_CONTAINER (grid), label);
 	gtk_grid_attach_next_to (GTK_GRID (grid), entry, label,
@@ -1847,7 +1847,12 @@ hidden_files_mode_changed (NemoWindow *window,
 {
 	NemoView *directory_view;
 
+	if (!NEMO_IS_WINDOW (window) || !NEMO_IS_VIEW (callback_data))
+		return;
+
 	directory_view = NEMO_VIEW (callback_data);
+	if (directory_view->details->window == NULL)
+		return;
 
 	nemo_view_init_show_hidden_files (directory_view);
 }
@@ -2556,12 +2561,17 @@ slot_inactive (NemoWindowSlot *slot,
 static void slot_changed_pane (NemoWindowSlot *slot,
 			       NemoView *view)
 {
-	g_signal_handlers_disconnect_matched (view->details->window,
-					      G_SIGNAL_MATCH_DATA, 0, 0,
-					      NULL, NULL, view);
+	if (view->details->window != NULL) {
+		g_signal_handlers_disconnect_matched (view->details->window,
+						      G_SIGNAL_MATCH_DATA, 0, 0,
+						      NULL, NULL, view);
+	}
 
 	view->details->window = nemo_window_slot_get_window (slot);
 	schedule_update_menus (view);
+
+	if (view->details->window == NULL)
+		return;
 
 	g_signal_connect_object (view->details->window,
 		"hidden-files-mode-changed", G_CALLBACK (hidden_files_mode_changed),
@@ -8401,6 +8411,9 @@ nemo_view_init_show_hidden_files (NemoView *view)
 	if (view->details->ignore_hidden_file_preferences) {
 		return;
 	}
+
+	if (!NEMO_IS_WINDOW (view->details->window))
+		return;
 
 	mode = nemo_window_get_hidden_files_mode (view->details->window);
 
