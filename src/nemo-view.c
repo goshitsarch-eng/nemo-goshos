@@ -880,6 +880,11 @@ nemo_view_update_menus (NemoView *view)
 		return;
 	}
 
+	if (view->details->dir_action_group == NULL ||
+	    !GTK_IS_ACTION_GROUP (view->details->dir_action_group)) {
+		return;
+	}
+
 	NEMO_VIEW_CLASS (G_OBJECT_GET_CLASS (view))->update_menus (view);
 
 	view->details->menu_states_untrustworthy = FALSE;
@@ -9759,6 +9764,11 @@ real_update_menus (NemoView *view)
 	gboolean show_properties;
     gboolean first_selected_is_pinned;
     gboolean trash_supported;
+
+	if (view->details->dir_action_group == NULL ||
+	    !GTK_IS_ACTION_GROUP (view->details->dir_action_group)) {
+		return;
+	}
 
 	selection = nemo_view_get_selection (view);
 	selection_count = g_list_length (selection);

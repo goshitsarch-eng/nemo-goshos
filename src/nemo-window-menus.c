@@ -337,6 +337,7 @@ action_about_nemo_callback (GtkAction *action,
 	adw_about_window_set_application_icon (ADW_ABOUT_WINDOW (about), "folder");
 	adw_about_window_set_developer_name (ADW_ABOUT_WINDOW (about), "Linux Mint / Cinnamon");
 	gtk_window_set_transient_for (GTK_WINDOW (about), parent);
+	gtk_window_set_hide_on_close (GTK_WINDOW (about), TRUE);
 	gtk_window_present (GTK_WINDOW (about));
 
 	g_free (license_trans);

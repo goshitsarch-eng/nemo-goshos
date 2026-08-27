@@ -41,9 +41,12 @@ nemo_ui_unmerge_ui (GtkUIManager *ui_manager,
 		*merge_id = 0;
 	}
 	if (*action_group != NULL) {
-		gtk_ui_manager_remove_action_group (ui_manager,
-						    *action_group);
+		GtkActionGroup *group = *action_group;
+
+		/* Drop the view pointer before releasing the group so menu
+		 * updates re-entered from action dispose cannot look it up. */
 		*action_group = NULL;
+		gtk_ui_manager_remove_action_group (ui_manager, group);
 	}
 }
      

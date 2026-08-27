@@ -203,14 +203,14 @@ gtk_action_activate (GtkAction *action)
 
 const gchar *gtk_action_get_name (GtkAction *action) { return action ? action->name : NULL; }
 void gtk_action_set_sensitive (GtkAction *action, gboolean sensitive) {
-	if (!action || action->sensitive == sensitive) return;
+	if (!action || !GTK_IS_ACTION (action) || action->sensitive == sensitive) return;
 	action->sensitive = sensitive;
 	g_object_notify (G_OBJECT (action), "sensitive");
 }
 gboolean gtk_action_get_sensitive (GtkAction *action) { return action ? action->sensitive : FALSE; }
 gboolean gtk_action_is_sensitive (GtkAction *action) { return gtk_action_get_sensitive (action); }
 void gtk_action_set_visible (GtkAction *action, gboolean visible) {
-	if (!action || action->visible == visible) return;
+	if (!action || !GTK_IS_ACTION (action) || action->visible == visible) return;
 	action->visible = visible;
 	g_object_notify (G_OBJECT (action), "visible");
 }
@@ -496,10 +496,19 @@ static void
 gtk_action_group_finalize (GObject *object)
 {
 	GtkActionGroup *group = GTK_ACTION_GROUP (object);
+	GHashTable *actions;
+
 	g_free (group->name);
-	g_hash_table_destroy (group->actions);
+	group->name = NULL;
+	/* Steal the table first. Unreffing GtkActions during destroy can
+	 * re-enter menu updates which look up this group. */
+	actions = group->actions;
+	group->actions = NULL;
+	if (actions)
+		g_hash_table_destroy (actions);
 	if (group->translate_notify)
 		group->translate_notify (group->translate_data);
+	group->translate_notify = NULL;
 	G_OBJECT_CLASS (gtk_action_group_parent_class)->finalize (object);
 }
 
@@ -535,7 +544,7 @@ const gchar *gtk_action_group_get_name (GtkActionGroup *group) { return group->n
 GtkAction *
 gtk_action_group_get_action (GtkActionGroup *group, const gchar *action_name)
 {
-	if (group == NULL || group->actions == NULL)
+	if (group == NULL || !GTK_IS_ACTION_GROUP (group) || group->actions == NULL || action_name == NULL)
 		return NULL;
 	return g_hash_table_lookup (group->actions, action_name);
 }

@@ -343,9 +343,13 @@ static void
 gtk_ui_manager_finalize (GObject *object)
 {
 	GtkUIManager *self = GTK_UI_MANAGER (object);
-	g_list_free_full (self->action_groups, g_object_unref);
+	GList *groups = self->action_groups;
+
+	self->action_groups = NULL;
+	g_list_free_full (groups, g_object_unref);
 	if (self->root)
 		ui_node_free (self->root);
+	self->root = NULL;
 	g_clear_object (&self->accel);
 	g_clear_pointer (&self->widgets, g_hash_table_destroy);
 	G_OBJECT_CLASS (gtk_ui_manager_parent_class)->finalize (object);
@@ -382,6 +386,8 @@ gtk_ui_manager_new (void)
 void
 gtk_ui_manager_insert_action_group (GtkUIManager *self, GtkActionGroup *group, gint pos)
 {
+	if (self == NULL || group == NULL)
+		return;
 	self->action_groups = g_list_insert (self->action_groups, g_object_ref (group), pos < 0 ? -1 : pos);
 	verne_action_group_bind_accels (group, self->accel);
 }
@@ -389,9 +395,16 @@ gtk_ui_manager_insert_action_group (GtkUIManager *self, GtkActionGroup *group, g
 void
 gtk_ui_manager_remove_action_group (GtkUIManager *self, GtkActionGroup *group)
 {
+	GList *link;
+
+	if (self == NULL || group == NULL)
+		return;
+	link = g_list_find (self->action_groups, group);
+	if (link == NULL)
+		return;
 	if (self->accel)
 		verne_action_group_unbind_accels (group, self->accel);
-	self->action_groups = g_list_remove (self->action_groups, group);
+	self->action_groups = g_list_delete_link (self->action_groups, link);
 	g_object_unref (group);
 }
 
