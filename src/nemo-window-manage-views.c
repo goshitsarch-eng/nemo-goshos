@@ -1814,7 +1814,8 @@ display_view_selection_failure (NemoWindow *window, NemoFile *file,
 		detail_message = g_strdup_printf (_("Error: %s\nPlease select another viewer and try again."), error->message);
 	}
 
-	eel_show_error_dialog (error_message, detail_message, NULL);
+	eel_show_error_dialog (error_message, detail_message,
+			       (window != NULL && GTK_IS_WINDOW (window)) ? GTK_WINDOW (window) : NULL);
 
 	g_free (uri_for_display);
 	g_free (error_message);

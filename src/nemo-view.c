@@ -7341,28 +7341,47 @@ verne_view_is_desktop (NemoView *view)
 	return NEMO_IS_DESKTOP_WINDOW (view->details->window);
 }
 
+static gchar *
+verne_admin_uri_for_path (const gchar *path)
+{
+	GFile *file;
+	gchar *file_uri;
+	gchar *admin_uri;
+
+	file = g_file_new_for_path (path);
+	file_uri = g_file_get_uri (file);
+	g_object_unref (file);
+	if (file_uri != NULL && g_str_has_prefix (file_uri, "file://"))
+		admin_uri = g_strconcat ("admin://", file_uri + 7, NULL);
+	else
+		admin_uri = g_strdup_printf ("admin://%s", path);
+	g_free (file_uri);
+	return admin_uri;
+}
+
 static void
 verne_spawn_file_manager_admin (const gchar *path)
 {
 	gchar *exe;
 	gchar *uri;
-	gchar *argv[5];
+	gchar *argv[6];
 	GError *error = NULL;
 
 	if (path == NULL || path[0] == '\0')
 		return;
 
 	exe = verne_file_manager_executable ();
-	uri = g_strdup_printf ("admin://%s", path);
+	uri = verne_admin_uri_for_path (path);
 	argv[0] = exe;
 	argv[1] = (gchar *) "--no-desktop";
-	argv[2] = uri;
-	argv[3] = NULL;
+	argv[2] = (gchar *) "--existing-window";
+	argv[3] = uri;
+	argv[4] = NULL;
 	if (!g_spawn_async (NULL, argv, NULL, G_SPAWN_SEARCH_PATH, NULL, NULL, NULL, &error)) {
 		g_warning ("Open as Root admin:// launch failed: %s", error->message);
 		g_clear_error (&error);
 	} else {
-		g_warning ("Open as Root launching %s %s", exe, uri);
+		g_warning ("Open as Root launching %s --existing-window %s", exe, uri);
 	}
 	g_free (exe);
 	g_free (uri);

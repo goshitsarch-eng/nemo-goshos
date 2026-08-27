@@ -305,16 +305,23 @@ static void
 nemo_window_prompt_for_location (NemoWindow *window,
                                  const char *initial)
 {
-    NemoWindowPane *pane;
-
     g_return_if_fail (NEMO_IS_WINDOW (window));
 
     if (!NEMO_IS_DESKTOP_WINDOW (window)) {
         if (initial) {
             NemoEntry *entry;
+            NemoWindowPane *pane;
+
+            pane = window->details != NULL ? window->details->active_pane : NULL;
+            if (pane == NULL || pane->location_bar == NULL)
+                return;
             nemo_window_show_location_entry(window);
             pane = window->details->active_pane;
+            if (pane == NULL || pane->location_bar == NULL)
+                return;
             entry = nemo_location_bar_get_entry (NEMO_LOCATION_BAR (pane->location_bar));
+            if (entry == NULL)
+                return;
             nemo_entry_set_text (entry, initial);
             gtk_editable_set_position (GTK_EDITABLE (entry), -1);
         }
@@ -608,8 +615,13 @@ on_menu_selection_done (GtkMenuShell *menushell,
 static gboolean
 nemo_window_present_idle (gpointer data)
 {
-	if (GTK_IS_WINDOW (data))
-		gtk_widget_show (GTK_WIDGET (data));
+	NemoWindow *window = data;
+
+	if (NEMO_IS_WINDOW (window) && window->details != NULL)
+		window->details->present_idle_id = 0;
+	if (GTK_IS_WINDOW (window) && NEMO_IS_WINDOW (window) &&
+	    window->details != NULL)
+		gtk_window_present (GTK_WINDOW (window));
 	return G_SOURCE_REMOVE;
 }
 
@@ -806,8 +818,8 @@ nemo_window_constructed (GObject *self)
 
 	/* GTK4 does not map toplevels from gtk_widget_show; present once the
 	 * slot has had a chance to load so Adwaita chrome is not stuck unmapped. */
-	if (!window->details->disable_chrome)
-		g_idle_add (nemo_window_present_idle, window);
+	if (!window->details->disable_chrome && window->details->present_idle_id == 0)
+		window->details->present_idle_id = g_idle_add (nemo_window_present_idle, window);
 }
 
 static void
@@ -881,6 +893,11 @@ nemo_window_destroy (GtkWidget *object)
 	window = NEMO_WINDOW (object);
 
 	DEBUG ("Destroying window");
+
+	if (window->details != NULL && window->details->present_idle_id != 0) {
+		g_source_remove (window->details->present_idle_id);
+		window->details->present_idle_id = 0;
+	}
 
 	/* close the sidebar first */
 	nemo_window_tear_down_sidebar (window);
@@ -1737,6 +1754,8 @@ GtkUIManager *
 nemo_window_get_ui_manager (NemoWindow *window)
 {
 	g_return_val_if_fail (NEMO_IS_WINDOW (window), NULL);
+	if (window->details == NULL)
+		return NULL;
 
 	return window->details->ui_manager;
 }
