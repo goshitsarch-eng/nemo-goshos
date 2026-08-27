@@ -2808,6 +2808,59 @@ verne_menu_hide_others (GtkMenu *keep)
 }
 
 static void
+verne_dest_customize_activate_at (GtkWidget *toplevel, GtkWidget *wrap, double x, double y)
+{
+	GtkWidget *picked;
+	GtkWidget *w;
+
+	picked = gtk_widget_pick (toplevel, x, y, GTK_PICK_DEFAULT);
+	g_warning ("verne: dest customize click %.0f,%.0f pick=%s",
+		   x, y, picked ? G_OBJECT_TYPE_NAME (picked) : "NULL");
+	for (w = picked; GTK_IS_WIDGET (w) && w != wrap && w != toplevel;
+	     w = gtk_widget_get_parent (w)) {
+		if (GTK_IS_SWITCH (w)) {
+			gtk_switch_set_active (GTK_SWITCH (w),
+					       !gtk_switch_get_active (GTK_SWITCH (w)));
+			g_warning ("verne: dest customize toggle switch");
+			return;
+		}
+		if (GTK_IS_COMBO_BOX (w)) {
+			gtk_combo_box_popup (GTK_COMBO_BOX (w));
+			g_warning ("verne: dest customize popup combo");
+			return;
+		}
+		if (GTK_IS_RANGE (w)) {
+			GtkOrientation ori = gtk_orientable_get_orientation (GTK_ORIENTABLE (w));
+			graphene_rect_t bounds;
+			GtkAdjustment *adj = gtk_range_get_adjustment (GTK_RANGE (w));
+			double lo, hi, t = 0.5;
+
+			if (adj && gtk_widget_compute_bounds (w, toplevel, &bounds) &&
+			    bounds.size.width > 1 && bounds.size.height > 1) {
+				lo = gtk_adjustment_get_lower (adj);
+				hi = gtk_adjustment_get_upper (adj);
+				if (ori == GTK_ORIENTATION_VERTICAL)
+					t = (y - bounds.origin.y) / bounds.size.height;
+				else
+					t = (x - bounds.origin.x) / bounds.size.width;
+				if (t < 0)
+					t = 0;
+				if (t > 1)
+					t = 1;
+				gtk_range_set_value (GTK_RANGE (w), lo + t * (hi - lo));
+			}
+			g_warning ("verne: dest customize range");
+			return;
+		}
+		if (GTK_IS_BUTTON (w)) {
+			g_warning ("verne: dest customize click button %s", G_OBJECT_TYPE_NAME (w));
+			g_signal_emit_by_name (w, "clicked");
+			return;
+		}
+	}
+}
+
+static void
 verne_toplevel_dismiss_menus (GtkGestureClick *gesture, gint n_press, gdouble x, gdouble y, gpointer data)
 {
 	GtkWidget *toplevel;
@@ -2850,6 +2903,8 @@ verne_toplevel_dismiss_menus (GtkGestureClick *gesture, gint n_press, gdouble x,
 						g_signal_emit_by_name (close_btn, "clicked");
 					g_warning ("verne: dest customize close at %.0f,%.0f wrap=%d,%d %dx%d",
 						   x, y, wx, wy, ww, wh);
+				} else if (button == 1) {
+					verne_dest_customize_activate_at (toplevel, wrap, x, y);
 				} else {
 					g_warning ("verne: dest customize click %.0f,%.0f wrap=%d,%d %dx%d",
 						   x, y, wx, wy, ww, wh);
