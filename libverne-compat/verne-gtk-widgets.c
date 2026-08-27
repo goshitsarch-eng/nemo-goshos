@@ -2121,6 +2121,23 @@ verne_menu_popup_now (GtkMenu *menu, int root_x, int root_y, gboolean has_pos)
 	g_idle_add (verne_menu_popup_idle, p);
 }
 
+static void
+verne_menu_emit_shell_signal (GtkMenu *menu, const char *name)
+{
+	guint sid;
+	GSignalQuery query;
+	gboolean handled = FALSE;
+
+	sid = g_signal_lookup (name, G_OBJECT_TYPE (menu));
+	if (sid == 0)
+		return;
+	g_signal_query (sid, &query);
+	if (query.return_type == G_TYPE_NONE)
+		g_signal_emit (menu, sid, 0);
+	else
+		g_signal_emit (menu, sid, 0, &handled);
+}
+
 void gtk_menu_popup_at_pointer (GtkMenu *menu, const GdkEvent *trigger) {
 	int x = 0, y = 0;
 	(void) trigger;
@@ -2179,10 +2196,8 @@ void gtk_menu_popdown (GtkMenu *menu) {
 	} else {
 		menu->attach = NULL;
 	}
-	if (g_signal_lookup ("deactivate", G_OBJECT_TYPE (menu)) != 0)
-		g_signal_emit_by_name (menu, "deactivate");
-	if (g_signal_lookup ("selection-done", G_OBJECT_TYPE (menu)) != 0)
-		g_signal_emit_by_name (menu, "selection-done");
+	verne_menu_emit_shell_signal (menu, "deactivate");
+	verne_menu_emit_shell_signal (menu, "selection-done");
 	g_idle_add (verne_menu_unmap_idle, g_object_ref (menu));
 	g_timeout_add (50, verne_menu_unmap_idle, g_object_ref (menu));
 	g_object_set_data (G_OBJECT (menu), "verne-popping", NULL);
