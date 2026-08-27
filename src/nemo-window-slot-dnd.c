@@ -128,6 +128,11 @@ slot_proxy_drag_motion (GtkWidget          *widget,
   return TRUE;
 }
 
+static void slot_proxy_handle_drop (GtkWidget *widget,
+                                    GdkDragContext *context,
+                                    unsigned int time,
+                                    NemoDragSlotProxyInfo *drag_info);
+
 static void
 drag_info_free (gpointer user_data)
 {
@@ -186,11 +191,23 @@ slot_proxy_drag_drop (GtkWidget          *widget,
   NemoDragSlotProxyInfo *drag_info;
 
   drag_info = user_data;
-  g_assert (!drag_info->have_data);
-
   drag_info->drop_occured = TRUE;
 
+  /* GTK3 fetched drop data asynchronously from drag-drop, so have_data
+   * was still FALSE here. GTK4 local drags fill it synchronously during
+   * drag-motion (pathbar, notebook tabs). Use that payload instead of
+   * asserting. */
+  if (drag_info->have_data) {
+    slot_proxy_handle_drop (widget, context, time, drag_info);
+    return TRUE;
+  }
+
   target = gtk_drag_dest_find_target (widget, context, NULL);
+  if (target == GDK_NONE) {
+    gtk_drag_finish (context, FALSE, FALSE, time);
+    drag_info_clear (drag_info);
+    return TRUE;
+  }
   gtk_drag_get_data (widget, context, target, time);
 
   return TRUE;
@@ -286,7 +303,14 @@ slot_proxy_drag_data_received (GtkWidget          *widget,
 
   drag_info = user_data;
 
-  g_assert (!drag_info->have_data);
+  /* Motion may already have fetched data synchronously. A second
+   * gtk_drag_get_data (drop, or another motion) must not abort. */
+  if (drag_info->have_data) {
+    if (drag_info->drop_occured) {
+      slot_proxy_handle_drop (widget, context, time, drag_info);
+    }
+    return;
+  }
 
   drag_info->have_data = TRUE;
   drag_info->info = info;
