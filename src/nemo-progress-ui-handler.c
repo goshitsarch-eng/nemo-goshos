@@ -210,9 +210,11 @@ progress_ui_handler_ensure_window (NemoProgressUIHandler *self)
 	progress_window = xapp_gtk_window_new (GTK_WINDOW_TOPLEVEL);
 	self->priv->progress_window = progress_window;
 
-    gtk_window_set_type_hint (GTK_WINDOW (progress_window), GDK_WINDOW_TYPE_HINT_DIALOG);
-    gtk_window_set_resizable (GTK_WINDOW (progress_window), FALSE);
-    gtk_window_set_default_size (GTK_WINDOW (progress_window), 500, 160);
+	/* GTK4 + xfwm leave an unparented TYPE_DIALOG GtkWindow Withdrawn, so
+	 * File Operations never appears. Keep it a normal window and attach it
+	 * to the active file window. */
+	gtk_window_set_resizable (GTK_WINDOW (progress_window), FALSE);
+	gtk_window_set_default_size (GTK_WINDOW (progress_window), 500, 160);
 
 	gtk_window_set_title (GTK_WINDOW (progress_window),
 			      _("File Operations"));
@@ -246,9 +248,16 @@ progress_ui_handler_ensure_window (NemoProgressUIHandler *self)
 
 	{
 		GtkApplication *app = GTK_APPLICATION (g_application_get_default ());
-		if (app != NULL)
+		if (app != NULL) {
+			GtkWindow *active;
+
 			gtk_application_add_window (app, GTK_WINDOW (progress_window));
+			active = gtk_application_get_active_window (app);
+			if (active != NULL && GTK_WIDGET (active) != progress_window)
+				gtk_window_set_transient_for (GTK_WINDOW (progress_window), active);
+		}
 	}
+	gtk_widget_set_visible (progress_window, TRUE);
 	gtk_window_present (GTK_WINDOW (progress_window));
 
 	gtk_window_set_hide_on_close (GTK_WINDOW (progress_window), TRUE);
@@ -382,7 +391,8 @@ handle_new_progress_info (NemoProgressUIHandler *self,
 	if (self->priv->active_infos == 1) {
 		/* this is the only active operation, present the window */
 		progress_ui_handler_add_to_window (self, info);
-        gtk_window_present (GTK_WINDOW (self->priv->progress_window));
+		gtk_widget_set_visible (self->priv->progress_window, TRUE);
+		gtk_window_present (GTK_WINDOW (self->priv->progress_window));
         gchar *details = nemo_progress_info_get_details (info);
 		gtk_window_set_title (GTK_WINDOW (self->priv->progress_window), details);
         g_free (details);
