@@ -1640,6 +1640,12 @@ on_related_action_active (GObject *action, GParamSpec *pspec, gpointer activatab
 					      gtk_toggle_action_get_active (GTK_TOGGLE_ACTION (action)));
 		g_object_set_data (G_OBJECT (activatable), "verne-syncing-toggle", NULL);
 	}
+	if (GTK_IS_SWITCH (activatable) && GTK_IS_TOGGLE_ACTION (action)) {
+		g_object_set_data (G_OBJECT (activatable), "verne-syncing-toggle", GINT_TO_POINTER (1));
+		gtk_switch_set_active (GTK_SWITCH (activatable),
+				       gtk_toggle_action_get_active (GTK_TOGGLE_ACTION (action)));
+		g_object_set_data (G_OBJECT (activatable), "verne-syncing-toggle", NULL);
+	}
 }
 
 static void
@@ -1647,8 +1653,22 @@ on_related_toggle_toggled (GtkToggleButton *button, gpointer action)
 {
 	if (g_object_get_data (G_OBJECT (button), "verne-syncing-toggle"))
 		return;
-	if (gtk_toggle_button_get_active (button))
+	if (GTK_IS_TOGGLE_ACTION (action))
+		gtk_toggle_action_set_active (GTK_TOGGLE_ACTION (action),
+					      gtk_toggle_button_get_active (button));
+	else if (gtk_toggle_button_get_active (button))
 		gtk_action_activate (GTK_ACTION (action));
+}
+
+static void
+on_related_switch_notify (GObject *sw, GParamSpec *pspec, gpointer action)
+{
+	(void) pspec;
+	if (g_object_get_data (sw, "verne-syncing-toggle"))
+		return;
+	if (GTK_IS_SWITCH (sw) && GTK_IS_TOGGLE_ACTION (action))
+		gtk_toggle_action_set_active (GTK_TOGGLE_ACTION (action),
+					      gtk_switch_get_active (GTK_SWITCH (sw)));
 }
 
 void
@@ -1691,6 +1711,23 @@ gtk_activatable_set_related_action (gpointer activatable, GtkAction *action)
 		} else if (g_object_get_data (G_OBJECT (activatable), "verne-action-clicked") == NULL) {
 			g_signal_connect_swapped (activatable, "clicked", G_CALLBACK (gtk_action_activate), action);
 			g_object_set_data (G_OBJECT (activatable), "verne-action-clicked", GINT_TO_POINTER (1));
+		}
+	}
+	if (GTK_IS_SWITCH (activatable) && GTK_IS_TOGGLE_ACTION (action)) {
+		gtk_switch_set_active (GTK_SWITCH (activatable),
+				       gtk_toggle_action_get_active (GTK_TOGGLE_ACTION (action)));
+		if (g_object_get_data (G_OBJECT (activatable), "verne-switch-notify") == NULL) {
+			g_signal_connect (activatable, "notify::active",
+					  G_CALLBACK (on_related_switch_notify), action);
+			g_object_set_data (G_OBJECT (activatable), "verne-switch-notify",
+					   GINT_TO_POINTER (1));
+		}
+		if (g_object_get_data (G_OBJECT (activatable), "verne-action-active") == NULL) {
+			g_signal_connect_object (action, "notify::active",
+						 G_CALLBACK (on_related_action_active),
+						 activatable, 0);
+			g_object_set_data (G_OBJECT (activatable), "verne-action-active",
+					   GINT_TO_POINTER (1));
 		}
 	}
 }

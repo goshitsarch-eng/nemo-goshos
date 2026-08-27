@@ -1443,13 +1443,21 @@ nemo_icon_container_receive_dropped_icons (NemoIconContainer *container,
 		}
 
 		local_move_only = FALSE;
-		if (!icon_hit && real_action == GDK_ACTION_MOVE) {
-			/* we can just move the icon positions if the move ended up in
-			 * the item's parent container
-			 */
+		if (!icon_hit &&
+		    nemo_icon_container_selection_items_local
+				(container, container->details->dnd_info->drag_info.selection_list)) {
+			/* GTK4 local dest/file rearranges often arrive as COPY
+			 * (foreign-drop default). Same-container empty drops
+			 * are icon position moves, matching GTK3 Nemo. */
+			real_action = GDK_ACTION_MOVE;
+			local_move_only = TRUE;
+		} else if (!icon_hit && real_action == GDK_ACTION_MOVE) {
 			local_move_only = nemo_icon_container_selection_items_local
 				(container, container->details->dnd_info->drag_info.selection_list);
 		}
+		g_warning ("receive_dropped_icons action=%d local_move=%d icon_hit=%d auto=%d",
+			   (int) real_action, local_move_only, icon_hit,
+			   container->details->auto_layout);
 
 		if (local_move_only) {
             prep_selection (container, world_x, world_y);

@@ -929,8 +929,14 @@ verne_local_update_dest (VerneLocalDrag *local)
 	pack_drop_xy (local, x, y);
 	g_signal_emit_by_name (dest, "drag-motion", local, (int) x, (int) y, GDK_CURRENT_TIME, &handled);
 	selected = (GdkDragAction) GPOINTER_TO_INT (g_object_get_qdata (G_OBJECT (local), selected_action_quark ()));
-	if (selected == 0 && handled)
-		selected = GDK_ACTION_COPY;
+	if (selected == 0 && handled) {
+		/* drag-motion often gdk_drag_status(0) over empty canvas.
+		 * Keep MOVE so dest/file icon rearranges are not COPY no-ops. */
+		if (local->selected)
+			selected = local->selected;
+		else
+			selected = GDK_ACTION_COPY;
+	}
 	if (selected)
 		local->selected = selected;
 }
@@ -2548,6 +2554,10 @@ gdk_drag_status (GdkDragContext *context, GdkDragAction action, guint32 time)
 {
 	(void) time;
 	if (!context)
+		return;
+	/* Motion over empty dest reports action 0. Do not wipe MOVE. */
+	if (action == 0 && VERNE_IS_LOCAL_DRAG (context) &&
+	    ((VerneLocalDrag *) context)->selected != 0)
 		return;
 	g_object_set_qdata (G_OBJECT (context), selected_action_quark (), GINT_TO_POINTER ((int) action));
 	if (VERNE_IS_LOCAL_DRAG (context))

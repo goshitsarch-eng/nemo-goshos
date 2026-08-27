@@ -2933,11 +2933,49 @@ verne_dest_customize_activate_at (GtkWidget *toplevel, GtkWidget *wrap, double x
 		   x, y, picked ? G_OBJECT_TYPE_NAME (picked) : "NULL");
 	for (w = picked; GTK_IS_WIDGET (w) && w != wrap && w != toplevel;
 	     w = gtk_widget_get_parent (w)) {
-		if (GTK_IS_SWITCH (w)) {
-			gtk_switch_set_active (GTK_SWITCH (w),
-					       !gtk_switch_get_active (GTK_SWITCH (w)));
-			g_warning ("verne: dest customize toggle switch");
-			return;
+		if (GTK_IS_SWITCH (w) || GTK_IS_LIST_BOX_ROW (w) || GTK_IS_LABEL (w) ||
+		    GTK_IS_IMAGE (w)) {
+			GtkWidget *sw = GTK_IS_SWITCH (w) ? w : NULL;
+			GtkWidget *row = w;
+			GtkWidget *ch;
+
+			while (sw == NULL && GTK_IS_WIDGET (row) && row != wrap && row != toplevel) {
+				if (GTK_IS_SWITCH (row)) {
+					sw = row;
+					break;
+				}
+				for (ch = gtk_widget_get_first_child (row); ch && sw == NULL;
+				     ch = gtk_widget_get_next_sibling (ch)) {
+					if (GTK_IS_SWITCH (ch))
+						sw = ch;
+					else if (GTK_IS_BOX (ch)) {
+						GtkWidget *inner;
+						for (inner = gtk_widget_get_first_child (ch);
+						     inner && sw == NULL;
+						     inner = gtk_widget_get_next_sibling (inner)) {
+							if (GTK_IS_SWITCH (inner))
+								sw = inner;
+						}
+					}
+				}
+				if (GTK_IS_LIST_BOX_ROW (row))
+					break;
+				row = gtk_widget_get_parent (row);
+			}
+			if (GTK_IS_SWITCH (sw)) {
+				gboolean newv = !gtk_switch_get_active (GTK_SWITCH (sw));
+				GtkAction *action;
+
+				gtk_switch_set_active (GTK_SWITCH (sw), newv);
+				action = gtk_activatable_get_related_action (GTK_ACTIVATABLE (sw));
+				if (GTK_IS_TOGGLE_ACTION (action))
+					gtk_toggle_action_set_active (GTK_TOGGLE_ACTION (action), newv);
+				g_warning ("verne: dest customize toggle switch active=%d action=%s",
+					   newv, action ? gtk_action_get_name (action) : "none");
+				return;
+			}
+			if (GTK_IS_SWITCH (w))
+				return;
 		}
 		if (GTK_IS_COMBO_BOX (w)) {
 			gtk_combo_box_popup (GTK_COMBO_BOX (w));
