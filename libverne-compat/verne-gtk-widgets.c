@@ -2663,6 +2663,16 @@ verne_accel_group_disconnect_action (GtkAccelGroup *group, GtkAction *action)
 }
 
 static gboolean
+verne_widget_really_showing (GtkWidget *w)
+{
+	return w != NULL &&
+	       gtk_widget_get_mapped (w) &&
+	       gtk_widget_get_visible (w) &&
+	       gtk_widget_get_width (w) > 2 &&
+	       gtk_widget_get_height (w) > 2;
+}
+
+static gboolean
 verne_editable_wants_key (GtkWidget *focus, guint key, GdkModifierType mods)
 {
 	if (focus == NULL || !GTK_IS_EDITABLE (focus))
@@ -2684,17 +2694,23 @@ verne_editable_wants_key (GtkWidget *focus, guint key, GdkModifierType mods)
 		    key == GDK_KEY_y || key == GDK_KEY_Y) {
 			GtkWidget *w;
 
-			if (GTK_IS_SEARCH_ENTRY (focus) || GTK_IS_TEXT (focus) ||
-			    GTK_IS_TEXT_VIEW (focus))
-				return TRUE;
+			/* GTK4 GtkEntry focuses an inner GtkText. Hidden search
+			 * (NemoQueryEditor) can keep that GtkText as focus.
+			 * Only swallow Undo inside a visible editor. */
+			if (!verne_widget_really_showing (focus))
+				return FALSE;
 			for (w = focus; w != NULL; w = gtk_widget_get_parent (w)) {
 				const gchar *tn = G_OBJECT_TYPE_NAME (w);
-				if (GTK_IS_TREE_VIEW (w))
+				if (!verne_widget_really_showing (w))
+					continue;
+				if (GTK_IS_SEARCH_ENTRY (w) || GTK_IS_TEXT_VIEW (w) ||
+				    GTK_IS_TREE_VIEW (w))
 					return TRUE;
 				if (tn != NULL &&
 				    (strstr (tn, "IconContainer") != NULL ||
 				     strstr (tn, "EelCanvas") != NULL ||
-				     strstr (tn, "EditableLabel") != NULL))
+				     strstr (tn, "EditableLabel") != NULL ||
+				     strstr (tn, "QueryEditor") != NULL))
 					return TRUE;
 			}
 			return FALSE;
@@ -2735,14 +2751,8 @@ verne_accel_group_activate (GtkAccelGroup *group, guint key, GdkModifierType mod
 		VerneAccelEntry *e = g_ptr_array_index (group->entries, i);
 		if (e->action == NULL || e->key != key || e->mods != mods)
 			continue;
-		if (!gtk_action_get_sensitive (e->action) || !gtk_action_get_visible (e->action)) {
-			if ((mods & GDK_CONTROL_MASK) && (key == GDK_KEY_z || key == GDK_KEY_y))
-				g_warning ("verne: accel %s skipped sensitive=%d visible=%d",
-					   e->action && e->action->name ? e->action->name : "?",
-					   e->action ? gtk_action_get_sensitive (e->action) : -1,
-					   e->action ? gtk_action_get_visible (e->action) : -1);
+		if (!gtk_action_get_sensitive (e->action) || !gtk_action_get_visible (e->action))
 			continue;
-		}
 		gtk_action_activate (e->action);
 		return TRUE;
 	}
@@ -2771,11 +2781,6 @@ verne_accel_key_pressed (GtkEventControllerKey *self, guint keyval, guint keycod
 	for (; groups != NULL; groups = groups->next) {
 		if (verne_accel_group_activate (groups->data, key, mods))
 			return TRUE;
-	}
-	if ((mods & GDK_CONTROL_MASK) && (key == GDK_KEY_z || key == GDK_KEY_y)) {
-		g_warning ("verne: Ctrl+%c not handled focus=%s sensitive-skip or unbound",
-			   key == GDK_KEY_z ? 'Z' : 'Y',
-			   focus ? G_OBJECT_TYPE_NAME (focus) : "none");
 	}
 	return FALSE;
 }
