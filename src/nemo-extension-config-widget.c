@@ -142,16 +142,51 @@ on_config_clicked (GtkLinkButton *button,
 #define LINE_PREFIX "NEMO_EXTENSION:::"
 #define LINE_PREFIX_LEN 17
 
+static gchar *
+find_extensions_list_helper (void)
+{
+    gchar *path;
+    gchar *self;
+    gchar *dir;
+
+    path = g_build_filename (LIBEXECDIR, "nemo-extensions-list", NULL);
+    if (g_file_test (path, G_FILE_TEST_IS_EXECUTABLE))
+        return path;
+    g_free (path);
+
+    /* Uninstalled / build-tree runs: helper sits next to the nemo binary. */
+    self = g_file_read_link ("/proc/self/exe", NULL);
+    if (self != NULL) {
+        dir = g_path_get_dirname (self);
+        g_free (self);
+        path = g_build_filename (dir, "nemo-extensions-list", NULL);
+        g_free (dir);
+        if (g_file_test (path, G_FILE_TEST_IS_EXECUTABLE))
+            return path;
+        g_free (path);
+    }
+
+    return NULL;
+}
+
 static void
 detect_extensions (NemoExtensionConfigWidget *widget)
 {
     gchar *out = NULL;
+    gchar *helper;
+    gchar *argv[2];
+    GError *error = NULL;
 
-    if (g_spawn_command_line_sync (LIBEXECDIR "/nemo-extensions-list",
-                                   &out,
-                                   NULL,
-                                   NULL,
-                                   NULL)) {
+    helper = find_extensions_list_helper ();
+    if (helper == NULL) {
+        g_printerr ("oops could not find nemo-extensions-list\n");
+        return;
+    }
+
+    argv[0] = helper;
+    argv[1] = NULL;
+
+    if (g_spawn_sync (NULL, argv, NULL, G_SPAWN_DEFAULT, NULL, NULL, &out, NULL, NULL, &error)) {
         if (out) {
             gchar **lines = g_strsplit (out, "\n", -1);
 
@@ -190,8 +225,12 @@ detect_extensions (NemoExtensionConfigWidget *widget)
             g_strfreev (lines);
         }
     } else {
-        g_printerr ("oops could not run nemo-extensions-list\n");
+        g_printerr ("oops could not run nemo-extensions-list: %s\n",
+                    error != NULL ? error->message : "unknown error");
+        g_clear_error (&error);
     }
+
+    g_free (helper);
 }
 
 static void
