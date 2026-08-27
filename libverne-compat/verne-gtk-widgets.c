@@ -888,6 +888,7 @@ verne_menu_ensure_scroll (GtkMenu *menu, GtkWidget *box, int view_w, int view_h)
 		gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (scroll),
 						GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
 		gtk_scrolled_window_set_propagate_natural_width (GTK_SCROLLED_WINDOW (scroll), TRUE);
+		gtk_scrolled_window_set_overlay_scrolling (GTK_SCROLLED_WINDOW (scroll), FALSE);
 		gtk_widget_add_css_class (scroll, "verne-dest-menu");
 		gtk_widget_add_css_class (scroll, "background");
 		gtk_widget_set_halign (scroll, GTK_ALIGN_START);
@@ -1253,6 +1254,8 @@ verne_dest_overlay_wheel_button (GtkGestureClick *gesture, gint n_press,
 		return;
 	gtk_adjustment_set_value (va,
 				  gtk_adjustment_get_value (va) + (button == 5 ? 48.0 : -48.0));
+	g_warning ("verne: overlay menu wheel button=%u value=%.0f",
+		   button, gtk_adjustment_get_value (va));
 	gtk_gesture_set_state (GTK_GESTURE (gesture), GTK_EVENT_SEQUENCE_CLAIMED);
 }
 
