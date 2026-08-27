@@ -1622,6 +1622,19 @@ gtk_menu_init (GtkMenu *menu)
 GtkWidget *gtk_menu_new (void) { return g_object_new (GTK_TYPE_MENU, NULL); }
 
 static void
+verne_menu_leaf_clicked (GtkWidget *item, gpointer data)
+{
+	GtkMenu *menu = data;
+
+	/* GTK3 emits GtkMenuItem::activate before the shell deactivates.
+	 * Ask-drop and other menus wait on activate to record the choice;
+	 * popping down first would quit those loops with chosen==0. */
+	if (g_signal_lookup ("activate", G_OBJECT_TYPE (item)) != 0)
+		g_signal_emit_by_name (item, "activate");
+	gtk_menu_popdown (menu);
+}
+
+static void
 verne_menu_hook_leaf_items (GtkMenu *menu)
 {
 	GtkWidget *ch;
@@ -1632,7 +1645,7 @@ verne_menu_hook_leaf_items (GtkMenu *menu)
 		if (GTK_IS_MENU_ITEM (ch) && gtk_menu_item_get_submenu (GTK_MENU_ITEM (ch)))
 			continue;
 		if (GTK_IS_BUTTON (ch) || GTK_IS_CHECK_BUTTON (ch)) {
-			g_signal_connect_swapped (ch, "clicked", G_CALLBACK (gtk_menu_popdown), menu);
+			g_signal_connect (ch, "clicked", G_CALLBACK (verne_menu_leaf_clicked), menu);
 			g_object_set_data (G_OBJECT (ch), "verne-leaf-hooked", GINT_TO_POINTER (1));
 		}
 	}
@@ -2288,7 +2301,16 @@ static void gtk_menu_item_dispose (GObject *o) {
 	g_clear_pointer (&item->label, g_free);
 	G_OBJECT_CLASS (gtk_menu_item_parent_class)->dispose (o);
 }
-static void gtk_menu_item_class_init (GtkMenuItemClass *c) { G_OBJECT_CLASS (c)->dispose = gtk_menu_item_dispose; }
+static void gtk_menu_item_class_init (GtkMenuItemClass *c)
+{
+	G_OBJECT_CLASS (c)->dispose = gtk_menu_item_dispose;
+	if (g_signal_lookup ("activate", GTK_TYPE_MENU_ITEM) == 0)
+		g_signal_new ("activate",
+			      G_TYPE_FROM_CLASS (c),
+			      G_SIGNAL_RUN_FIRST,
+			      0, NULL, NULL, NULL,
+			      G_TYPE_NONE, 0);
+}
 static void
 verne_menu_item_set_selected_shell (GtkWidget *item)
 {
