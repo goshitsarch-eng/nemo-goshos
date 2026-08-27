@@ -1618,13 +1618,16 @@ update_filtering_from_preferences (FMTreeView *view)
 }
 
 static void
-parent_set_callback (GtkWidget        *widget,
-		     GtkWidget        *previous_parent,
-		     gpointer          callback_data)
+parent_set_callback (GObject    *object,
+		     GParamSpec *pspec,
+		     gpointer    callback_data)
 {
 	FMTreeView *view;
+	GtkWidget *widget;
 
+	(void) pspec;
 	view = FM_TREE_VIEW (callback_data);
+	widget = GTK_WIDGET (object);
 
 	if (gtk_widget_get_parent (widget) != NULL && view->details->tree_widget == NULL) {
 		create_tree (view);
@@ -1705,7 +1708,8 @@ fm_tree_view_init (FMTreeView *view)
 	
 	gtk_widget_show (GTK_WIDGET (view));
 
-	g_signal_connect_object (view, "parent_set",
+	/* GTK4 dropped GtkWidget::parent-set. Create the tree when parented. */
+	g_signal_connect_object (view, "notify::parent",
 				 G_CALLBACK (parent_set_callback), view, 0);
 
 	view->details->selection_location = NULL;
