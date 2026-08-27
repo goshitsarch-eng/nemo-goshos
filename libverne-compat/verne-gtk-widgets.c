@@ -1223,22 +1223,28 @@ verne_dest_overlay_pressed (GtkGestureClick *gesture, gint n_press, gdouble x, g
 	(void) menu;
 }
 
+static GtkAdjustment *
+verne_overlay_menu_vadj (GtkWidget *widget)
+{
+	GtkWidget *sw;
+
+	if (GTK_IS_SCROLLED_WINDOW (widget))
+		return gtk_scrolled_window_get_vadjustment (GTK_SCROLLED_WINDOW (widget));
+	sw = widget ? gtk_widget_get_parent (widget) : NULL;
+	if (GTK_IS_SCROLLED_WINDOW (sw))
+		return gtk_scrolled_window_get_vadjustment (GTK_SCROLLED_WINDOW (sw));
+	return NULL;
+}
+
 static gboolean
 verne_dest_overlay_scroll (GtkEventControllerScroll *controller,
 			   gdouble dx, gdouble dy, gpointer data)
 {
-	GtkWidget *box = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (controller));
-	GtkWidget *parent;
-	GtkAdjustment *va;
+	GtkWidget *widget = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (controller));
+	GtkAdjustment *va = verne_overlay_menu_vadj (widget);
 
 	(void) data;
 	(void) dx;
-	if (box == NULL)
-		return FALSE;
-	parent = gtk_widget_get_parent (box);
-	if (!GTK_IS_SCROLLED_WINDOW (parent))
-		return FALSE;
-	va = gtk_scrolled_window_get_vadjustment (GTK_SCROLLED_WINDOW (parent));
 	if (va == NULL)
 		return FALSE;
 	gtk_adjustment_set_value (va, gtk_adjustment_get_value (va) + dy * 32.0);
@@ -1249,8 +1255,7 @@ static void
 verne_dest_overlay_wheel_button (GtkGestureClick *gesture, gint n_press,
 				 gdouble x, gdouble y, gpointer data)
 {
-	GtkWidget *box = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (gesture));
-	GtkWidget *parent;
+	GtkWidget *widget = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (gesture));
 	GtkAdjustment *va;
 	guint button;
 
@@ -1258,15 +1263,12 @@ verne_dest_overlay_wheel_button (GtkGestureClick *gesture, gint n_press,
 	(void) x;
 	(void) y;
 	(void) data;
-	if (box == NULL)
+	if (widget == NULL)
 		return;
 	button = gtk_gesture_single_get_current_button (GTK_GESTURE_SINGLE (gesture));
 	if (button != 4 && button != 5)
 		return;
-	parent = gtk_widget_get_parent (box);
-	if (!GTK_IS_SCROLLED_WINDOW (parent))
-		return;
-	va = gtk_scrolled_window_get_vadjustment (GTK_SCROLLED_WINDOW (parent));
+	va = verne_overlay_menu_vadj (widget);
 	if (va == NULL)
 		return;
 	gtk_adjustment_set_value (va,
@@ -1274,6 +1276,29 @@ verne_dest_overlay_wheel_button (GtkGestureClick *gesture, gint n_press,
 	g_warning ("verne: overlay menu wheel button=%u value=%.0f",
 		   button, gtk_adjustment_get_value (va));
 	gtk_gesture_set_state (GTK_GESTURE (gesture), GTK_EVENT_SEQUENCE_CLAIMED);
+}
+
+static void
+verne_overlay_attach_scroll_controllers (GtkWidget *widget)
+{
+	GtkEventController *scroll;
+	GtkGesture *wheel;
+
+	if (widget == NULL || g_object_get_data (G_OBJECT (widget), "verne-dest-scroll"))
+		return;
+	scroll = gtk_event_controller_scroll_new (GTK_EVENT_CONTROLLER_SCROLL_VERTICAL);
+	gtk_event_controller_set_propagation_phase (scroll, GTK_PHASE_CAPTURE);
+	g_signal_connect (scroll, "scroll",
+			  G_CALLBACK (verne_dest_overlay_scroll), NULL);
+	gtk_widget_add_controller (widget, scroll);
+	wheel = gtk_gesture_click_new ();
+	gtk_gesture_single_set_button (GTK_GESTURE_SINGLE (wheel), 0);
+	gtk_event_controller_set_propagation_phase (GTK_EVENT_CONTROLLER (wheel),
+						    GTK_PHASE_CAPTURE);
+	g_signal_connect (wheel, "pressed",
+			  G_CALLBACK (verne_dest_overlay_wheel_button), NULL);
+	gtk_widget_add_controller (widget, GTK_EVENT_CONTROLLER (wheel));
+	g_object_set_data (G_OBJECT (widget), "verne-dest-scroll", GINT_TO_POINTER (1));
 }
 
 static gboolean
@@ -1433,6 +1458,9 @@ verne_menu_popup_dest_overlay (GtkMenu *menu, int root_x, int root_y)
 		gtk_widget_set_can_target (extra, TRUE);
 		gtk_widget_set_visible (box, TRUE);
 		gtk_widget_set_can_target (box, TRUE);
+		verne_overlay_attach_scroll_controllers (box);
+		if (extra != box)
+			verne_overlay_attach_scroll_controllers (extra);
 	}
 	{
 		GtkWidget *ch;
@@ -1464,28 +1492,6 @@ verne_menu_popup_dest_overlay (GtkMenu *menu, int root_x, int root_y)
 				  G_CALLBACK (verne_dest_overlay_pressed), menu);
 		gtk_widget_add_controller (box, GTK_EVENT_CONTROLLER (click));
 		g_object_set_data (G_OBJECT (box), "verne-dest-click", GINT_TO_POINTER (1));
-	}
-	if (g_object_get_data (G_OBJECT (box), "verne-dest-scroll") == NULL) {
-		GtkEventController *scroll;
-
-		scroll = gtk_event_controller_scroll_new (GTK_EVENT_CONTROLLER_SCROLL_VERTICAL |
-							  GTK_EVENT_CONTROLLER_SCROLL_DISCRETE);
-		gtk_event_controller_set_propagation_phase (scroll, GTK_PHASE_CAPTURE);
-		g_signal_connect (scroll, "scroll",
-				  G_CALLBACK (verne_dest_overlay_scroll), NULL);
-		gtk_widget_add_controller (box, scroll);
-		g_object_set_data (G_OBJECT (box), "verne-dest-scroll", GINT_TO_POINTER (1));
-	}
-	if (g_object_get_data (G_OBJECT (box), "verne-dest-wheel") == NULL) {
-		GtkGesture *wheel = gtk_gesture_click_new ();
-
-		gtk_gesture_single_set_button (GTK_GESTURE_SINGLE (wheel), 0);
-		gtk_event_controller_set_propagation_phase (GTK_EVENT_CONTROLLER (wheel),
-							    GTK_PHASE_CAPTURE);
-		g_signal_connect (wheel, "pressed",
-				  G_CALLBACK (verne_dest_overlay_wheel_button), NULL);
-		gtk_widget_add_controller (box, GTK_EVENT_CONTROLLER (wheel));
-		g_object_set_data (G_OBJECT (box), "verne-dest-wheel", GINT_TO_POINTER (1));
 	}
 	g_object_set_data (G_OBJECT (menu), "verne-dest-overlay", overlay);
 	g_object_unref (box);

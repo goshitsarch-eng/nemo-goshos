@@ -456,7 +456,10 @@ action_show_shortcuts_window (GtkAction *action,
 				  G_CALLBACK (gtk_widget_destroyed), &shortcuts_window);
 
 		gtk_window_set_title (GTK_WINDOW (shortcuts_window), _("Keyboard Shortcuts"));
+		gtk_window_set_resizable (GTK_WINDOW (shortcuts_window), TRUE);
 		gtk_window_set_default_size (GTK_WINDOW (shortcuts_window), 760, 520);
+		/* GTK4 GtkShortcutsWindow otherwise sizes to content (~natural). */
+		gtk_widget_set_size_request (shortcuts_window, 700, 480);
 
 		g_object_unref (builder);
 	}
