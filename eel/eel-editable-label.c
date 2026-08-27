@@ -2199,9 +2199,16 @@ eel_editable_label_focus_in (GtkWidget     *widget,
   label->need_im_reset = TRUE;
   gtk_im_context_focus_in (label->im_context);
 
-  g_signal_connect (gdk_keymap_get_default (),
-		    "direction_changed",
-		    G_CALLBACK (eel_editable_label_keymap_direction_changed), label);
+  {
+    GdkKeymap *keymap = gdk_keymap_get_default ();
+
+    /* GTK4 has no GdkKeymap; the compat shim is NULL. Connecting to
+     * it SIGSEGV'd dest after Create New Document auto-rename / F2. */
+    if (keymap != NULL)
+      g_signal_connect (keymap,
+			"direction_changed",
+			G_CALLBACK (eel_editable_label_keymap_direction_changed), label);
+  }
 
   eel_editable_label_check_cursor_blink (label);
 
@@ -2220,11 +2227,16 @@ eel_editable_label_focus_out (GtkWidget     *widget,
   gtk_im_context_focus_out (label->im_context);
 
   eel_editable_label_check_cursor_blink (label);
-  
-  g_signal_handlers_disconnect_by_func (gdk_keymap_get_default (),
-                                        (gpointer) eel_editable_label_keymap_direction_changed,
-                                        label);
-  
+
+  {
+    GdkKeymap *keymap = gdk_keymap_get_default ();
+
+    if (keymap != NULL)
+      g_signal_handlers_disconnect_by_func (keymap,
+					    (gpointer) eel_editable_label_keymap_direction_changed,
+					    label);
+  }
+
   return FALSE;
 }
 
