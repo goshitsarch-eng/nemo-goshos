@@ -2357,11 +2357,10 @@ button_press_callback (GtkWidget *widget, GdkEventFocus *event, gpointer user_da
 
     if (!nemo_view_get_active (view)) {
         NemoWindowSlot *slot = nemo_view_get_nemo_window_slot (view);
-        nemo_window_slot_make_hosting_pane_active (slot);
-        /* Keep the extra pane's existing selection; still let a click on
-         * empty space propagate so rubberband / background menus work. */
-        if (selection_count > 0)
-            return GDK_EVENT_STOP;
+        /* Switching the active pane synchronously during this press
+         * unmerged menus and SIGSEGV'd extra-pane drags. Let the
+         * container start a drag, then activate on idle. */
+        nemo_window_slot_make_hosting_pane_active_idle (slot);
     }
 
     /* double left click on blank will go to parent folder */

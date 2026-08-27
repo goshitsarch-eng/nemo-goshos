@@ -2573,7 +2573,7 @@ static void slot_changed_pane (NemoWindowSlot *slot,
 	view->details->window = nemo_window_slot_get_window (slot);
 	schedule_update_menus (view);
 
-	if (view->details->window == NULL)
+	if (view->details->window == NULL || !NEMO_IS_WINDOW (view->details->window))
 		return;
 
 	g_signal_connect_object (view->details->window,
@@ -2905,7 +2905,7 @@ real_unmerge_menus (NemoView *view)
 {
 	GtkUIManager *ui_manager;
 
-	if (view->details->window == NULL) {
+	if (view->details->window == NULL || !NEMO_IS_WINDOW (view->details->window)) {
 		return;
 	}
     if (GTK_IS_ACTION_GROUP (view->details->copy_move_action_groups[0])) {
@@ -4371,7 +4371,7 @@ nemo_view_get_loading (NemoView *view)
 GtkUIManager *
 nemo_view_get_ui_manager (NemoView  *view)
 {
-	if (view->details->window == NULL) {
+	if (view->details->window == NULL || !NEMO_IS_WINDOW (view->details->window)) {
 		return NULL;
 	}
 	return nemo_window_get_ui_manager (view->details->window);
@@ -10649,7 +10649,7 @@ schedule_update_status (NemoView *view)
 	g_assert (NEMO_IS_VIEW (view));
 
 	/* Make sure we haven't already destroyed it */
-	if (view->details->window == NULL) {
+	if (view->details->window == NULL || !NEMO_IS_WINDOW (view->details->window)) {
 		return;
 	}
 
