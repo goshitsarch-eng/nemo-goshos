@@ -508,9 +508,11 @@ nemo_icon_canvas_item_get_drag_surface (NemoIconCanvasItem *item)
     drag_surface = gdk_cairo_surface_create_from_pixbuf (item->details->pixbuf,
                                                          gtk_widget_get_scale_factor (GTK_WIDGET (canvas)),
                                                          gtk_widget_get_window (GTK_WIDGET (canvas)));
-    gtk_render_icon_surface (context, cr, drag_surface,
-                            item_offset_x, item_offset_y);
-    cairo_surface_destroy (drag_surface);
+    if (drag_surface != NULL) {
+	    gtk_render_icon_surface (context, cr, drag_surface,
+				    item_offset_x, item_offset_y);
+	    cairo_surface_destroy (drag_surface);
+    }
 
     get_scaled_icon_size (item, &pix_width, &pix_height);
 

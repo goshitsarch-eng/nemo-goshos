@@ -235,7 +235,8 @@ void gtk_action_set_tooltip (GtkAction *action, const gchar *tooltip) {
 const gchar *gtk_action_get_tooltip (GtkAction *action) { return action ? action->tooltip : NULL; }
 void gtk_action_set_icon_name (GtkAction *action, const gchar *icon_name) {
 	g_return_if_fail (GTK_IS_ACTION (action));
-	g_free (action->icon_name); action->icon_name = g_strdup (icon_name);
+	g_free (action->icon_name);
+	action->icon_name = g_strdup (verne_map_icon_name (icon_name));
 	g_object_notify (G_OBJECT (action), "icon-name");
 }
 const gchar *gtk_action_get_icon_name (GtkAction *action) { return action ? action->icon_name : NULL; }
@@ -243,7 +244,9 @@ void gtk_action_set_gicon (GtkAction *action, GIcon *icon) {
 	if (action == NULL)
 		return;
 	g_clear_object (&action->gicon);
-	if (icon)
+	/* GTK3 GdkPixbuf implemented GIcon; GTK4's does not. Nemo still
+	 * passes G_ICON (pixbuf) for template / Open With menu icons. */
+	if (icon != NULL && G_IS_ICON (icon))
 		action->gicon = g_object_ref (icon);
 	g_object_notify (G_OBJECT (action), "gicon");
 }

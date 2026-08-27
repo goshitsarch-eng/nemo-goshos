@@ -59,6 +59,7 @@
 #include <glib/gi18n.h>
 #include <glib/gstdio.h>
 #include <gio/gio.h>
+#include <gio/gunixmounts.h>
 #include <glib.h>
 #include <libnemo-extension/nemo-file-info.h>
 #include <libnemo-extension/nemo-extension-private.h>
@@ -7600,6 +7601,8 @@ nemo_file_get_volume_name (NemoFile *file)
 	GFile *location;
 	char *res;
 	GMount *mount;
+	char *path;
+	GUnixMountEntry *entry;
 
 	res = NULL;
 
@@ -7608,6 +7611,18 @@ nemo_file_get_volume_name (NemoFile *file)
 	if (mount) {
 		res = g_mount_get_name (mount);
 		g_object_unref (mount);
+	} else {
+		/* Overlay / container roots often have no GMount. Fall back to
+		 * the unix mount table so Properties still shows a volume name. */
+		path = g_file_get_path (location);
+		if (path != NULL) {
+			entry = g_unix_mount_for (path, NULL);
+			if (entry != NULL) {
+				res = g_unix_mount_guess_name (entry);
+				g_unix_mount_free (entry);
+			}
+			g_free (path);
+		}
 	}
 	g_object_unref (location);
 

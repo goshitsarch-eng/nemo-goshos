@@ -608,6 +608,25 @@ nemo_window_slot_make_hosting_pane_active (NemoWindowSlot *slot)
 					 slot);
 }
 
+static gboolean
+make_hosting_pane_active_idle (gpointer data)
+{
+	NemoWindowSlot *slot = data;
+
+	if (NEMO_IS_WINDOW_SLOT (slot) && NEMO_IS_WINDOW_PANE (slot->pane))
+		nemo_window_slot_make_hosting_pane_active (slot);
+	g_object_unref (slot);
+	return G_SOURCE_REMOVE;
+}
+
+void
+nemo_window_slot_make_hosting_pane_active_idle (NemoWindowSlot *slot)
+{
+	if (!NEMO_IS_WINDOW_SLOT (slot))
+		return;
+	g_idle_add (make_hosting_pane_active_idle, g_object_ref (slot));
+}
+
 NemoWindow *
 nemo_window_slot_get_window (NemoWindowSlot *slot)
 {

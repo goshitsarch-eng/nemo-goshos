@@ -443,11 +443,22 @@ static gboolean
 fade_and_request_redraw (gpointer user_data)
 {
 	NemoSelectionCanvasItem *self = user_data;
+	EelCanvasItem *item;
+
+	if (!NEMO_IS_SELECTION_CANVAS_ITEM (self))
+		return FALSE;
+
+	item = EEL_CANVAS_ITEM (self);
+	if (item->canvas == NULL || !EEL_IS_CANVAS (item->canvas) ||
+	    item->canvas->destroying) {
+		self->priv->fade_out_handler_id = 0;
+		return FALSE;
+	}
 
 	if (self->priv->fade_out_fill_alpha <= 0 ||
 	    self->priv->fade_out_outline_alpha <= 0) {
 		self->priv->fade_out_handler_id = 0;
-		eel_canvas_item_destroy (EEL_CANVAS_ITEM (self));
+		eel_canvas_item_destroy (item);
 
 		return FALSE;
 	}
@@ -455,7 +466,7 @@ fade_and_request_redraw (gpointer user_data)
 	self->priv->fade_out_fill_alpha -= self->priv->fade_out_fill_delta;
 	self->priv->fade_out_outline_alpha -= self->priv->fade_out_outline_delta;
 
-	eel_canvas_item_request_redraw (EEL_CANVAS_ITEM (self));
+	eel_canvas_item_request_redraw (item);
 
 	return TRUE;
 }

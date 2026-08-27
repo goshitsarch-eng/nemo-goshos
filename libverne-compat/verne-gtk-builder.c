@@ -493,6 +493,34 @@ find_matching_object_end (const char *start, const char *limit)
 	return NULL;
 }
 
+static const char *
+find_matching_child_end (const char *start, const char *limit)
+{
+	int depth = 0;
+	const char *p = start;
+
+	while (p < limit && *p) {
+		if (memcmp (p, "<child", 6) == 0) {
+			char next = p[6];
+			if (next == '>' || next == ' ' || next == '\t' || next == '\n' || next == '/') {
+				const char *gt = memchr (p, '>', (gsize) (limit - p));
+				if (gt && gt > p && *(gt - 1) == '/') {
+					p = gt;
+				} else {
+					depth++;
+				}
+			}
+		} else if (memcmp (p, "</child>", 8) == 0) {
+			depth--;
+			if (depth == 0)
+				return p + 8;
+			p += 7;
+		}
+		p++;
+	}
+	return NULL;
+}
+
 static GPtrArray *
 collect_stacks_from_xml (const char *xml)
 {
@@ -531,41 +559,101 @@ collect_stacks_from_xml (const char *xml)
 				info->stack_id = g_strndup (id_attr + 4, (gsize) (id_end - (id_attr + 4)));
 		}
 
-		q = obj;
-		while (q < end) {
-			const char *pack = strstr (q, "<packing>");
-			const char *pack_end;
-			gchar *block;
-			gchar *name;
-			gchar *title;
+		/* Direct GtkStack children only. Nested packing (boxes, nested
+		 * stacks) used to be collected and assigned to the outer stack,
+		 * so dest Customize lost "view" / "substack_enabled" names. */
+		q = gt + 1;
+		{
+			int depth = 0;
 
-			if (pack == NULL || pack >= end)
-				break;
-			pack_end = strstr (pack, "</packing>");
-			if (pack_end == NULL || pack_end >= end)
-				break;
-			pack_end += strlen ("</packing>");
-			block = g_strndup (pack, (gsize) (pack_end - pack));
-			name = xml_prop_in_block (block, "name");
-			title = xml_prop_in_block (block, "title");
-			if (name && title) {
-				VerneStackPageInfo *page = g_new0 (VerneStackPageInfo, 1);
-				gchar *icon = xml_prop_in_block (block, "icon-name");
-				page->name = name;
-				page->title = title;
-				if (icon && g_str_has_prefix (icon, "xsi-")) {
-					page->icon = g_strdup (icon + 4);
-					g_free (icon);
-				} else {
-					page->icon = icon;
+			while (q < end && *q) {
+				if (memcmp (q, "<object", 7) == 0) {
+					char next = q[7];
+					if (next == ' ' || next == '\t' || next == '\n' || next == '>') {
+						const char *ogt = memchr (q, '>', (gsize) (end - q));
+						if (ogt && ogt > q && *(ogt - 1) == '/') {
+							q = ogt + 1;
+							continue;
+						}
+						depth++;
+						q += 7;
+						continue;
+					}
 				}
-				g_ptr_array_add (info->pages, page);
-			} else {
-				g_free (name);
-				g_free (title);
+				if (memcmp (q, "</object>", 9) == 0) {
+					depth--;
+					q += 9;
+					continue;
+				}
+				if (depth == 0 && memcmp (q, "<child", 6) == 0) {
+					char next = q[6];
+					if (next == '>' || next == ' ' || next == '\t' || next == '\n') {
+						const char *cgt = strchr (q, '>');
+						const char *child_end;
+						const char *obj_start;
+						const char *obj_end;
+						const char *pack;
+
+						if (cgt == NULL || cgt >= end)
+							break;
+						child_end = find_matching_child_end (q, end);
+						if (child_end == NULL)
+							break;
+						obj_start = strstr (cgt, "<object");
+						if (obj_start == NULL || obj_start >= child_end) {
+							q = child_end;
+							continue;
+						}
+						obj_end = find_matching_object_end (obj_start, child_end);
+						if (obj_end == NULL) {
+							q = child_end;
+							continue;
+						}
+						pack = strstr (obj_end, "<packing>");
+						if (pack && pack < child_end) {
+							const char *pack_end = strstr (pack, "</packing>");
+							gchar *block;
+							gchar *name;
+							gchar *title;
+							gchar *icon;
+
+							if (pack_end == NULL || pack_end >= child_end) {
+								q = child_end;
+								continue;
+							}
+							block = g_strndup (pack, (gsize) (pack_end + strlen ("</packing>") - pack));
+							name = xml_prop_in_block (block, "name");
+							title = xml_prop_in_block (block, "title");
+							icon = xml_prop_in_block (block, "icon-name");
+							if (icon == NULL)
+								icon = xml_prop_in_block (block, "icon_name");
+							if (name) {
+								VerneStackPageInfo *page = g_new0 (VerneStackPageInfo, 1);
+
+								page->name = name;
+								page->title = title;
+								if (icon && g_str_has_prefix (icon, "xsi-")) {
+									const char *mapped = verne_map_icon_name (icon + 4);
+									page->icon = g_strdup (mapped ? mapped : icon + 4);
+									g_free (icon);
+								} else {
+									page->icon = icon ? g_strdup (verne_map_icon_name (icon)) : NULL;
+									g_free (icon);
+								}
+								g_ptr_array_add (info->pages, page);
+							} else {
+								g_free (name);
+								g_free (title);
+								g_free (icon);
+							}
+							g_free (block);
+						}
+						q = child_end;
+						continue;
+					}
+				}
+				q++;
 			}
-			g_free (block);
-			q = pack_end;
 		}
 
 		if (info->pages->len > 0)
@@ -573,7 +661,9 @@ collect_stacks_from_xml (const char *xml)
 		else
 			stack_info_free (info);
 
-		p = end;
+		/* Continue from the opening tag so nested GtkStack objects are
+		 * collected instead of being skipped with the outer stack. */
+		p = gt + 1;
 	}
 
 	return stacks;
@@ -606,8 +696,20 @@ verne_restore_builder_stacks (GtkBuilder *builder, const gchar *xml)
 		gtk_widget_set_vexpand (GTK_WIDGET (stack), TRUE);
 		model = gtk_stack_get_pages (stack);
 		n = g_list_model_get_n_items (G_LIST_MODEL (model));
-		g_message ("Verne: GtkStack '%s' has %u children, %u titled pages in XML",
-			   info->stack_id, n, info->pages->len);
+		{
+			GString *names = g_string_new (NULL);
+			guint k;
+
+			for (k = 0; k < info->pages->len; k++) {
+				VerneStackPageInfo *pg = g_ptr_array_index (info->pages, k);
+				if (k)
+					g_string_append (names, ",");
+				g_string_append (names, pg->name ? pg->name : "?");
+			}
+			g_message ("Verne: GtkStack '%s' has %u children, %u named pages in XML [%s]",
+				   info->stack_id, n, info->pages->len, names->str);
+			g_string_free (names, TRUE);
+		}
 		for (j = 0; j < n && j < info->pages->len; j++) {
 			VerneStackPageInfo *pg = g_ptr_array_index (info->pages, j);
 			GtkStackPage *page = g_list_model_get_item (G_LIST_MODEL (model), j);
@@ -784,6 +886,46 @@ convert_numeric_icon_size (GString *s)
 	}
 }
 
+/* GtkBuilder sets GtkImage:icon-name as a GObject property, which bypasses
+ * gtk_image_new_from_icon_name() and therefore verne_map_icon_name(). Map
+ * Mint / missing names onto Adwaita icons so Compact view and Preview paint. */
+static void
+rewrite_mapped_icon_names (GString *s)
+{
+	const char *pat = "<property name=\"icon-name\">";
+	gsize plen = strlen (pat);
+	gsize i = 0;
+
+	while (i < s->len) {
+		const char *found = strstr (s->str + i, pat);
+		const char *val;
+		const char *end;
+		gchar *raw;
+		const char *mapped;
+		gsize pos, n;
+
+		if (found == NULL)
+			break;
+		val = found + plen;
+		end = strstr (val, "</property>");
+		if (end == NULL)
+			break;
+		raw = g_strndup (val, (gsize) (end - val));
+		g_strstrip (raw);
+		mapped = verne_map_icon_name (raw);
+		if (mapped != NULL && g_strcmp0 (mapped, raw) != 0) {
+			pos = (gsize) (val - s->str);
+			n = (gsize) (end - val);
+			g_string_erase (s, pos, (gssize) n);
+			g_string_insert (s, pos, mapped);
+			i = pos + strlen (mapped) + strlen ("</property>");
+		} else {
+			i = (gsize) (end - s->str) + strlen ("</property>");
+		}
+		g_free (raw);
+	}
+}
+
 static gchar *
 verne_transform_gtk3_ui (const gchar *xml, gssize len)
 {
@@ -825,6 +967,7 @@ verne_transform_gtk3_ui (const gchar *xml, gssize len)
 	replace_all (s, " name=\"top-padding\"", " name=\"margin-top\"");
 	replace_all (s, " name=\"bottom-padding\"", " name=\"margin-bottom\"");
 	replace_all (s, "xsi-", "");
+	rewrite_mapped_icon_names (s);
 
 	replace_all (s, " internal-child=\"vbox\"", " internal-child=\"content_area\"");
 	replace_all (s, " internal-child=\"action_area\"", "");

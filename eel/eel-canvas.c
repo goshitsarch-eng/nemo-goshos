@@ -145,6 +145,10 @@ canvas_unregister_item (EelCanvasItem *item)
 
 	if (item == NULL || item->canvas == NULL)
 		return;
+	if (!EEL_IS_CANVAS (item->canvas)) {
+		item->canvas = NULL;
+		return;
+	}
 	t = g_object_get_qdata (G_OBJECT (item->canvas), canvas_live_quark ());
 	if (t != NULL)
 		g_hash_table_remove (t, item);
@@ -351,6 +355,9 @@ eel_canvas_item_dispose (GObject *object)
 	g_return_if_fail (EEL_IS_CANVAS_ITEM (object));
 
 	item = EEL_CANVAS_ITEM (object);
+
+	if (item->canvas != NULL && !EEL_IS_CANVAS (item->canvas))
+		item->canvas = NULL;
 
 	canvas_unregister_item (item);
 

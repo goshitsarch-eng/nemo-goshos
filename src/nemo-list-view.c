@@ -1164,10 +1164,9 @@ button_press_callback (GtkWidget *widget, GdkEventButton *event, gpointer callba
 	}
 	list_view_translate_event_xy (tree_view, &event->x, &event->y);
 
-    if (!nemo_view_get_active (NEMO_VIEW (view)) && gtk_tree_selection_count_selected_rows (selection) > 0) {
+    if (!nemo_view_get_active (NEMO_VIEW (view))) {
         NemoWindowSlot *slot = nemo_view_get_nemo_window_slot (NEMO_VIEW (view));
-        nemo_window_slot_make_hosting_pane_active (slot);
-        return GDK_EVENT_STOP;
+        nemo_window_slot_make_hosting_pane_active_idle (slot);
     }
 
 	nemo_list_model_set_drag_view

@@ -33,6 +33,7 @@
 
 #include <glib/gi18n-lib.h>
 #include <pango/pango.h>
+#include <pango/pangocairo.h>
 #include <gtk/gtk.h>
 #include <gdk/gdkkeysyms.h>
 
@@ -233,6 +234,7 @@ eel_editable_label_class_init (EelEditableLabelClass *class)
   verne_widget_class_set_style_updated (widget_class, eel_editable_label_style_updated);
   widget_class->direction_changed = eel_editable_label_direction_changed;
   verne_widget_class_set_draw (widget_class, eel_editable_label_draw);
+  gtk_widget_class_set_css_name (widget_class, "entry");
   verne_widget_class_set_realize (widget_class, eel_editable_label_realize);
   verne_widget_class_set_unrealize (widget_class, eel_editable_label_unrealize);
   widget_class->map = eel_editable_label_map;
@@ -1487,17 +1489,13 @@ eel_editable_label_draw_cursor (EelEditableLabel  *label, cairo_t *cr, gint xoff
 {
   if (gtk_widget_is_drawable (GTK_WIDGET (label)))
     {
-      GtkWidget *widget = GTK_WIDGET (label);
-
       gboolean block;
       gboolean block_at_line_end;
       gint range[2];
-      gint index;
-      GtkStyleContext *context;
       PangoRectangle strong_pos;
+      GdkRGBA fg_color;
 
-      context = gtk_widget_get_style_context (widget);
-      index = eel_editable_label_get_cursor_pos (label, NULL, NULL);
+      eel_editable_label_get_cursor_pos (label, &strong_pos, NULL);
 
       if (label->overwrite_mode &&
 	  eel_editable_label_get_block_cursor_location (label, range,
@@ -1507,107 +1505,113 @@ eel_editable_label_draw_cursor (EelEditableLabel  *label, cairo_t *cr, gint xoff
       else
 	block = FALSE;
 
+      gtk_widget_get_color (GTK_WIDGET (label), &fg_color);
+      if (fg_color.alpha <= 0.01) {
+        fg_color.red = fg_color.green = fg_color.blue = 0.12;
+        fg_color.alpha = 1.0;
+      }
+
+      cairo_save (cr);
+      cairo_set_source_rgba (cr, fg_color.red, fg_color.green, fg_color.blue, fg_color.alpha);
       if (!block)
+        {
+          gint cx = xoffset + PANGO_PIXELS (strong_pos.x);
+          gint cy = yoffset + PANGO_PIXELS (strong_pos.y);
+          gint ch = MAX (PANGO_PIXELS (strong_pos.height), 12);
+          cairo_set_line_width (cr, 1.0);
+          cairo_move_to (cr, cx + 0.5, cy);
+          cairo_line_to (cr, cx + 0.5, cy + ch);
+          cairo_stroke (cr);
+        }
+      else
 	{
-          gtk_render_insertion_cursor (context, cr,
-                                       xoffset, yoffset,
-                                       label->layout, index,
-                                       gdk_keymap_get_direction (gdk_keymap_get_default ()));
-	}
-      else /* Block cursor */
-	{
-          GdkRGBA fg_color;
 	  cairo_region_t *clip;
-
-          gtk_style_context_get_color (context, GTK_STATE_FLAG_NORMAL, &fg_color);
-
-	  cairo_save (cr);
-          gdk_cairo_set_source_rgba (cr, &fg_color);
 
 	  cairo_rectangle (cr,
 			   xoffset + PANGO_PIXELS (strong_pos.x),
 			   yoffset + PANGO_PIXELS (strong_pos.y),
-			   PANGO_PIXELS (strong_pos.width),
+			   MAX (PANGO_PIXELS (strong_pos.width), 1),
 			   PANGO_PIXELS (strong_pos.height));
 	  cairo_fill (cr);
 
 	  if (!block_at_line_end)
 	    {
-              GdkRGBA color;
-
 	      clip = gdk_pango_layout_get_clip_region (label->layout,
 						       xoffset, yoffset,
 						       range, 1);
 
 	      gdk_cairo_region (cr, clip);
 	      cairo_clip (cr);
-
-              gtk_style_context_get_background_color (context, GTK_STATE_FLAG_FOCUSED,
-                                                      &color);
-
-	      gdk_cairo_set_source_rgba (cr,
-                                         &color);
+	      cairo_set_source_rgb (cr, 1, 1, 1);
 	      cairo_move_to (cr, xoffset, yoffset);
 	      pango_cairo_show_layout (cr, label->layout);
-
 	      cairo_region_destroy (clip);
 	    }
-
-	  cairo_restore (cr);
 	}
+      cairo_restore (cr);
     }
 }
-
 
 static gint
 eel_editable_label_draw (GtkWidget *widget,
                          cairo_t   *cr)
 {
   EelEditableLabel *label;
-  GtkStyleContext *style;
   gint x, y;
-  
-  g_assert (EEL_IS_EDITABLE_LABEL (widget));
-  
-  label = EEL_EDITABLE_LABEL (widget);
-  style = gtk_widget_get_style_context (widget);
+  int width, height;
+  GdkRGBA fg;
 
-  gtk_render_background (style, cr,
-                         0, 0,
-                         gtk_widget_get_allocated_width (widget),
-                         gtk_widget_get_allocated_height (widget));
+  g_assert (EEL_IS_EDITABLE_LABEL (widget));
+
+  label = EEL_EDITABLE_LABEL (widget);
+  width = gtk_widget_get_allocated_width (widget);
+  height = gtk_widget_get_allocated_height (widget);
+  if (width < 1)
+    width = 1;
+  if (height < 1)
+    height = 1;
+
+  /* GTK4 gtk_render_* is deprecated and paints nothing for this
+   * custom widget, so the rename editor received events while staying
+   * invisible. Draw a readable entry with cairo/pango instead. */
+  cairo_save (cr);
+  cairo_set_source_rgb (cr, 1.0, 1.0, 1.0);
+  cairo_rectangle (cr, 0, 0, width, height);
+  cairo_fill (cr);
 
   eel_editable_label_ensure_layout (label, TRUE);
-  
+
+  gtk_widget_get_color (widget, &fg);
+  if (fg.alpha <= 0.01) {
+    fg.red = fg.green = fg.blue = 0.12;
+    fg.alpha = 1.0;
+  }
+
   if (gtk_widget_get_visible (widget) && gtk_widget_get_mapped (widget) &&
       label->text)
     {
       get_layout_location (label, &x, &y);
-      
-      gtk_render_layout (style,
-                         cr,
-                         x, y,
-                         label->layout);
+
+      cairo_set_source_rgba (cr, fg.red, fg.green, fg.blue, fg.alpha);
+      cairo_move_to (cr, x, y);
+      pango_cairo_show_layout (cr, label->layout);
 
       if (label->selection_anchor != label->selection_end)
         {
           gint range[2];
 	  const char *text;
           cairo_region_t *clip;
-	  GtkStateType state;
-          GdkRGBA background_color;
 
           range[0] = label->selection_anchor;
           range[1] = label->selection_end;
 
-	  /* Handle possible preedit string */
 	  if (label->preedit_length > 0 &&
 	      range[1] > label->selection_anchor)
 	    {
 	      text = pango_layout_get_text (label->layout) + label->selection_anchor;
 	      range[1] += g_utf8_offset_to_pointer (text, label->preedit_length) - text;
 	    }
-	  
+
           if (range[0] > range[1])
             {
               gint tmp = range[0];
@@ -1621,44 +1625,28 @@ eel_editable_label_draw (GtkWidget *widget,
                                                    1);
 
           cairo_save (cr);
-
 	  gdk_cairo_region (cr, clip);
 	  cairo_clip (cr);
-
-          state = gtk_widget_get_state_flags (widget);
-	  state |= GTK_STATE_FLAG_SELECTED;
-
-          gtk_style_context_get_background_color (style, state, &background_color);
-	  gdk_cairo_set_source_rgba (cr, &background_color);
+	  cairo_set_source_rgb (cr, 0.18, 0.45, 0.85);
 	  cairo_paint (cr);
-
-          gtk_style_context_save (style);
-          gtk_style_context_set_state (style, state);
-
-          gtk_render_layout (style, cr,
-                             x, y, label->layout);
-
-          gtk_style_context_restore (style);
+	  cairo_set_source_rgb (cr, 1, 1, 1);
+	  cairo_move_to (cr, x, y);
+	  pango_cairo_show_layout (cr, label->layout);
           cairo_restore (cr);
-
           cairo_region_destroy (clip);
         }
       else if (gtk_widget_has_focus (widget))
 	eel_editable_label_draw_cursor (label, cr, x, y);
 
       if (label->draw_outline) {
-        gtk_style_context_save (style);
-        gtk_style_context_set_state (style, gtk_widget_get_state_flags (widget));
-
-        gtk_render_frame (style, cr,
-                          0, 0,
-                          gtk_widget_get_allocated_width (widget),
-                          gtk_widget_get_allocated_height (widget));
-
-        gtk_style_context_restore (style);
+        cairo_set_source_rgb (cr, 0.18, 0.45, 0.85);
+        cairo_set_line_width (cr, 1.0);
+        cairo_rectangle (cr, 0.5, 0.5, width - 1.0, height - 1.0);
+        cairo_stroke (cr);
       }
     }
 
+  cairo_restore (cr);
   return FALSE;
 }
 
@@ -2211,9 +2199,16 @@ eel_editable_label_focus_in (GtkWidget     *widget,
   label->need_im_reset = TRUE;
   gtk_im_context_focus_in (label->im_context);
 
-  g_signal_connect (gdk_keymap_get_default (),
-		    "direction_changed",
-		    G_CALLBACK (eel_editable_label_keymap_direction_changed), label);
+  {
+    GdkKeymap *keymap = gdk_keymap_get_default ();
+
+    /* GTK4 has no GdkKeymap; the compat shim is NULL. Connecting to
+     * it SIGSEGV'd dest after Create New Document auto-rename / F2. */
+    if (keymap != NULL)
+      g_signal_connect (keymap,
+			"direction_changed",
+			G_CALLBACK (eel_editable_label_keymap_direction_changed), label);
+  }
 
   eel_editable_label_check_cursor_blink (label);
 
@@ -2232,11 +2227,16 @@ eel_editable_label_focus_out (GtkWidget     *widget,
   gtk_im_context_focus_out (label->im_context);
 
   eel_editable_label_check_cursor_blink (label);
-  
-  g_signal_handlers_disconnect_by_func (gdk_keymap_get_default (),
-                                        (gpointer) eel_editable_label_keymap_direction_changed,
-                                        label);
-  
+
+  {
+    GdkKeymap *keymap = gdk_keymap_get_default ();
+
+    if (keymap != NULL)
+      g_signal_handlers_disconnect_by_func (keymap,
+					    (gpointer) eel_editable_label_keymap_direction_changed,
+					    label);
+  }
+
   return FALSE;
 }
 

@@ -31,7 +31,7 @@
 #define NEMO_TYPE_MIME_APPLICATION_CHOOSER         (nemo_mime_application_chooser_get_type ())
 #define NEMO_MIME_APPLICATION_CHOOSER(obj)         (G_TYPE_CHECK_INSTANCE_CAST ((obj), NEMO_TYPE_MIME_APPLICATION_CHOOSER, NemoMimeApplicationChooser))
 #define NEMO_MIME_APPLICATION_CHOOSER_CLASS(klass) (G_TYPE_CHECK_CLASS_CAST ((klass), NEMO_TYPE_MIME_APPLICATION_CHOOSER, NemoMimeApplicationChooserClass))
-#define NEMO_IS_MIME_APPLICATION_CHOOSER(obj)      (G_TYPE_CHECK_INSTANCE_TYPE ((obj), NEMO_TYPE_MIME_APPLICATION_CHOOSER)
+#define NEMO_IS_MIME_APPLICATION_CHOOSER(obj)      (G_TYPE_CHECK_INSTANCE_TYPE ((obj), NEMO_TYPE_MIME_APPLICATION_CHOOSER))
 
 typedef struct _NemoMimeApplicationChooser        NemoMimeApplicationChooser;
 typedef struct _NemoMimeApplicationChooserClass   NemoMimeApplicationChooserClass;

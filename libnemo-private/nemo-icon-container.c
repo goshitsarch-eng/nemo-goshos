@@ -3587,6 +3587,13 @@ motion_notify_event (GtkWidget *widget,
 					actions |= GDK_ACTION_MOVE;
 				}
 
+				if (details->drag_icon == NULL)
+					details->drag_icon = get_first_selected_icon (container);
+				if (details->drag_icon == NULL) {
+					details->drag_started = FALSE;
+					break;
+				}
+
 				nemo_icon_dnd_begin_drag (container,
 							      actions,
 							      details->drag_button,
@@ -7087,6 +7094,8 @@ nemo_icon_container_start_renaming_selected_item (NemoIconContainer *container,
 	}
 
 	gtk_widget_show (details->rename_widget);
+	gtk_widget_queue_allocate (GTK_WIDGET (container));
+	gtk_widget_queue_draw (details->rename_widget);
 	gtk_widget_grab_focus (details->rename_widget);
 
 	eel_editable_label_select_region (EEL_EDITABLE_LABEL (details->rename_widget),
