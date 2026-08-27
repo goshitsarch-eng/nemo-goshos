@@ -484,6 +484,15 @@ verne_window_apply_x11 (GtkWindow *window)
 				 (unsigned char *) &value, 1);
 		if (hint == GDK_WINDOW_TYPE_HINT_DESKTOP)
 			XLowerWindow (dpy, xid);
+	} else if (hint == GDK_WINDOW_TYPE_HINT_POPUP_MENU ||
+		   hint == GDK_WINDOW_TYPE_HINT_DROPDOWN_MENU ||
+		   hint == GDK_WINDOW_TYPE_HINT_MENU) {
+		Atom type = XInternAtom (dpy, "_NET_WM_WINDOW_TYPE", False);
+		Atom value = XInternAtom (dpy, "_NET_WM_WINDOW_TYPE_POPUP_MENU", False);
+
+		XChangeProperty (dpy, xid, type, XA_ATOM, 32, PropModeReplace,
+				 (unsigned char *) &value, 1);
+		XRaiseWindow (dpy, xid);
 	}
 
 	skip_taskbar = GPOINTER_TO_INT (g_object_get_data (G_OBJECT (window), "verne-skip-taskbar")) == 1

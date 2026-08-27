@@ -670,8 +670,13 @@ verne_menu_mapped (GtkWidget *w, gpointer data)
 	s = gtk_native_get_surface (GTK_NATIVE (w));
 #ifdef GDK_WINDOWING_X11
 	if (s && GDK_IS_X11_SURFACE (s)) {
+		Display *dpy = gdk_x11_display_get_xdisplay (gdk_surface_get_display (s));
+		Window xid = gdk_x11_surface_get_xid (s);
+
 		gdk_x11_surface_set_skip_taskbar_hint (s, TRUE);
 		gdk_x11_surface_set_skip_pager_hint (s, TRUE);
+		XRaiseWindow (dpy, xid);
+		XFlush (dpy);
 	}
 #endif
 	if (g_object_get_data (G_OBJECT (w), "verne-popup-pos") == NULL)
@@ -798,7 +803,8 @@ verne_ensure_menu_attach (GtkMenu *menu, GtkWidget *fallback)
 	if (menu->attach == NULL || !GTK_IS_WIDGET (menu->attach))
 		return;
 	root = gtk_widget_get_root (menu->attach);
-	if (GTK_IS_WINDOW (root) && !GTK_IS_MENU (root))
+	if (GTK_IS_WINDOW (root) && !GTK_IS_MENU (root) &&
+	    gtk_window_get_type_hint (GTK_WINDOW (root)) != GDK_WINDOW_TYPE_HINT_DESKTOP)
 		gtk_window_set_transient_for (GTK_WINDOW (menu), GTK_WINDOW (root));
 	else if (GTK_IS_MENU (root))
 		gtk_window_set_transient_for (GTK_WINDOW (menu), GTK_WINDOW (root));
@@ -825,6 +831,7 @@ gtk_menu_init (GtkMenu *menu)
 	gtk_window_set_deletable (GTK_WINDOW (menu), FALSE);
 	gtk_window_set_title (GTK_WINDOW (menu), " ");
 	gtk_window_set_hide_on_close (GTK_WINDOW (menu), TRUE);
+	gtk_window_set_type_hint (GTK_WINDOW (menu), GDK_WINDOW_TYPE_HINT_POPUP_MENU);
 	gtk_widget_add_css_class (GTK_WIDGET (menu), "popup");
 	gtk_widget_add_css_class (GTK_WIDGET (menu), "menu");
 	menu->box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
@@ -1103,6 +1110,16 @@ verne_menu_popup_idle (gpointer data)
 	gtk_widget_grab_focus (w);
 	if (p->has_pos)
 		verne_x11_move (GTK_WINDOW (p->menu), p->x, p->y);
+#ifdef GDK_WINDOWING_X11
+	{
+		GdkSurface *s = gtk_native_get_surface (GTK_NATIVE (w));
+		if (s && GDK_IS_X11_SURFACE (s)) {
+			Display *dpy = gdk_x11_display_get_xdisplay (gdk_surface_get_display (s));
+			XRaiseWindow (dpy, gdk_x11_surface_get_xid (s));
+			XFlush (dpy);
+		}
+	}
+#endif
 	g_timeout_add (350, verne_menu_watch_focus, g_object_ref (w));
 	g_object_unref (p->menu);
 	g_free (p);
