@@ -1421,6 +1421,19 @@ nemo_icon_container_receive_dropped_icons (NemoIconContainer *container,
 
 		drop_target = nemo_icon_container_find_drop_target (container,
 									context, x, y, &icon_hit, FALSE);
+		/* GTK4 local drops can complete a few pixels off the motion
+		 * highlight. Keep the folder that drag-motion already chose. */
+		if (!icon_hit && container->details->drop_target != NULL) {
+			char *highlighted;
+
+			highlighted = nemo_icon_container_get_icon_drop_target_uri (container,
+										     container->details->drop_target);
+			if (highlighted != NULL) {
+				g_free (drop_target);
+				drop_target = highlighted;
+				icon_hit = TRUE;
+			}
+		}
 
 		local_move_only = FALSE;
 		if (!icon_hit && real_action == GDK_ACTION_MOVE) {
