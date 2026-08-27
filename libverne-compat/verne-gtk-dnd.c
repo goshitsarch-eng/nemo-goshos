@@ -40,6 +40,24 @@ drop_xy_quark (void)
 	return q;
 }
 
+static GQuark
+drop_read_quark (void)
+{
+	static GQuark q;
+	if (!q)
+		q = g_quark_from_static_string ("verne-drop-read-inflight");
+	return q;
+}
+
+static GQuark
+drop_cache_quark (void)
+{
+	static GQuark q;
+	if (!q)
+		q = g_quark_from_static_string ("verne-drop-read-cache");
+	return q;
+}
+
 static GList *verne_drop_dests;
 
 static void
@@ -2007,6 +2025,8 @@ drop_read_free (VerneDropRead *rd)
 		g_source_remove (rd->timeout_id);
 		rd->timeout_id = 0;
 	}
+	if (rd->drop && g_object_get_qdata (G_OBJECT (rd->drop), drop_read_quark ()) == rd)
+		g_object_set_qdata (G_OBJECT (rd->drop), drop_read_quark (), NULL);
 	g_clear_object (&rd->stream);
 	g_clear_object (&rd->mem);
 	g_clear_object (&rd->cancellable);
@@ -2027,33 +2047,49 @@ drop_read_unref (VerneDropRead *rd)
 }
 
 static void
-drop_read_emit (VerneDropRead *rd, GBytes *bytes)
+drop_deliver_bytes (GtkWidget *widget, GdkDrop *drop, const char *mime,
+		    GBytes *bytes, int x, int y, guint info, guint32 time)
 {
 	GtkSelectionData sel = { 0 };
+	gsize n = 0;
 
+	sel.target = (GdkAtom) (mime ? mime : "text/uri-list");
+	sel.type = sel.target;
+	sel.format = 8;
+	if (bytes)
+		sel.data = (guchar *) g_bytes_get_data (bytes, &n);
+	sel.length = (gint) n;
+	if (widget && GTK_IS_WIDGET (widget)) {
+		g_signal_emit_by_name (widget, "drag-data-received",
+				       drop, x, y, &sel, info, time);
+	}
+	g_warning ("drag-data-received mime=%s len=%d info=%u dest=%s xy=%d,%d",
+		   mime ? mime : "(null)", sel.length, info,
+		   widget ? G_OBJECT_TYPE_NAME (widget) : "(null)", x, y);
+}
+
+static void
+drop_read_emit (VerneDropRead *rd, GBytes *bytes)
+{
 	if (rd == NULL)
 		return;
+	if (bytes && rd->drop) {
+		g_object_set_qdata_full (G_OBJECT (rd->drop), drop_cache_quark (),
+					 g_bytes_ref (bytes), (GDestroyNotify) g_bytes_unref);
+		if (rd->mime)
+			g_object_set_data_full (G_OBJECT (rd->drop), "verne-drop-mime",
+						g_strdup (rd->mime), g_free);
+	}
 	if (!rd->completed) {
 		rd->completed = TRUE;
-		sel.target = (GdkAtom) (rd->mime ? rd->mime : "text/uri-list");
-		sel.type = sel.target;
-		sel.format = 8;
-		if (bytes) {
-			gsize n;
-			sel.data = (guchar *) g_bytes_unref_to_data (bytes, &n);
-			sel.length = (gint) n;
-			bytes = NULL;
-		}
 		if (rd->widget && GTK_IS_WIDGET (rd->widget)) {
-			g_signal_emit_by_name (rd->widget, "drag-data-received",
-					       rd->drop, rd->x, rd->y, &sel, rd->info, rd->time);
-		} else if (rd->drop) {
+			unpack_drop_xy (rd->drop, &rd->x, &rd->y);
+			drop_deliver_bytes (rd->widget, rd->drop,
+					    rd->mime ? rd->mime : "text/uri-list",
+					    bytes, rd->x, rd->y, rd->info, rd->time);
+		} else if (rd->drop && bytes == NULL) {
 			gdk_drop_finish (rd->drop, 0);
 		}
-		g_warning ("drag-data-received mime=%s len=%d info=%u dest=%s",
-			   rd->mime ? rd->mime : "(null)", sel.length, rd->info,
-			   rd->widget ? G_OBJECT_TYPE_NAME (rd->widget) : "(null)");
-		g_free (sel.data);
 	}
 	if (bytes)
 		g_bytes_unref (bytes);
@@ -2077,11 +2113,9 @@ drop_read_timeout (gpointer data)
 	VerneDropRead *rd = data;
 
 	rd->timeout_id = 0;
-	g_warning ("drop-read timeout dest=%s — not blocking dest main loop",
+	g_warning ("drop-read timeout dest=%s — waiting for async, not emitting empty drop",
 		   rd->widget ? G_OBJECT_TYPE_NAME (rd->widget) : "(null)");
-	if (rd->cancellable)
-		g_cancellable_cancel (rd->cancellable);
-	drop_read_emit (rd, NULL);
+	drop_read_unref (rd);
 	return G_SOURCE_REMOVE;
 }
 
@@ -2094,10 +2128,28 @@ drop_splice_done (GObject *source, GAsyncResult *result, gpointer data)
 
 	g_output_stream_splice_finish (G_OUTPUT_STREAM (source), result, &err);
 	if (err) {
+		gboolean cancelled = g_error_matches (err, G_IO_ERROR, G_IO_ERROR_CANCELLED);
+
 		g_warning ("drop-read splice failed: %s", err->message);
 		g_clear_error (&err);
+		if (cancelled || rd->completed) {
+			drop_read_unref (rd);
+			return;
+		}
 	} else if (rd->mem) {
 		bytes = g_memory_output_stream_steal_as_bytes (G_MEMORY_OUTPUT_STREAM (rd->mem));
+	}
+	if (rd->completed) {
+		if (bytes)
+			g_bytes_unref (bytes);
+		drop_read_unref (rd);
+		return;
+	}
+	if (bytes == NULL) {
+		g_warning ("drop-read splice produced no bytes dest=%s",
+			   rd->widget ? G_OBJECT_TYPE_NAME (rd->widget) : "(null)");
+		drop_read_unref (rd);
+		return;
 	}
 	drop_read_emit (rd, bytes);
 }
@@ -2112,8 +2164,16 @@ drop_read_done (GObject *source, GAsyncResult *result, gpointer data)
 
 	stream = gdk_drop_read_finish (GDK_DROP (source), result, &mime, &err);
 	if (err) {
+		gboolean cancelled = g_error_matches (err, G_IO_ERROR, G_IO_ERROR_CANCELLED);
+
 		g_warning ("gdk_drop_read_finish failed: %s", err->message);
 		g_clear_error (&err);
+		if (cancelled) {
+			if (stream)
+				g_object_unref (stream);
+			drop_read_unref (rd);
+			return;
+		}
 	}
 	if (rd->mime == NULL)
 		rd->mime = g_strdup (mime ? mime : "text/uri-list");
@@ -2127,7 +2187,9 @@ drop_read_done (GObject *source, GAsyncResult *result, gpointer data)
 		return;
 	}
 	if (stream == NULL) {
-		drop_read_emit (rd, NULL);
+		g_warning ("gdk_drop_read_finish returned no stream dest=%s",
+			   rd->widget ? G_OBJECT_TYPE_NAME (rd->widget) : "(null)");
+		drop_read_unref (rd);
 		return;
 	}
 	rd->stream = stream;
@@ -2175,6 +2237,34 @@ gtk_drag_get_data (GtkWidget *widget, GdkDragContext *context, GdkAtom target, g
 	}
 	if (!GDK_IS_DROP (context))
 		return;
+	{
+		GBytes *cached = g_object_get_qdata (G_OBJECT (context), drop_cache_quark ());
+		VerneDropRead *inflight = g_object_get_qdata (G_OBJECT (context), drop_read_quark ());
+		int x, y;
+
+		unpack_drop_xy (context, &x, &y);
+		if (cached != NULL) {
+			const char *mime = g_object_get_data (G_OBJECT (context), "verne-drop-mime");
+			guint info = info_for_target (gtk_drag_dest_get_target_list (widget),
+						      target ? target : (GdkAtom) (mime ? mime : "text/uri-list"));
+
+			g_warning ("drop-read cache hit dest=%s mime=%s xy=%d,%d",
+				   widget ? G_OBJECT_TYPE_NAME (widget) : "(null)",
+				   mime ? mime : "(null)", x, y);
+			drop_deliver_bytes (widget, GDK_DROP (context),
+					    mime ? mime : (target ? (const char *) target : "text/uri-list"),
+					    cached, x, y, info, time);
+			return;
+		}
+		if (inflight != NULL && !inflight->completed) {
+			inflight->x = x;
+			inflight->y = y;
+			inflight->time = time;
+			g_warning ("drop-read coalesced dest=%s xy=%d,%d",
+				   widget ? G_OBJECT_TYPE_NAME (widget) : "(null)", x, y);
+			return;
+		}
+	}
 	rd = g_new0 (VerneDropRead, 1);
 	rd->widget = g_object_ref (widget);
 	rd->drop = g_object_ref (GDK_DROP (context));
@@ -2184,9 +2274,10 @@ gtk_drag_get_data (GtkWidget *widget, GdkDragContext *context, GdkAtom target, g
 	rd->cancellable = g_cancellable_new ();
 	rd->refs = 2; /* timeout + gdk_drop_read_async chain */
 	/* GDK X11 drop streams need the main loop. A sync read here deadlocks
-	 * dest after mouse-up (source already sent XdndLeave) so live icons
-	 * never appear. Time out so dest keeps rescanning. */
-	rd->timeout_id = g_timeout_add (1500, drop_read_timeout, rd);
+	 * dest after mouse-up. Coalesce in-flight reads and cache bytes so drop
+	 * can reuse motion data instead of flooding gdk_drop_read_async. */
+	rd->timeout_id = g_timeout_add (4000, drop_read_timeout, rd);
+	g_object_set_qdata (G_OBJECT (context), drop_read_quark (), rd);
 	{
 		GdkContentFormats *formats = gdk_drop_get_formats (GDK_DROP (context));
 		const char *wanted[] = {
@@ -2268,6 +2359,9 @@ gtk_drag_finish (gpointer context, gboolean success, gboolean del, guint32 time)
 		action = GDK_ACTION_COPY;
 	if (GDK_IS_DROP (context)) {
 		drag = gdk_drop_get_drag (GDK_DROP (context));
+		g_object_set_qdata (G_OBJECT (context), drop_cache_quark (), NULL);
+		g_object_set_qdata (G_OBJECT (context), drop_read_quark (), NULL);
+		g_object_set_data (G_OBJECT (context), "verne-drop-mime", NULL);
 		gdk_drop_finish (GDK_DROP (context), success ? action : 0);
 	} else if (GDK_IS_DRAG (context)) {
 		drag = GDK_DRAG (context);
