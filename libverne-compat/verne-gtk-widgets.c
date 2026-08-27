@@ -1,5 +1,6 @@
 #include "config.h"
 #include "verne-gtk-compat.h"
+#include <string.h>
 #include <cairo.h>
 #include <graphene.h>
 #include <gdk-pixbuf/gdk-pixbuf.h>
@@ -2675,6 +2676,29 @@ verne_editable_wants_key (GtkWidget *focus, guint key, GdkModifierType mods)
 	if (!(mods & (GDK_CONTROL_MASK | GDK_ALT_MASK | GDK_SUPER_MASK)))
 		return TRUE;
 	if ((mods & GDK_CONTROL_MASK) && !(mods & GDK_ALT_MASK)) {
+		/* File-manager Undo/Redo must run unless this editable is an
+		 * in-place editor (rename cell, search, canvas label). A
+		 * leftover location-bar GtkEntry would otherwise swallow
+		 * Ctrl+Z as a no-op text undo. */
+		if (key == GDK_KEY_z || key == GDK_KEY_Z ||
+		    key == GDK_KEY_y || key == GDK_KEY_Y) {
+			GtkWidget *w;
+
+			if (GTK_IS_SEARCH_ENTRY (focus) || GTK_IS_TEXT (focus) ||
+			    GTK_IS_TEXT_VIEW (focus))
+				return TRUE;
+			for (w = focus; w != NULL; w = gtk_widget_get_parent (w)) {
+				const gchar *tn = G_OBJECT_TYPE_NAME (w);
+				if (GTK_IS_TREE_VIEW (w))
+					return TRUE;
+				if (tn != NULL &&
+				    (strstr (tn, "IconContainer") != NULL ||
+				     strstr (tn, "EelCanvas") != NULL ||
+				     strstr (tn, "EditableLabel") != NULL))
+					return TRUE;
+			}
+			return FALSE;
+		}
 		switch (key) {
 		case GDK_KEY_a:
 		case GDK_KEY_A:
@@ -2684,8 +2708,6 @@ verne_editable_wants_key (GtkWidget *focus, guint key, GdkModifierType mods)
 		case GDK_KEY_V:
 		case GDK_KEY_x:
 		case GDK_KEY_X:
-		case GDK_KEY_z:
-		case GDK_KEY_Z:
 		case GDK_KEY_Left:
 		case GDK_KEY_Right:
 		case GDK_KEY_Home:
@@ -2713,8 +2735,14 @@ verne_accel_group_activate (GtkAccelGroup *group, guint key, GdkModifierType mod
 		VerneAccelEntry *e = g_ptr_array_index (group->entries, i);
 		if (e->action == NULL || e->key != key || e->mods != mods)
 			continue;
-		if (!gtk_action_get_sensitive (e->action) || !gtk_action_get_visible (e->action))
+		if (!gtk_action_get_sensitive (e->action) || !gtk_action_get_visible (e->action)) {
+			if ((mods & GDK_CONTROL_MASK) && (key == GDK_KEY_z || key == GDK_KEY_y))
+				g_warning ("verne: accel %s skipped sensitive=%d visible=%d",
+					   e->action && e->action->name ? e->action->name : "?",
+					   e->action ? gtk_action_get_sensitive (e->action) : -1,
+					   e->action ? gtk_action_get_visible (e->action) : -1);
 			continue;
+		}
 		gtk_action_activate (e->action);
 		return TRUE;
 	}
@@ -2743,6 +2771,11 @@ verne_accel_key_pressed (GtkEventControllerKey *self, guint keyval, guint keycod
 	for (; groups != NULL; groups = groups->next) {
 		if (verne_accel_group_activate (groups->data, key, mods))
 			return TRUE;
+	}
+	if ((mods & GDK_CONTROL_MASK) && (key == GDK_KEY_z || key == GDK_KEY_y)) {
+		g_warning ("verne: Ctrl+%c not handled focus=%s sensitive-skip or unbound",
+			   key == GDK_KEY_z ? 'Z' : 'Y',
+			   focus ? G_OBJECT_TYPE_NAME (focus) : "none");
 	}
 	return FALSE;
 }

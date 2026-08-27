@@ -333,6 +333,11 @@ on_pressed (GtkGestureClick *click, gint n_press, gdouble x, gdouble y, gpointer
 		return;
 	}
 	emit_button_press (widget, click, 1, x, y);
+	/* GTK3 list/icon views grab focus on click. Without this, the
+	 * location GtkEntry keeps focus and file-manager accelerators
+	 * (Ctrl+Z undo) never reach the view. */
+	if (gtk_widget_get_focusable (widget))
+		gtk_widget_grab_focus (widget);
 	/* Do not claim on press. Claiming takes a GTK4 pointer grab which
 	 * suppresses GtkEventControllerMotion, so icon/list DnD never starts.
 	 * GtkGestureDrag (grouped below) delivers button-down motion instead.
@@ -642,6 +647,11 @@ ensure_controllers (GtkWidget *widget)
 	 * rubberband, and single-click navigation. */
 	if (v == NULL && !GTK_IS_TREE_VIEW (widget))
 		return;
+
+	if (GTK_IS_TREE_VIEW (widget)) {
+		gtk_widget_set_focusable (widget, TRUE);
+		gtk_widget_set_can_focus (widget, TRUE);
+	}
 
 	click = gtk_gesture_click_new ();
 	gtk_gesture_single_set_button (GTK_GESTURE_SINGLE (click), 0);
