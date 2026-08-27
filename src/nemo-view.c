@@ -33,6 +33,7 @@
 
 #include "nemo-actions.h"
 #include "nemo-desktop-icon-view.h"
+#include "nemo-desktop-window.h"
 #include "nemo-error-reporting.h"
 #include "nemo-list-view.h"
 #include "nemo-mime-actions.h"
@@ -7254,7 +7255,11 @@ static void open_as_admin (NemoView *view, const gchar *path);
 typedef struct {
 	NemoView *view;
 	gchar *path;
+	gboolean desktop;
 } VerneOpenAsRootData;
+
+static gchar *verne_file_manager_executable (void);
+static void verne_spawn_file_manager_admin (const gchar *path);
 
 static void
 cb_open_as_root_watch (GPid pid, gint status, gpointer user_data)
@@ -7265,10 +7270,12 @@ cb_open_as_root_watch (GPid pid, gint status, gpointer user_data)
 	g_spawn_close_pid (pid);
 	if (WIFEXITED (status) && WEXITSTATUS (status) == 0)
 		failed = FALSE;
-	if (failed && data != NULL && data->view != NULL && NEMO_IS_VIEW (data->view) &&
-	    data->path != NULL) {
+	if (failed && data != NULL && data->path != NULL) {
 		g_warning ("pkexec Open as Root exited %d, opening admin://", status);
-		open_as_admin (data->view, data->path);
+		if (data->desktop)
+			verne_spawn_file_manager_admin (data->path);
+		else if (data->view != NULL && NEMO_IS_VIEW (data->view))
+			open_as_admin (data->view, data->path);
 	}
 	if (data != NULL) {
 		if (data->view != NULL)
@@ -7301,6 +7308,66 @@ verne_running_executable (void)
 	return g_strdup ("nemo");
 }
 
+static gchar *
+verne_file_manager_executable (void)
+{
+	gchar *exe;
+	gchar *base;
+	gchar *dir;
+	gchar *fm;
+
+	exe = verne_running_executable ();
+	base = g_path_get_basename (exe);
+	if (g_strcmp0 (base, "nemo-desktop") != 0) {
+		g_free (base);
+		return exe;
+	}
+	dir = g_path_get_dirname (exe);
+	fm = g_build_filename (dir, "nemo", NULL);
+	g_free (dir);
+	g_free (exe);
+	g_free (base);
+	if (g_file_test (fm, G_FILE_TEST_IS_EXECUTABLE))
+		return fm;
+	g_free (fm);
+	return g_strdup ("nemo");
+}
+
+static gboolean
+verne_view_is_desktop (NemoView *view)
+{
+	if (view == NULL || view->details->window == NULL)
+		return FALSE;
+	return NEMO_IS_DESKTOP_WINDOW (view->details->window);
+}
+
+static void
+verne_spawn_file_manager_admin (const gchar *path)
+{
+	gchar *exe;
+	gchar *uri;
+	gchar *argv[5];
+	GError *error = NULL;
+
+	if (path == NULL || path[0] == '\0')
+		return;
+
+	exe = verne_file_manager_executable ();
+	uri = g_strdup_printf ("admin://%s", path);
+	argv[0] = exe;
+	argv[1] = (gchar *) "--no-desktop";
+	argv[2] = uri;
+	argv[3] = NULL;
+	if (!g_spawn_async (NULL, argv, NULL, G_SPAWN_SEARCH_PATH, NULL, NULL, NULL, &error)) {
+		g_warning ("Open as Root admin:// launch failed: %s", error->message);
+		g_clear_error (&error);
+	} else {
+		g_warning ("Open as Root launching %s %s", exe, uri);
+	}
+	g_free (exe);
+	g_free (uri);
+}
+
 static void
 open_as_root (NemoView *view, const gchar *path)
 {
@@ -7310,16 +7377,28 @@ open_as_root (NemoView *view, const gchar *path)
 	GPid pid = 0;
 	GError *error = NULL;
 	VerneOpenAsRootData *data;
+	gboolean desktop;
+	gchar *pkexec;
 
 	if (path == NULL || path[0] == '\0')
 		return;
 
-	if (eel_check_is_wayland ()) {
-		open_as_admin (view, path);
+	desktop = verne_view_is_desktop (view);
+	pkexec = g_find_program_in_path ("pkexec");
+
+	/* Dest has no file-browser window to navigate. Never open admin://
+	 * in the dest slot (that SIGABRTs: target_window == NULL). */
+	if (desktop || pkexec == NULL || eel_check_is_wayland ()) {
+		g_free (pkexec);
+		if (desktop)
+			verne_spawn_file_manager_admin (path);
+		else
+			open_as_admin (view, path);
 		return;
 	}
+	g_free (pkexec);
 
-	exe = verne_running_executable ();
+	exe = verne_file_manager_executable ();
 	folder = g_strdup (path);
 	argv[0] = (gchar *) "pkexec";
 	argv[1] = exe;
@@ -7330,7 +7409,9 @@ open_as_root (NemoView *view, const gchar *path)
 	data = g_new0 (VerneOpenAsRootData, 1);
 	data->view = view;
 	data->path = g_strdup (path);
-	g_object_add_weak_pointer (G_OBJECT (view), (gpointer *) &data->view);
+	data->desktop = desktop;
+	if (view != NULL)
+		g_object_add_weak_pointer (G_OBJECT (view), (gpointer *) &data->view);
 
 	if (!g_spawn_async (NULL, argv, NULL,
 			    G_SPAWN_SEARCH_PATH | G_SPAWN_DO_NOT_REAP_CHILD,
@@ -7341,7 +7422,10 @@ open_as_root (NemoView *view, const gchar *path)
 			g_object_remove_weak_pointer (G_OBJECT (data->view), (gpointer *) &data->view);
 		g_free (data->path);
 		g_free (data);
-		open_as_admin (view, path);
+		if (desktop)
+			verne_spawn_file_manager_admin (path);
+		else
+			open_as_admin (view, path);
 	} else {
 		g_child_watch_add (pid, (GChildWatchFunc) cb_open_as_root_watch, data);
 	}
