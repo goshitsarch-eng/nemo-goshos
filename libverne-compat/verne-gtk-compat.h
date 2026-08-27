@@ -803,6 +803,7 @@ void gtk_image_menu_item_set_always_show_image (GtkMenuItem *item, gboolean alwa
 
 GtkWidget *gtk_separator_menu_item_new (void);
 #define GTK_TYPE_SEPARATOR_MENU_ITEM (gtk_separator_menu_item_get_type ())
+#define GTK_IS_SEPARATOR_MENU_ITEM(obj) (G_TYPE_CHECK_INSTANCE_TYPE ((obj), GTK_TYPE_SEPARATOR_MENU_ITEM))
 GType gtk_separator_menu_item_get_type (void);
 
 #define GTK_TYPE_CHECK_MENU_ITEM (gtk_check_menu_item_get_type ())

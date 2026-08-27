@@ -1669,6 +1669,8 @@ verne_menu_hook_leaf_items (GtkMenu *menu)
 	for (ch = box ? gtk_widget_get_first_child (box) : NULL; ch; ch = gtk_widget_get_next_sibling (ch)) {
 		if (g_object_get_data (G_OBJECT (ch), "verne-leaf-hooked"))
 			continue;
+		if (GTK_IS_SEPARATOR (ch) || !gtk_widget_get_sensitive (ch))
+			continue;
 		if (GTK_IS_MENU_ITEM (ch) && gtk_menu_item_get_submenu (GTK_MENU_ITEM (ch)))
 			continue;
 		if (GTK_IS_BUTTON (ch) || GTK_IS_CHECK_BUTTON (ch)) {
@@ -2282,7 +2284,7 @@ gtk_menu_shell_select_first (gpointer menu_shell, gboolean search_sensitive)
 			continue;
 		if (search_sensitive && !gtk_widget_get_sensitive (child))
 			continue;
-		if (GTK_IS_SEPARATOR (child))
+		if (GTK_IS_SEPARATOR (child) || GTK_IS_SEPARATOR_MENU_ITEM (child))
 			continue;
 		g_object_set_data (G_OBJECT (menu_shell), "verne-selected-item", child);
 		if (gtk_widget_get_focusable (child))
@@ -2514,8 +2516,35 @@ GtkWidget *gtk_image_menu_item_new_from_stock (const gchar *stock_id, gpointer a
 }
 void gtk_image_menu_item_set_always_show_image (GtkMenuItem *item, gboolean always_show) { (void) item; (void) always_show; }
 
-GType gtk_separator_menu_item_get_type (void) { return GTK_TYPE_SEPARATOR; }
-GtkWidget *gtk_separator_menu_item_new (void) { return gtk_separator_new (GTK_ORIENTATION_HORIZONTAL); }
+typedef struct _GtkSeparatorMenuItemClass { GtkMenuItemClass parent_class; } GtkSeparatorMenuItemClass;
+typedef struct _GtkSeparatorMenuItem GtkSeparatorMenuItem;
+struct _GtkSeparatorMenuItem { GtkMenuItem parent; };
+G_DEFINE_TYPE (GtkSeparatorMenuItem, gtk_separator_menu_item, GTK_TYPE_MENU_ITEM)
+
+static void
+gtk_separator_menu_item_class_init (GtkSeparatorMenuItemClass *c)
+{
+	(void) c;
+}
+
+static void
+gtk_separator_menu_item_init (GtkSeparatorMenuItem *item)
+{
+	GtkWidget *sep;
+
+	gtk_widget_set_sensitive (GTK_WIDGET (item), FALSE);
+	gtk_widget_add_css_class (GTK_WIDGET (item), "separator");
+	gtk_button_set_has_frame (GTK_BUTTON (item), FALSE);
+	sep = gtk_separator_new (GTK_ORIENTATION_HORIZONTAL);
+	gtk_widget_set_hexpand (sep, TRUE);
+	gtk_button_set_child (GTK_BUTTON (item), sep);
+}
+
+GtkWidget *
+gtk_separator_menu_item_new (void)
+{
+	return g_object_new (GTK_TYPE_SEPARATOR_MENU_ITEM, NULL);
+}
 
 enum { CHECK_MENU_TOGGLED, CHECK_MENU_LAST };
 static guint check_menu_signals[CHECK_MENU_LAST];
