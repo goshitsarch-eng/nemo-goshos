@@ -1892,6 +1892,10 @@ verne_gtk_tree_view_get_tooltip_context (GtkTreeView *tree_view, gint *x, gint *
 	verne_gtk_tree_view_get_tooltip_context (tv, x, y, kb, model, path, iter)
 #define gtk_paned_get_child1(p) gtk_paned_get_start_child (p)
 #define gtk_paned_get_child2(p) gtk_paned_get_end_child (p)
+void verne_gtk_paned_set_start_child (GtkPaned *paned, GtkWidget *child);
+void verne_gtk_paned_set_end_child (GtkPaned *paned, GtkWidget *child);
+#define gtk_paned_set_start_child(p, c) verne_gtk_paned_set_start_child ((p), (c))
+#define gtk_paned_set_end_child(p, c) verne_gtk_paned_set_end_child ((p), (c))
 #define gtk_menu_bar_get_child_pack_direction(m) 0
 #define gtk_image_menu_item_get_always_show_image(i) TRUE
 void gtk_builder_connect_signals (GtkBuilder *builder, gpointer user_data);

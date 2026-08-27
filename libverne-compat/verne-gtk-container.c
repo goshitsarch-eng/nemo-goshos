@@ -314,10 +314,53 @@ gtk_box_set_child_packing (GtkBox *box, GtkWidget *child, gboolean expand, gbool
 		gtk_widget_set_margin_start (child, padding);
 }
 
+static void
+verne_paned_replace_child (GtkPaned *paned, GtkWidget *child, gboolean end)
+{
+	GtkWidget *old;
+	GtkWidget *keep;
+
+	g_return_if_fail (GTK_IS_PANED (paned));
+	old = end ? (gtk_paned_get_end_child) (paned) : (gtk_paned_get_start_child) (paned);
+	if (old == child)
+		return;
+	keep = end ? (gtk_paned_get_start_child) (paned) : (gtk_paned_get_end_child) (paned);
+	if (old != NULL) {
+		GtkRoot *root = gtk_widget_get_root (GTK_WIDGET (paned));
+
+		/* GTK4 GtkPaned warns and can dispose the native when
+		 * gtk_paned_set_focus_child() runs on a child already torn
+		 * down. Move focus off the outgoing child first. */
+		if (keep != NULL)
+			gtk_widget_set_focus_child (GTK_WIDGET (paned), keep);
+		if (GTK_IS_WINDOW (root)) {
+			GtkWidget *focus = gtk_window_get_focus (GTK_WINDOW (root));
+			if (focus == NULL || focus == old || gtk_widget_is_ancestor (focus, old))
+				gtk_window_set_focus (GTK_WINDOW (root), NULL);
+		}
+	}
+	if (end)
+		(gtk_paned_set_end_child) (paned, child);
+	else
+		(gtk_paned_set_start_child) (paned, child);
+}
+
+void
+verne_gtk_paned_set_start_child (GtkPaned *paned, GtkWidget *child)
+{
+	verne_paned_replace_child (paned, child, FALSE);
+}
+
+void
+verne_gtk_paned_set_end_child (GtkPaned *paned, GtkWidget *child)
+{
+	verne_paned_replace_child (paned, child, TRUE);
+}
+
 void
 gtk_paned_pack1 (GtkPaned *paned, GtkWidget *child, gboolean resize, gboolean shrink)
 {
-	gtk_paned_set_start_child (paned, child);
+	verne_gtk_paned_set_start_child (paned, child);
 	gtk_paned_set_resize_start_child (paned, resize);
 	gtk_paned_set_shrink_start_child (paned, shrink);
 }
@@ -325,7 +368,7 @@ gtk_paned_pack1 (GtkPaned *paned, GtkWidget *child, gboolean resize, gboolean sh
 void
 gtk_paned_pack2 (GtkPaned *paned, GtkWidget *child, gboolean resize, gboolean shrink)
 {
-	gtk_paned_set_end_child (paned, child);
+	verne_gtk_paned_set_end_child (paned, child);
 	gtk_paned_set_resize_end_child (paned, resize);
 	gtk_paned_set_shrink_end_child (paned, shrink);
 }

@@ -2606,34 +2606,44 @@ nemo_window_split_view_on (NemoWindow *window)
 void
 nemo_window_split_view_off (NemoWindow *window)
 {
-	NemoWindowPane *pane, *active_pane;
+	NemoWindowPane *pane, *main_pane;
 	GList *l, *next;
 
-	active_pane = nemo_window_get_active_pane (window);
+	g_return_if_fail (NEMO_IS_WINDOW (window));
+	if (window->details->panes == NULL)
+		return;
 
-	/* delete all panes except the first (main) pane */
+	/* Always keep the original left pane. If the extra pane is focused,
+	 * GTK4 GtkPaned would otherwise destroy start_child and leave the
+	 * window without a valid slot (F3 off then Ctrl+1 SIGSEGV'd). */
+	main_pane = window->details->panes->data;
+	if (window->details->active_pane != main_pane &&
+	    NEMO_IS_WINDOW_PANE (main_pane))
+		nemo_window_set_active_pane (window, main_pane);
+
 	for (l = window->details->panes; l != NULL; l = next) {
 		next = l->next;
 		pane = l->data;
-		if (pane != active_pane) {
-            g_clear_object (&window->details->secondary_pane_last_location);
-            if (pane->active_slot != NULL)
-                window->details->secondary_pane_last_location = nemo_window_slot_get_location (pane->active_slot);
+		if (pane != main_pane) {
+			g_clear_object (&window->details->secondary_pane_last_location);
+			if (pane->active_slot != NULL)
+				window->details->secondary_pane_last_location = nemo_window_slot_get_location (pane->active_slot);
 			nemo_window_close_pane (window, pane);
 		}
 	}
 
-    /* Reset split view pane's position so the position can be
-     * caught again later */
-    g_object_set (G_OBJECT (window->details->split_view_hpane),
-                  "position", 0,
-                  "position-set", FALSE,
-                  NULL);
+	/* Reset split view pane's position so the position can be
+	 * caught again later */
+	if (window->details->split_view_hpane != NULL)
+		g_object_set (G_OBJECT (window->details->split_view_hpane),
+			      "position", 0,
+			      "position-set", FALSE,
+			      NULL);
 
-	if (NEMO_IS_WINDOW_PANE (active_pane) && active_pane->action_group != NULL) {
-		nemo_window_set_active_pane (window, active_pane);
+	if (NEMO_IS_WINDOW_PANE (main_pane) && main_pane->action_group != NULL) {
+		nemo_window_set_active_pane (window, main_pane);
 		nemo_navigation_state_set_master (window->details->nav_state,
-						      active_pane->action_group);
+						  main_pane->action_group);
 	}
 
 	nemo_window_update_show_hide_ui_elements (window);
