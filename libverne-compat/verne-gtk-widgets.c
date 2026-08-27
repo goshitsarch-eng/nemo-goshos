@@ -749,6 +749,20 @@ verne_menu_ensure_css (void)
 		"  border-radius: 0;\n"
 		"  min-width: 0;\n"
 		"}\n"
+		"box.verne-overlay-scroll {\n"
+		"  background-color: #ffffff;\n"
+		"  background-image: none;\n"
+		"  color: #1e1e1e;\n"
+		"  border-radius: 12px;\n"
+		"  border: 1px solid #c0c0c0;\n"
+		"  min-width: 240px;\n"
+		"}\n"
+		"box.verne-overlay-scroll box.verne-dest-menu {\n"
+		"  border: none;\n"
+		"  border-radius: 0;\n"
+		"  min-width: 0;\n"
+		"  padding: 6px;\n"
+		"}\n"
 		".menubar {\n"
 		"  background-color: #f6f5f4;\n"
 		"  min-height: 28px;\n"
@@ -848,6 +862,38 @@ verne_menu_overlay_widget (GtkWidget *host)
 	return GTK_IS_OVERLAY (overlay) ? overlay : NULL;
 }
 
+static GtkAdjustment *
+verne_overlay_vadj_from_widget (GtkWidget *widget)
+{
+	GtkWidget *w;
+	GtkAdjustment *va;
+
+	for (w = widget; GTK_IS_WIDGET (w); w = gtk_widget_get_parent (w)) {
+		va = g_object_get_data (G_OBJECT (w), "verne-overlay-vadj");
+		if (GTK_IS_ADJUSTMENT (va))
+			return va;
+		if (GTK_IS_SCROLLED_WINDOW (w))
+			return gtk_scrolled_window_get_vadjustment (GTK_SCROLLED_WINDOW (w));
+	}
+	return NULL;
+}
+
+static void
+verne_overlay_clip_value_changed (GtkAdjustment *va, gpointer data)
+{
+	GtkWidget *clip = data;
+	GtkWidget *box;
+	int y;
+
+	if (!GTK_IS_FIXED (clip) || !GTK_IS_ADJUSTMENT (va))
+		return;
+	box = gtk_widget_get_first_child (clip);
+	if (!GTK_IS_WIDGET (box))
+		return;
+	y = - (int) gtk_adjustment_get_value (va);
+	gtk_fixed_move (GTK_FIXED (clip), box, 0, y);
+}
+
 static GtkWidget *
 verne_menu_get_scroll (GtkMenu *menu)
 {
@@ -856,7 +902,12 @@ verne_menu_get_scroll (GtkMenu *menu)
 	if (!GTK_IS_MENU (menu))
 		return NULL;
 	scroll = g_object_get_data (G_OBJECT (menu), "verne-menu-scroll");
-	return GTK_IS_SCROLLED_WINDOW (scroll) ? scroll : NULL;
+	if (!GTK_IS_WIDGET (scroll))
+		return NULL;
+	if (GTK_IS_SCROLLED_WINDOW (scroll) ||
+	    gtk_widget_has_css_class (scroll, "verne-overlay-scroll"))
+		return scroll;
+	return NULL;
 }
 
 static void
@@ -874,42 +925,95 @@ verne_menu_unparent_overlay_extra (GtkWidget *widget)
 		gtk_overlay_remove_overlay (GTK_OVERLAY (parent), widget);
 	else if (GTK_IS_SCROLLED_WINDOW (parent))
 		gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (parent), NULL);
+	else if (GTK_IS_FIXED (parent))
+		gtk_fixed_remove (GTK_FIXED (parent), widget);
+	else if (GTK_IS_BOX (parent) &&
+		 gtk_widget_has_css_class (parent, "verne-overlay-scroll"))
+		gtk_box_remove (GTK_BOX (parent), widget);
 	else
 		gtk_widget_unparent (widget);
 	g_object_unref (widget);
 }
 
 static GtkWidget *
-verne_menu_ensure_scroll (GtkMenu *menu, GtkWidget *box, int view_w, int view_h)
+verne_menu_ensure_scroll (GtkMenu *menu, GtkWidget *box, int view_w, int view_h,
+			  int nat_w, int nat_h)
 {
-	GtkWidget *scroll = verne_menu_get_scroll (menu);
+	GtkWidget *extra = verne_menu_get_scroll (menu);
+	GtkWidget *clip = NULL;
+	GtkWidget *bar;
+	GtkAdjustment *va = NULL;
 
-	if (scroll == NULL) {
-		scroll = gtk_scrolled_window_new (NULL, NULL);
-		gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (scroll),
-						GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
-		gtk_scrolled_window_set_propagate_natural_width (GTK_SCROLLED_WINDOW (scroll), TRUE);
-		gtk_scrolled_window_set_overlay_scrolling (GTK_SCROLLED_WINDOW (scroll), FALSE);
-		gtk_widget_add_css_class (scroll, "verne-dest-menu");
-		gtk_widget_add_css_class (scroll, "background");
-		gtk_widget_set_halign (scroll, GTK_ALIGN_START);
-		gtk_widget_set_valign (scroll, GTK_ALIGN_START);
-		gtk_widget_set_hexpand (scroll, FALSE);
-		gtk_widget_set_vexpand (scroll, FALSE);
-		g_object_ref_sink (scroll);
+	/* GtkScrolledWindow as an overlay child leaves the inner GtkBox
+	 * unallocated (blank white panel + scrollbar). Clip with GtkFixed so
+	 * rows keep the same allocation path as unscoped menus. */
+	if (nat_w < 1)
+		nat_w = view_w > 16 ? view_w - 16 : 240;
+	if (nat_h < view_h)
+		nat_h = view_h;
+
+	if (extra == NULL || !gtk_widget_has_css_class (extra, "verne-overlay-scroll")) {
+		extra = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
+		gtk_widget_add_css_class (extra, "verne-dest-menu");
+		gtk_widget_add_css_class (extra, "verne-overlay-scroll");
+		gtk_widget_add_css_class (extra, "background");
+		gtk_widget_set_halign (extra, GTK_ALIGN_START);
+		gtk_widget_set_valign (extra, GTK_ALIGN_START);
+		gtk_widget_set_hexpand (extra, FALSE);
+		gtk_widget_set_vexpand (extra, FALSE);
+		clip = gtk_fixed_new ();
+		gtk_widget_set_overflow (clip, GTK_OVERFLOW_HIDDEN);
+		gtk_widget_set_hexpand (clip, TRUE);
+		gtk_widget_set_vexpand (clip, FALSE);
+		gtk_widget_set_halign (clip, GTK_ALIGN_FILL);
+		gtk_widget_set_valign (clip, GTK_ALIGN_FILL);
+		gtk_box_append (GTK_BOX (extra), clip);
+		va = gtk_adjustment_new (0, 0, 1, 24, 80, 1);
+		g_object_ref_sink (va);
+		g_object_set_data_full (G_OBJECT (extra), "verne-overlay-vadj",
+					va, g_object_unref);
+		g_object_set_data_full (G_OBJECT (clip), "verne-overlay-vadj",
+					g_object_ref (va), g_object_unref);
+		g_signal_connect (va, "value-changed",
+				  G_CALLBACK (verne_overlay_clip_value_changed), clip);
+		bar = gtk_scrollbar_new (GTK_ORIENTATION_VERTICAL, va);
+		gtk_widget_set_vexpand (bar, TRUE);
+		gtk_box_append (GTK_BOX (extra), bar);
+		g_object_set_data (G_OBJECT (extra), "verne-overlay-clip", clip);
+		g_object_ref_sink (extra);
 		g_object_set_data_full (G_OBJECT (menu), "verne-menu-scroll",
-					scroll, g_object_unref);
+					extra, g_object_unref);
+	} else {
+		clip = g_object_get_data (G_OBJECT (extra), "verne-overlay-clip");
+		va = g_object_get_data (G_OBJECT (extra), "verne-overlay-vadj");
 	}
-	if (gtk_scrolled_window_get_child (GTK_SCROLLED_WINDOW (scroll)) != box) {
+	if (!GTK_IS_FIXED (clip))
+		return extra;
+
+	if (gtk_widget_get_parent (box) != clip) {
 		if (gtk_widget_get_parent (box) != NULL)
 			verne_menu_unparent_overlay_extra (box);
-		gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (scroll), box);
+		gtk_fixed_put (GTK_FIXED (clip), box, 0, 0);
 	}
-	gtk_widget_set_size_request (box, -1, -1);
-	gtk_widget_set_size_request (scroll, view_w, view_h);
-	gtk_scrolled_window_set_min_content_height (GTK_SCROLLED_WINDOW (scroll), view_h);
-	gtk_scrolled_window_set_max_content_height (GTK_SCROLLED_WINDOW (scroll), view_h);
-	return scroll;
+
+	gtk_widget_set_size_request (box, nat_w, nat_h);
+	gtk_widget_set_size_request (clip, nat_w, view_h);
+	gtk_widget_set_size_request (extra, view_w, view_h);
+	if (GTK_IS_ADJUSTMENT (va)) {
+		g_signal_handlers_block_by_func (va,
+						 G_CALLBACK (verne_overlay_clip_value_changed),
+						 clip);
+		gtk_adjustment_configure (va, 0, 0, (gdouble) nat_h, 32.0,
+					  (gdouble) view_h, (gdouble) view_h);
+		g_signal_handlers_unblock_by_func (va,
+						   G_CALLBACK (verne_overlay_clip_value_changed),
+						   clip);
+		gtk_fixed_move (GTK_FIXED (clip), box, 0, 0);
+	}
+	gtk_widget_set_visible (box, TRUE);
+	gtk_widget_set_visible (clip, TRUE);
+	gtk_widget_set_visible (extra, TRUE);
+	return extra;
 }
 
 static void
@@ -925,15 +1029,24 @@ verne_menu_restore_box_to_window (GtkMenu *menu)
 	box = menu->box;
 	parent = gtk_widget_get_parent (box);
 	scroll = verne_menu_get_scroll (menu);
-	if (parent != NULL && GTK_IS_SCROLLED_WINDOW (parent)) {
-		GtkWidget *ov = gtk_widget_get_parent (parent);
+	if (parent != NULL &&
+	    (GTK_IS_SCROLLED_WINDOW (parent) || GTK_IS_FIXED (parent))) {
+		GtkWidget *extra = parent;
+		GtkWidget *ov;
+
+		while (GTK_IS_WIDGET (extra) &&
+		       gtk_widget_get_parent (extra) != NULL &&
+		       !GTK_IS_OVERLAY (gtk_widget_get_parent (extra)))
+			extra = gtk_widget_get_parent (extra);
+		ov = extra ? gtk_widget_get_parent (extra) : NULL;
 
 		g_object_ref (box);
 		verne_widget_clear_active (box);
-		gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (parent), NULL);
-		if (GTK_IS_OVERLAY (ov))
-			gtk_overlay_remove_overlay (GTK_OVERLAY (ov), parent);
-		gtk_widget_set_visible (parent, FALSE);
+		verne_menu_unparent_overlay_extra (box);
+		if (GTK_IS_OVERLAY (ov) && GTK_IS_WIDGET (extra))
+			gtk_overlay_remove_overlay (GTK_OVERLAY (ov), extra);
+		if (GTK_IS_WIDGET (extra))
+			gtk_widget_set_visible (extra, FALSE);
 		gtk_widget_remove_css_class (box, "verne-dest-menu");
 		gtk_widget_set_size_request (box, -1, -1);
 		gtk_widget_set_margin_start (box, 0);
@@ -988,7 +1101,12 @@ verne_menu_box_is_dest_overlay (GtkWidget *box)
 	if (box == NULL || !GTK_IS_WIDGET (box) || !gtk_widget_is_visible (box))
 		return FALSE;
 	parent = gtk_widget_get_parent (box);
-	if (GTK_IS_SCROLLED_WINDOW (parent)) {
+	while (GTK_IS_WIDGET (parent) &&
+	       (GTK_IS_SCROLLED_WINDOW (parent) ||
+		GTK_IS_FIXED (parent) ||
+		GTK_IS_VIEWPORT (parent) ||
+		(GTK_IS_BOX (parent) &&
+		 gtk_widget_has_css_class (parent, "verne-dest-menu")))) {
 		if (!gtk_widget_is_visible (parent))
 			return FALSE;
 		parent = gtk_widget_get_parent (parent);
@@ -1092,7 +1210,12 @@ verne_dest_menu_button_at (GtkWidget *box, double lx, double ly)
 		int view_w = GPOINTER_TO_INT (g_object_get_data (G_OBJECT (box), "verne-dest-menu-w"));
 		GtkWidget *parent = gtk_widget_get_parent (box);
 
-		if (GTK_IS_SCROLLED_WINDOW (parent) && view_w > 48 && lx >= view_w - 18)
+		if (GTK_IS_FIXED (parent))
+			parent = gtk_widget_get_parent (parent);
+		if ((GTK_IS_SCROLLED_WINDOW (parent) ||
+		     (GTK_IS_BOX (parent) &&
+		      gtk_widget_has_css_class (parent, "verne-overlay-scroll"))) &&
+		    view_w > 48 && lx >= view_w - 18)
 			return NULL;
 	}
 	box_w = gtk_widget_get_width (box);
@@ -1214,18 +1337,29 @@ static GtkWidget *
 verne_overlay_hit_box (GtkWidget *widget, double *x, double *y)
 {
 	GtkAdjustment *va;
-	int sw;
+	GtkWidget *box;
+	GtkWidget *clip;
+	int sw = 0;
 
 	if (widget == NULL)
 		return NULL;
-	if (GTK_IS_SCROLLED_WINDOW (widget)) {
+	if (GTK_IS_SCROLLED_WINDOW (widget) ||
+	    GTK_IS_FIXED (widget) ||
+	    (GTK_IS_BOX (widget) &&
+	     gtk_widget_has_css_class (widget, "verne-overlay-scroll"))) {
 		sw = gtk_widget_get_width (widget);
 		if (sw > 48 && x != NULL && *x >= sw - 20)
 			return NULL;
-		va = gtk_scrolled_window_get_vadjustment (GTK_SCROLLED_WINDOW (widget));
+		va = verne_overlay_vadj_from_widget (widget);
 		if (va != NULL && y != NULL)
 			*y += gtk_adjustment_get_value (va);
-		return gtk_scrolled_window_get_child (GTK_SCROLLED_WINDOW (widget));
+		if (GTK_IS_SCROLLED_WINDOW (widget))
+			return gtk_scrolled_window_get_child (GTK_SCROLLED_WINDOW (widget));
+		if (GTK_IS_FIXED (widget))
+			return gtk_widget_get_first_child (widget);
+		clip = g_object_get_data (G_OBJECT (widget), "verne-overlay-clip");
+		box = GTK_IS_FIXED (clip) ? gtk_widget_get_first_child (clip) : NULL;
+		return box != NULL ? box : widget;
 	}
 	{
 		GtkWidget *parent = gtk_widget_get_parent (widget);
@@ -1258,9 +1392,13 @@ verne_dest_overlay_pressed (GtkGestureClick *gesture, gint n_press, gdouble x, g
 		GtkWidget *parent = gtk_widget_get_parent (host);
 		int sw = 0;
 
-		if (GTK_IS_SCROLLED_WINDOW (host))
+		if (GTK_IS_SCROLLED_WINDOW (host) ||
+		    (GTK_IS_BOX (host) &&
+		     gtk_widget_has_css_class (host, "verne-overlay-scroll")))
 			sw = gtk_widget_get_width (host);
-		else if (GTK_IS_SCROLLED_WINDOW (parent))
+		else if (GTK_IS_SCROLLED_WINDOW (parent) ||
+			 (GTK_IS_BOX (parent) &&
+			  gtk_widget_has_css_class (parent, "verne-overlay-scroll")))
 			sw = gtk_widget_get_width (parent);
 		if (sw > 48 && x >= sw - 20) {
 			g_warning ("verne: overlay press in scrollbar gutter x=%.0f sw=%d", x, sw);
@@ -1284,14 +1422,9 @@ verne_dest_overlay_pressed (GtkGestureClick *gesture, gint n_press, gdouble x, g
 static GtkAdjustment *
 verne_overlay_menu_vadj (GtkWidget *widget)
 {
-	GtkWidget *sw;
-
 	if (GTK_IS_SCROLLED_WINDOW (widget))
 		return gtk_scrolled_window_get_vadjustment (GTK_SCROLLED_WINDOW (widget));
-	sw = widget ? gtk_widget_get_parent (widget) : NULL;
-	if (GTK_IS_SCROLLED_WINDOW (sw))
-		return gtk_scrolled_window_get_vadjustment (GTK_SCROLLED_WINDOW (sw));
-	return NULL;
+	return verne_overlay_vadj_from_widget (widget);
 }
 
 static gboolean
@@ -1475,19 +1608,17 @@ verne_menu_popup_dest_overlay (GtkMenu *menu, int root_x, int root_y)
 		if (lx + view_w > dest_w - 8)
 			lx = MAX (8, dest_w - 8 - view_w);
 		if (need_scroll)
-			extra = verne_menu_ensure_scroll (menu, box, view_w, view_h);
+			extra = verne_menu_ensure_scroll (menu, box, view_w, view_h, nat_w, nat_h);
 		else {
 			GtkWidget *scroll = verne_menu_get_scroll (menu);
 
-			if (scroll != NULL && gtk_scrolled_window_get_child (GTK_SCROLLED_WINDOW (scroll)) == box)
-				gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (scroll), NULL);
+			if (gtk_widget_get_parent (box) != NULL &&
+			    gtk_widget_get_parent (box) != overlay)
+				verne_menu_unparent_overlay_extra (box);
 			if (scroll != NULL && GTK_IS_OVERLAY (gtk_widget_get_parent (scroll))) {
 				gtk_overlay_remove_overlay (GTK_OVERLAY (gtk_widget_get_parent (scroll)), scroll);
 				gtk_widget_set_visible (scroll, FALSE);
 			}
-			if (gtk_widget_get_parent (box) != NULL &&
-			    gtk_widget_get_parent (box) != overlay)
-				verne_menu_unparent_overlay_extra (box);
 			gtk_widget_set_size_request (box, view_w, view_h);
 			extra = box;
 		}
@@ -1519,8 +1650,21 @@ verne_menu_popup_dest_overlay (GtkMenu *menu, int root_x, int root_y)
 		gtk_widget_set_visible (box, TRUE);
 		gtk_widget_set_can_target (box, TRUE);
 		verne_overlay_attach_scroll_controllers (box);
-		if (extra != box)
+		if (extra != box) {
 			verne_overlay_attach_scroll_controllers (extra);
+			if (g_object_get_data (G_OBJECT (extra), "verne-dest-click") == NULL) {
+				GtkGesture *click = gtk_gesture_click_new ();
+
+				gtk_gesture_single_set_button (GTK_GESTURE_SINGLE (click), 1);
+				gtk_event_controller_set_propagation_phase (GTK_EVENT_CONTROLLER (click),
+									    GTK_PHASE_CAPTURE);
+				g_signal_connect (click, "pressed",
+						  G_CALLBACK (verne_dest_overlay_pressed), menu);
+				gtk_widget_add_controller (extra, GTK_EVENT_CONTROLLER (click));
+				g_object_set_data (G_OBJECT (extra), "verne-dest-click",
+						   GINT_TO_POINTER (1));
+			}
+		}
 	}
 	{
 		GtkWidget *ch;
@@ -2572,10 +2716,21 @@ verne_menu_hide_overlay_leftovers (GtkMenu *keep)
 			overlay = g_object_get_data (G_OBJECT (w), "verne-dest-menu-overlay");
 		if (GTK_IS_OVERLAY (overlay)) {
 			for (ch = gtk_widget_get_first_child (overlay); ch; ch = next) {
+				GtkWidget *walk;
+				gboolean keep_here = FALSE;
+
 				next = gtk_widget_get_next_sibling (ch);
 				if (ch == keep_box)
 					continue;
 				if (ch == gtk_overlay_get_child (GTK_OVERLAY (overlay)))
+					continue;
+				for (walk = keep_box; GTK_IS_WIDGET (walk); walk = gtk_widget_get_parent (walk)) {
+					if (walk == ch) {
+						keep_here = TRUE;
+						break;
+					}
+				}
+				if (keep_here)
 					continue;
 				if (!gtk_widget_has_css_class (ch, "verne-dest-menu"))
 					continue;
@@ -2683,17 +2838,12 @@ verne_toplevel_dismiss_menus (GtkGestureClick *gesture, gint n_press, gdouble x,
 			if (mw > 0 && mh > 0 &&
 			    x >= mx && x < mx + mw && y >= my && y < my + mh) {
 				GtkWidget *btn;
-				GtkWidget *scroll_parent;
+				GtkAdjustment *va;
 				double lx = x - mx, ly = y - my;
 
-				scroll_parent = gtk_widget_get_parent (box);
-				if (GTK_IS_SCROLLED_WINDOW (scroll_parent)) {
-					GtkAdjustment *va;
-
-					va = gtk_scrolled_window_get_vadjustment (GTK_SCROLLED_WINDOW (scroll_parent));
-					if (va != NULL)
-						ly += gtk_adjustment_get_value (va);
-				}
+				va = verne_overlay_vadj_from_widget (box);
+				if (va != NULL)
+					ly += gtk_adjustment_get_value (va);
 				btn = verne_dest_menu_button_at (box, lx, ly);
 				g_warning ("verne: dest menu hit ly=%.0f btn=%s label=%s",
 					   ly,
