@@ -2,6 +2,10 @@
 <interface>
   <object class="GtkShortcutsWindow" id="keyboard_shortcuts">
     <property name="modal">False</property>
+    <property name="title" translatable="yes">Keyboard Shortcuts</property>
+    <property name="default-width">760</property>
+    <property name="default-height">520</property>
+    <property name="resizable">True</property>
     <child>
       <object class="GtkShortcutsSection">
         <property name="visible">True</property>

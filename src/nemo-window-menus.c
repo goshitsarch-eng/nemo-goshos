@@ -455,13 +455,16 @@ action_show_shortcuts_window (GtkAction *action,
 		g_signal_connect (shortcuts_window, "destroy",
 				  G_CALLBACK (gtk_widget_destroyed), &shortcuts_window);
 
+		gtk_window_set_title (GTK_WINDOW (shortcuts_window), _("Keyboard Shortcuts"));
+		gtk_window_set_default_size (GTK_WINDOW (shortcuts_window), 760, 520);
+
 		g_object_unref (builder);
 	}
 
 	if (GTK_WINDOW (window) != gtk_window_get_transient_for (GTK_WINDOW (shortcuts_window)))
 		gtk_window_set_transient_for (GTK_WINDOW (shortcuts_window), GTK_WINDOW (window));
 
-	gtk_widget_show_all (shortcuts_window);
+	gtk_widget_show (shortcuts_window);
 	gtk_window_present (GTK_WINDOW (shortcuts_window));
 }
 
