@@ -124,9 +124,14 @@ on_toggle_action_notify_active (GtkAction *action, GParamSpec *pspec, gpointer i
 static void
 on_action_notify_visible (GtkAction *action, GParamSpec *pspec, gpointer item)
 {
+	gboolean visible;
+
 	(void) pspec;
-	if (GTK_IS_WIDGET (item))
-		gtk_widget_set_visible (item, gtk_action_get_visible (action));
+	if (!GTK_IS_WIDGET (item))
+		return;
+	visible = gtk_action_get_visible (action);
+	gtk_widget_set_no_show_all (item, !visible);
+	gtk_widget_set_visible (item, visible);
 }
 
 static void
@@ -179,8 +184,10 @@ build_menu_item_for_action (GtkUIManager *self, UiNode *node)
 			g_object_set_data (G_OBJECT (item), "verne-action-clicked", GINT_TO_POINTER (1));
 		}
 	}
-	if (action && !gtk_action_get_visible (action))
+	if (action && !gtk_action_get_visible (action)) {
+		gtk_widget_set_no_show_all (item, TRUE);
 		gtk_widget_set_visible (item, FALSE);
+	}
 	if (action && !gtk_action_get_sensitive (action))
 		gtk_widget_set_sensitive (item, FALSE);
 	if (action) {

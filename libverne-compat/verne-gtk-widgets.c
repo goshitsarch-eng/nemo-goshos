@@ -890,6 +890,11 @@ verne_menu_update_separators (GtkWidget *box)
 		}
 		if (!gtk_widget_get_visible (ch))
 			continue;
+		{
+			const gchar *lab = verne_dest_item_label (ch);
+			if (lab == NULL || lab[0] == '\0')
+				continue;
+		}
 		if (pending_sep != NULL) {
 			gtk_widget_set_visible (pending_sep, TRUE);
 			pending_sep = NULL;

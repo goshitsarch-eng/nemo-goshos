@@ -437,6 +437,14 @@ gtk_widget_show_all (GtkWidget *widget)
 	/* GTK3: no_show_all skips this widget and its descendants. */
 	if (gtk_widget_get_no_show_all (widget))
 		return;
+	{
+		GtkAction *action = g_object_get_data (G_OBJECT (widget), "verne-action");
+		if (action && !gtk_action_get_visible (action)) {
+			gtk_widget_set_no_show_all (widget, TRUE);
+			gtk_widget_set_visible (widget, FALSE);
+			return;
+		}
+	}
 	/* GTK3 gtk_widget_show_all() on a GtkMenu shows items, not the popup. */
 	if (GTK_IS_POPOVER (widget) || GTK_IS_MENU (widget)) {
 		GtkWidget *box = GTK_IS_MENU (widget) ? gtk_menu_get_box (GTK_MENU (widget))
