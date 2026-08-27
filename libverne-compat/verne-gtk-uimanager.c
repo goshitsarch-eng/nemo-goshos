@@ -169,12 +169,15 @@ build_menu_item_for_action (GtkUIManager *self, UiNode *node)
 		gtk_check_menu_item_set_active (GTK_CHECK_MENU_ITEM (item),
 						gtk_toggle_action_get_active (GTK_TOGGLE_ACTION (action)));
 		g_signal_connect (item, "clicked", G_CALLBACK (on_item_activate), action);
+		g_object_set_data (G_OBJECT (item), "verne-action-clicked", GINT_TO_POINTER (1));
 		g_signal_connect_object (action, "notify::active",
 					 G_CALLBACK (on_toggle_action_notify_active), item, 0);
 	} else {
 		item = gtk_menu_item_new_with_mnemonic (label ? label : "");
-		if (action)
+		if (action) {
 			g_signal_connect (item, "clicked", G_CALLBACK (on_item_activate), action);
+			g_object_set_data (G_OBJECT (item), "verne-action-clicked", GINT_TO_POINTER (1));
+		}
 	}
 	if (action && !gtk_action_get_visible (action))
 		gtk_widget_set_visible (item, FALSE);

@@ -325,6 +325,12 @@ action_about_nemo_callback (GtkAction *action,
 	GtkWindow *parent = GTK_WINDOW (user_data);
 	GtkWidget *about;
 
+	about = g_object_get_data (G_OBJECT (parent), "verne-about-window");
+	if (GTK_IS_WINDOW (about)) {
+		gtk_window_present (GTK_WINDOW (about));
+		return;
+	}
+
 	license_trans = g_strjoin ("\n\n", _(license[0]), _(license[1]),
 					     _(license[2]), NULL);
 
@@ -338,6 +344,8 @@ action_about_nemo_callback (GtkAction *action,
 	adw_about_window_set_developer_name (ADW_ABOUT_WINDOW (about), "Linux Mint / Cinnamon");
 	gtk_window_set_transient_for (GTK_WINDOW (about), parent);
 	gtk_window_set_hide_on_close (GTK_WINDOW (about), TRUE);
+	g_object_set_data_full (G_OBJECT (parent), "verne-about-window",
+				g_object_ref_sink (about), g_object_unref);
 	gtk_window_present (GTK_WINDOW (about));
 
 	g_free (license_trans);

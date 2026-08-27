@@ -1891,7 +1891,12 @@ verne_menu_leaf_clicked (GtkWidget *item, gpointer data)
 	 * Block this clicked handler so GtkButton::activate cannot re-enter. */
 	g_object_ref (menu);
 	g_signal_handlers_block_by_func (item, G_CALLBACK (verne_menu_leaf_clicked), menu);
-	if (g_signal_lookup ("activate", G_OBJECT_TYPE (item)) != 0)
+	/* UI-manager items already run the GtkAction from GtkButton::clicked.
+	 * Emitting activate here re-enters clicked and opened About / Connect
+	 * twice, then SIGSEGV'd the file window on close. Ask-drop items have
+	 * no action and still need GtkMenuItem::activate. */
+	if (g_object_get_data (G_OBJECT (item), "verne-action-clicked") == NULL &&
+	    g_signal_lookup ("activate", G_OBJECT_TYPE (item)) != 0)
 		g_signal_emit_by_name (item, "activate");
 	g_signal_handlers_unblock_by_func (item, G_CALLBACK (verne_menu_leaf_clicked), menu);
 	gtk_menu_popdown (menu);
