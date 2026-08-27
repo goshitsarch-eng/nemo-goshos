@@ -1595,8 +1595,22 @@ verne_toplevel_dismiss_menus (GtkGestureClick *gesture, gint n_press, gdouble x,
 		    gtk_widget_get_ancestor (picked, GTK_TYPE_NOTEBOOK) != NULL)
 			return;
 		for (walk = picked; walk != NULL; walk = gtk_widget_get_parent (walk)) {
-			if (gtk_widget_has_css_class (walk, "verne-dest-menu") ||
-			    gtk_widget_has_css_class (walk, "menu"))
+			if (gtk_widget_has_css_class (walk, "verne-dest-menu")) {
+				GtkWidget *btn = picked;
+				guint button = gtk_gesture_single_get_current_button (GTK_GESTURE_SINGLE (gesture));
+
+				while (btn != NULL && btn != walk &&
+				       !GTK_IS_BUTTON (btn) && !GTK_IS_CHECK_BUTTON (btn))
+					btn = gtk_widget_get_parent (btn);
+				if (button == 1 && btn != NULL && btn != walk &&
+				    (GTK_IS_BUTTON (btn) || GTK_IS_CHECK_BUTTON (btn))) {
+					g_signal_emit_by_name (btn, "clicked");
+					g_warning ("verne: dest overlay dismiss-activate %s",
+						   G_OBJECT_TYPE_NAME (btn));
+				}
+				return;
+			}
+			if (gtk_widget_has_css_class (walk, "menu") && GTK_IS_BOX (walk))
 				return;
 		}
 	}
