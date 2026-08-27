@@ -228,9 +228,10 @@ static void update_places                              (NemoPlacesSidebar *sideb
 static void update_places_on_idle                      (NemoPlacesSidebar *sidebar);
 static void rebuild_menu                               (NemoPlacesSidebar *sidebar);
 static void actions_changed                            (gpointer user_data);
-/* Identifiers for target types */
+/* Identifiers for target types. Never use 0: unset drag_data_info is 0
+ * and would look like GTK_TREE_MODEL_ROW, rejecting file drops on Home/Desktop. */
 enum {
-  GTK_TREE_MODEL_ROW,
+  GTK_TREE_MODEL_ROW = 1,
   TEXT_URI_LIST
 };
 
@@ -1645,8 +1646,109 @@ get_drag_type (NemoPlacesSidebar *sidebar,
         /* or else you want to drag items INTO the existing bookmarks */
         return GTK_TREE_VIEW_DROP_INTO_OR_BEFORE;
     }
+    }
+
+
+static gboolean
+places_try_path_at (GtkTreeView *tree_view,
+		    int x, int y,
+		    GtkTreePath **path,
+		    GtkTreeViewDropPosition *pos)
+{
+	g_clear_pointer (path, gtk_tree_path_free);
+	if (gtk_tree_view_get_dest_row_at_pos (tree_view, x, y, path, pos) &&
+	    *path != NULL)
+		return TRUE;
+	g_clear_pointer (path, gtk_tree_path_free);
+	if (gtk_tree_view_get_path_at_pos (tree_view, x, y, path, NULL, NULL, NULL) &&
+	    *path != NULL) {
+		*pos = GTK_TREE_VIEW_DROP_INTO_OR_BEFORE;
+		return TRUE;
+	}
+	g_clear_pointer (path, gtk_tree_path_free);
+	return FALSE;
 }
 
+/* GTK4 drop x,y are widget-relative. get_path_at_pos still wants bin-window
+ * coords, and the two spaces often miss the row. Walk visible row rectangles
+ * so Home/Desktop/Trash file drops still hit. */
+static gboolean
+places_path_from_drop_xy (GtkTreeView *tree_view,
+			  int x, int y,
+			  GtkTreePath **path,
+			  GtkTreeViewDropPosition *pos)
+{
+	GtkTreeModel *model;
+	GtkTreeIter iter;
+	GtkTreeViewColumn *col;
+	GtkTreePath *best = NULL;
+	int best_dist = G_MAXINT;
+	int wx, wy, bx, by;
+	int trials[3][2];
+	int n = 0, i;
+
+	*path = NULL;
+	trials[n][0] = x;
+	trials[n][1] = y;
+	n++;
+	gtk_tree_view_convert_widget_to_bin_window_coords (tree_view, x, y, &bx, &by);
+	if (bx != x || by != y) {
+		trials[n][0] = bx;
+		trials[n][1] = by;
+		n++;
+	}
+	gtk_tree_view_convert_bin_window_to_widget_coords (tree_view, x, y, &wx, &wy);
+	if ((wx != x || wy != y) && (n < 2 || wx != trials[1][0] || wy != trials[1][1])) {
+		trials[n][0] = wx;
+		trials[n][1] = wy;
+		n++;
+	}
+	for (i = 0; i < n; i++) {
+		if (places_try_path_at (tree_view, trials[i][0], trials[i][1], path, pos))
+			return TRUE;
+	}
+
+	model = gtk_tree_view_get_model (tree_view);
+	col = gtk_tree_view_get_column (tree_view, 1);
+	if (col == NULL)
+		col = gtk_tree_view_get_column (tree_view, 0);
+	if (model == NULL || col == NULL || !gtk_tree_model_get_iter_first (model, &iter))
+		return FALSE;
+
+	do {
+		GtkTreePath *ip;
+		GdkRectangle area;
+		int dist;
+
+		ip = gtk_tree_model_get_path (model, &iter);
+		gtk_tree_view_get_background_area (tree_view, ip, col, &area);
+		if (y >= area.y && y < area.y + MAX (area.height, 1)) {
+			*path = ip;
+			*pos = GTK_TREE_VIEW_DROP_INTO_OR_BEFORE;
+			gtk_tree_path_free (best);
+			return TRUE;
+		}
+		if (y < area.y)
+			dist = area.y - y;
+		else
+			dist = y - (area.y + area.height);
+		if (dist < best_dist) {
+			best_dist = dist;
+			gtk_tree_path_free (best);
+			best = ip;
+		} else {
+			gtk_tree_path_free (ip);
+		}
+	} while (gtk_tree_model_iter_next (model, &iter));
+
+	if (best != NULL && best_dist <= 28) {
+		*path = best;
+		*pos = GTK_TREE_VIEW_DROP_INTO_OR_BEFORE;
+		return TRUE;
+	}
+	gtk_tree_path_free (best);
+	return FALSE;
+}
 
 /* Computes the appropriate row and position for dropping */
 static gboolean
@@ -1663,17 +1765,9 @@ compute_drop_position (GtkTreeView *tree_view,
 	SectionType section_type;
     gchar *drop_target_uri = NULL;
 
-	if (!gtk_tree_view_get_dest_row_at_pos (tree_view,
-						x, y,
-						path, pos) ||
-	    *path == NULL) {
-		g_clear_pointer (path, gtk_tree_path_free);
-		if (!gtk_tree_view_get_path_at_pos (tree_view, x, y, path, NULL, NULL, NULL) ||
-		    *path == NULL) {
-			return FALSE;
-		}
-		*pos = GTK_TREE_VIEW_DROP_INTO_OR_BEFORE;
-	}
+	*path = NULL;
+	if (!places_path_from_drop_xy (tree_view, x, y, path, pos))
+		return FALSE;
 	model = gtk_tree_view_get_model (tree_view);
 
 	gtk_tree_model_get_iter (model, &iter, *path);
@@ -1708,6 +1802,30 @@ compute_drop_position (GtkTreeView *tree_view,
             *pos = GTK_TREE_VIEW_DROP_AFTER;
             g_free (drop_target_uri);
             return TRUE;
+        } else if (!(sidebar->drag_data_received &&
+		     sidebar->drag_data_info == GTK_TREE_MODEL_ROW)) {
+		/* File transfer onto an expanded heading: land in the first child
+		 * (Home under My Computer) instead of rejecting the drop. */
+		GtkTreeIter child;
+
+		if (gtk_tree_model_iter_children (model, &child, &iter)) {
+			gtk_tree_path_free (*path);
+			*path = gtk_tree_model_get_path (model, &child);
+			iter = child;
+			g_free (drop_target_uri);
+			drop_target_uri = NULL;
+			gtk_tree_model_get (model, &iter,
+					    PLACES_SIDEBAR_COLUMN_ROW_TYPE, &place_type,
+					    PLACES_SIDEBAR_COLUMN_SECTION_TYPE, &section_type,
+					    PLACES_SIDEBAR_COLUMN_URI, &drop_target_uri,
+					    -1);
+			*pos = GTK_TREE_VIEW_DROP_INTO_OR_BEFORE;
+			if (place_type == PLACES_HEADING ||
+			    drop_target_uri == NULL || drop_target_uri[0] == '\0')
+				goto fail;
+		} else {
+			goto fail;
+		}
         } else {
             goto fail;
         }
@@ -2151,7 +2269,8 @@ drag_data_received_callback (GtkWidget *widget,
 	/* Compute position */
 	success = compute_drop_position (tree_view, x, y, &tree_path, &tree_pos, sidebar);
 	if (!success) {
-		g_warning ("places drop rejected xy=%d,%d", x, y);
+		g_warning ("places drop rejected xy=%d,%d info=%d received=%d",
+			   x, y, sidebar->drag_data_info, sidebar->drag_data_received);
 		goto out;
 	}
 
