@@ -504,8 +504,13 @@ verne_desktop_canvas_snapshot (GtkWidget *widget, GtkSnapshot *snapshot, int wid
 void
 verne_gtk_widget_queue_draw (GtkWidget *widget)
 {
-	if (widget != NULL && verne_desktop_wallpaper_for_widget (widget) != NULL)
+	if (widget != NULL && verne_desktop_wallpaper_for_widget (widget) != NULL) {
+		/* EelCanvas draw/update often queues another expose. Swallow
+		 * that during dest snapshot so the texture cache can hold. */
+		if (g_object_get_data (G_OBJECT (widget), "verne-in-snapshot") != NULL)
+			return;
 		g_object_set_data (G_OBJECT (widget), "verne-dest-dirty", GINT_TO_POINTER (1));
+	}
 	gtk_widget_queue_draw (widget);
 }
 
