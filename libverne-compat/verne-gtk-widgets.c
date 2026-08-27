@@ -6,6 +6,8 @@
 #ifdef GDK_WINDOWING_X11
 #include <gdk/x11/gdkx.h>
 #include <X11/Xlib.h>
+#include <X11/Xatom.h>
+#include <X11/Xutil.h>
 #endif
 
 /* ---------- GtkContainer ---------- */
@@ -599,6 +601,9 @@ struct _GtkMenu { GtkWindow parent; GtkWidget *box; GtkWidget *attach; };
 G_DEFINE_TYPE (GtkMenu, gtk_menu, GTK_TYPE_WINDOW)
 
 static void verne_menu_popup_now (GtkMenu *menu, int root_x, int root_y, gboolean has_pos);
+static void verne_menu_set_override_redirect (GtkWidget *w);
+static void verne_menu_embed_on_desktop (GtkWidget *w);
+static void verne_menu_unembed (GtkWidget *w);
 
 static void
 verne_menu_ensure_css (void)
@@ -662,28 +667,251 @@ verne_x11_move (GtkWindow *win, int x, int y)
 #endif
 }
 
+#ifdef GDK_WINDOWING_X11
+static GdkSurface *
+verne_menu_x11_surface (GtkWidget *w)
+{
+	GdkSurface *s;
+
+	if (w == NULL || !GTK_IS_NATIVE (w))
+		return NULL;
+	s = gtk_native_get_surface (GTK_NATIVE (w));
+	if (s == NULL || !GDK_IS_X11_SURFACE (s))
+		return NULL;
+	return s;
+}
+
+static void
+verne_x11_consider_dest_canvas (Display *dpy, Window xid, Window skip,
+				Window *best, int *best_area)
+{
+	XWindowAttributes wa;
+	XClassHint ch = { 0, 0 };
+	char *name = NULL;
+	int area;
+	gboolean class_ok = FALSE;
+
+	if (xid == 0 || xid == skip)
+		return;
+	if (!XGetWindowAttributes (dpy, xid, &wa) || wa.map_state != IsViewable)
+		return;
+	if (wa.width < 400 || wa.height < 400)
+		return;
+	if (XFetchName (dpy, xid, &name) && name) {
+		gboolean is_menu = (name[0] == ' ' && name[1] == '\0');
+		XFree (name);
+		if (is_menu)
+			return;
+	}
+	if (XGetClassHint (dpy, xid, &ch)) {
+		if (ch.res_class != NULL &&
+		    (g_ascii_strcasecmp (ch.res_class, "nemo-desktop") == 0 ||
+		     g_str_has_prefix (ch.res_class, "nemo-desktop")))
+			class_ok = TRUE;
+		if (ch.res_name)
+			XFree (ch.res_name);
+		if (ch.res_class)
+			XFree (ch.res_class);
+	}
+	if (!class_ok)
+		return;
+	area = wa.width * wa.height;
+	if (area > *best_area) {
+		*best_area = area;
+		*best = xid;
+	}
+}
+
+static void
+verne_x11_walk_dest_canvas (Display *dpy, Window start, Window skip,
+			    Window *best, int *best_area, int depth)
+{
+	Window root = 0, parent = 0, *children = NULL;
+	unsigned n = 0, i;
+
+	verne_x11_consider_dest_canvas (dpy, start, skip, best, best_area);
+	if (depth <= 0)
+		return;
+	if (!XQueryTree (dpy, start, &root, &parent, &children, &n))
+		return;
+	for (i = 0; i < n; i++)
+		verne_x11_walk_dest_canvas (dpy, children[i], skip, best, best_area, depth - 1);
+	if (children)
+		XFree (children);
+}
+
+static Window
+verne_x11_find_dest_canvas (Display *dpy, Window skip)
+{
+	Window best = 0;
+	int best_area = 0;
+	GListModel *model;
+	guint i, n;
+
+	if (dpy == NULL)
+		return 0;
+	verne_x11_walk_dest_canvas (dpy, DefaultRootWindow (dpy), skip, &best, &best_area, 3);
+
+	model = gtk_window_get_toplevels ();
+	n = g_list_model_get_n_items (model);
+	for (i = 0; i < n; i++) {
+		gpointer w = g_list_model_get_item (model, i);
+		GdkSurface *s;
+
+		if (w && GTK_IS_WINDOW (w) && !GTK_IS_MENU (w) &&
+		    (gtk_window_get_type_hint (GTK_WINDOW (w)) == GDK_WINDOW_TYPE_HINT_DESKTOP ||
+		     g_object_get_data (w, "is_desktop_window") != NULL)) {
+			s = gtk_native_get_surface (GTK_NATIVE (w));
+			if (s && GDK_IS_X11_SURFACE (s))
+				verne_x11_walk_dest_canvas (dpy, gdk_x11_surface_get_xid (s),
+							    skip, &best, &best_area, 2);
+		}
+		if (w)
+			g_object_unref (w);
+	}
+	return best;
+}
+
+static GtkWindow *
+verne_menu_dest_attach_window (GtkWidget *menu)
+{
+	GtkWidget *attach;
+	GtkRoot *root;
+
+	if (!GTK_IS_MENU (menu))
+		return NULL;
+	attach = GTK_MENU (menu)->attach;
+	if (attach == NULL || !GTK_IS_WIDGET (attach))
+		return NULL;
+	root = gtk_widget_get_root (attach);
+	if (!GTK_IS_WINDOW (root) || GTK_IS_MENU (root))
+		return NULL;
+	if (gtk_window_get_type_hint (GTK_WINDOW (root)) == GDK_WINDOW_TYPE_HINT_DESKTOP ||
+	    g_object_get_data (G_OBJECT (root), "is_desktop_window") != NULL)
+		return GTK_WINDOW (root);
+	return NULL;
+}
+#endif
+
 static void
 verne_x11_lower_desktop_windows (void)
 {
 #ifdef GDK_WINDOWING_X11
 	GListModel *model = gtk_window_get_toplevels ();
 	guint i, n = g_list_model_get_n_items (model);
+	Display *dpy = NULL;
+	Window canvas;
 
 	for (i = 0; i < n; i++) {
 		gpointer w = g_list_model_get_item (model, i);
 		GdkSurface *s;
 
 		if (w && GTK_IS_WINDOW (w) && !GTK_IS_MENU (w) &&
-		    gtk_window_get_type_hint (GTK_WINDOW (w)) == GDK_WINDOW_TYPE_HINT_DESKTOP) {
+		    (gtk_window_get_type_hint (GTK_WINDOW (w)) == GDK_WINDOW_TYPE_HINT_DESKTOP ||
+		     g_object_get_data (w, "is_desktop_window") != NULL)) {
 			s = gtk_native_get_surface (GTK_NATIVE (w));
 			if (s && GDK_IS_X11_SURFACE (s)) {
-				Display *dpy = gdk_x11_display_get_xdisplay (gdk_surface_get_display (s));
+				dpy = gdk_x11_display_get_xdisplay (gdk_surface_get_display (s));
 				XLowerWindow (dpy, gdk_x11_surface_get_xid (s));
 			}
 		}
 		if (w)
 			g_object_unref (w);
 	}
+	if (dpy) {
+		canvas = verne_x11_find_dest_canvas (dpy, 0);
+		if (canvas)
+			XLowerWindow (dpy, canvas);
+	}
+#endif
+}
+
+static void
+verne_menu_unembed (GtkWidget *w)
+{
+#ifdef GDK_WINDOWING_X11
+	GdkSurface *s = verne_menu_x11_surface (w);
+	gpointer canvas_ptr;
+
+	if (s == NULL)
+		return;
+	canvas_ptr = g_object_get_data (G_OBJECT (w), "verne-embed-canvas");
+	if (canvas_ptr == NULL)
+		return;
+	{
+		Display *dpy = gdk_x11_display_get_xdisplay (gdk_surface_get_display (s));
+		Window xid = gdk_x11_surface_get_xid (s);
+
+		XReparentWindow (dpy, xid, DefaultRootWindow (dpy), -20000, -20000);
+		g_object_set_data (G_OBJECT (w), "verne-embed-canvas", NULL);
+		XFlush (dpy);
+	}
+#else
+	(void) w;
+#endif
+}
+
+static void
+verne_menu_embed_on_desktop (GtkWidget *w)
+{
+#ifdef GDK_WINDOWING_X11
+	GdkSurface *s = verne_menu_x11_surface (w);
+	Display *dpy;
+	Window menu_xid, canvas, child;
+	int lx = 0, ly = 0, mx = 0, my = 0;
+	XWindowAttributes wa;
+	XSetWindowAttributes attrs;
+
+	if (s == NULL || verne_menu_dest_attach_window (w) == NULL)
+		return;
+	dpy = gdk_x11_display_get_xdisplay (gdk_surface_get_display (s));
+	menu_xid = gdk_x11_surface_get_xid (s);
+	canvas = verne_x11_find_dest_canvas (dpy, menu_xid);
+	if (canvas == 0)
+		return;
+
+	{
+		Window root = 0, parent = 0, *children = NULL;
+		unsigned n = 0;
+
+		if (XQueryTree (dpy, menu_xid, &root, &parent, &children, &n)) {
+			if (children)
+				XFree (children);
+			if (parent == canvas) {
+				XMapRaised (dpy, menu_xid);
+				XRaiseWindow (dpy, menu_xid);
+				g_object_set_data (G_OBJECT (w), "verne-embed-canvas",
+						   GSIZE_TO_POINTER ((gsize) canvas));
+				return;
+			}
+		}
+	}
+
+	attrs.override_redirect = True;
+	XChangeWindowAttributes (dpy, menu_xid, CWOverrideRedirect, &attrs);
+
+	if (g_object_get_data (G_OBJECT (w), "verne-popup-pos")) {
+		mx = GPOINTER_TO_INT (g_object_get_data (G_OBJECT (w), "verne-popup-x"));
+		my = GPOINTER_TO_INT (g_object_get_data (G_OBJECT (w), "verne-popup-y"));
+	} else if (XGetWindowAttributes (dpy, menu_xid, &wa)) {
+		mx = wa.x;
+		my = wa.y;
+	}
+	if (!XTranslateCoordinates (dpy, DefaultRootWindow (dpy), canvas,
+				    mx, my, &lx, &ly, &child)) {
+		lx = mx;
+		ly = my;
+	}
+	XReparentWindow (dpy, menu_xid, canvas, lx, ly);
+	XMapRaised (dpy, menu_xid);
+	XRaiseWindow (dpy, menu_xid);
+	g_object_set_data (G_OBJECT (w), "verne-embed-canvas",
+			   GSIZE_TO_POINTER ((gsize) canvas));
+	XFlush (dpy);
+	g_warning ("verne: dest menu embed xid=0x%lx canvas=0x%lx at %d,%d",
+		   (unsigned long) menu_xid, (unsigned long) canvas, lx, ly);
+#else
+	(void) w;
 #endif
 }
 
@@ -694,23 +922,43 @@ verne_menu_keep_above (gpointer data)
 
 	if (!GTK_IS_MENU (w) || !gtk_widget_get_visible (w) ||
 	    g_object_get_data (G_OBJECT (w), "verne-dismissed")) {
+		verne_menu_unembed (w);
 		g_object_unref (w);
 		return G_SOURCE_REMOVE;
 	}
-	verne_x11_lower_desktop_windows ();
+	if (g_object_get_data (G_OBJECT (w), "verne-embed-canvas") == NULL)
+		verne_x11_lower_desktop_windows ();
 	verne_menu_set_override_redirect (w);
+	verne_menu_embed_on_desktop (w);
 	return G_SOURCE_CONTINUE;
 }
+
+static void
+verne_menu_set_override_redirect (GtkWidget *w)
 {
 #ifdef GDK_WINDOWING_X11
-	GdkSurface *s = gtk_native_get_surface (GTK_NATIVE (w));
-	if (s && GDK_IS_X11_SURFACE (s)) {
+	GdkSurface *s = verne_menu_x11_surface (w);
+	if (s) {
 		Display *dpy = gdk_x11_display_get_xdisplay (gdk_surface_get_display (s));
 		Window xid = gdk_x11_surface_get_xid (s);
 		XSetWindowAttributes attrs;
+		Atom type, value, state, above;
+		Atom state_atoms[4];
+		int n_state = 0;
 
 		attrs.override_redirect = True;
 		XChangeWindowAttributes (dpy, xid, CWOverrideRedirect, &attrs);
+		type = XInternAtom (dpy, "_NET_WM_WINDOW_TYPE", False);
+		value = XInternAtom (dpy, "_NET_WM_WINDOW_TYPE_POPUP_MENU", False);
+		XChangeProperty (dpy, xid, type, XA_ATOM, 32, PropModeReplace,
+				 (unsigned char *) &value, 1);
+		state = XInternAtom (dpy, "_NET_WM_STATE", False);
+		above = XInternAtom (dpy, "_NET_WM_STATE_ABOVE", False);
+		state_atoms[n_state++] = above;
+		state_atoms[n_state++] = XInternAtom (dpy, "_NET_WM_STATE_SKIP_TASKBAR", False);
+		state_atoms[n_state++] = XInternAtom (dpy, "_NET_WM_STATE_SKIP_PAGER", False);
+		XChangeProperty (dpy, xid, state, XA_ATOM, 32, PropModeReplace,
+				 (unsigned char *) state_atoms, n_state);
 		XRaiseWindow (dpy, xid);
 		XFlush (dpy);
 	}
@@ -733,12 +981,13 @@ verne_menu_mapped (GtkWidget *w, gpointer data)
 		}
 	}
 #endif
-	if (g_object_get_data (G_OBJECT (w), "verne-popup-pos") == NULL)
-		return;
-	verne_x11_move (GTK_WINDOW (w),
-			GPOINTER_TO_INT (g_object_get_data (G_OBJECT (w), "verne-popup-x")),
-			GPOINTER_TO_INT (g_object_get_data (G_OBJECT (w), "verne-popup-y")));
+	if (g_object_get_data (G_OBJECT (w), "verne-popup-pos") != NULL &&
+	    g_object_get_data (G_OBJECT (w), "verne-embed-canvas") == NULL)
+		verne_x11_move (GTK_WINDOW (w),
+				GPOINTER_TO_INT (g_object_get_data (G_OBJECT (w), "verne-popup-x")),
+				GPOINTER_TO_INT (g_object_get_data (G_OBJECT (w), "verne-popup-y")));
 	verne_menu_set_override_redirect (w);
+	verne_menu_embed_on_desktop (w);
 }
 
 static gboolean
@@ -1167,7 +1416,7 @@ verne_menu_popup_idle (gpointer data)
 	if (p->has_pos)
 		verne_x11_move (GTK_WINDOW (p->menu), p->x, p->y);
 	verne_menu_set_override_redirect (w);
-	verne_x11_lower_desktop_windows ();
+	verne_menu_embed_on_desktop (w);
 	if (g_object_get_data (G_OBJECT (w), "verne-keep-above") == NULL) {
 		g_object_set_data (G_OBJECT (w), "verne-keep-above", GINT_TO_POINTER (1));
 		g_timeout_add (50, verne_menu_keep_above, g_object_ref (w));
@@ -1236,7 +1485,9 @@ void gtk_menu_popdown (GtkMenu *menu) {
 	g_object_set_data (G_OBJECT (menu), "verne-popping", GINT_TO_POINTER (1));
 	g_object_set_data (G_OBJECT (menu), "verne-menu-hold", NULL);
 	g_object_set_data (G_OBJECT (menu), "verne-dismissed", GINT_TO_POINTER (1));
+	g_object_set_data (G_OBJECT (menu), "verne-keep-above", NULL);
 	verne_menu_bump_serial (menu);
+	verne_menu_unembed (GTK_WIDGET (menu));
 	gtk_widget_set_visible (GTK_WIDGET (menu), FALSE);
 	gtk_widget_set_opacity (GTK_WIDGET (menu), 0.0);
 	verne_menu_set_input_enabled (GTK_WIDGET (menu), FALSE);
