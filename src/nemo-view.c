@@ -1432,7 +1432,9 @@ choose_program (NemoView *view,
 
     gtk_box_pack_start (GTK_BOX (content), chooser, TRUE, TRUE, 0);
 
+    gtk_window_set_default_size (GTK_WINDOW (dialog), 520, 480);
     gtk_widget_show_all (dialog);
+    gtk_window_present (GTK_WINDOW (dialog));
 
 	g_signal_connect_object (dialog, "response",
 				 G_CALLBACK (app_chooser_dialog_response_cb),

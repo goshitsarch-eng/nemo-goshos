@@ -548,10 +548,35 @@ desktop_ensure_icons_from_model (NemoView *view)
 	}
 	g_hash_table_destroy (have);
 	if (disk != NULL) {
-		g_warning ("desktop ensure_icons notifying %u new disk files",
-			   g_list_length (disk));
-		nemo_directory_notify_files_added (disk);
-		g_list_free_full (disk, g_object_unref);
+		static GHashTable *recent = NULL;
+		GList *fresh = NULL, *n;
+		gint64 now = g_get_monotonic_time ();
+
+		if (recent == NULL)
+			recent = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
+		for (n = disk; n != NULL; n = n->next) {
+			char *uri = g_file_get_uri (n->data);
+			gpointer prev = uri ? g_hash_table_lookup (recent, uri) : NULL;
+			gint64 then = (gint64) GPOINTER_TO_SIZE (prev);
+
+			if (uri != NULL && prev != NULL && (now - then) < 3 * G_TIME_SPAN_SECOND) {
+				g_object_unref (n->data);
+			} else {
+				if (uri != NULL)
+					g_hash_table_insert (recent, g_strdup (uri),
+							     GSIZE_TO_POINTER ((gsize) now));
+				fresh = g_list_prepend (fresh, n->data);
+			}
+			g_free (uri);
+		}
+		g_list_free (disk);
+		disk = g_list_reverse (fresh);
+		if (disk != NULL) {
+			g_warning ("desktop ensure_icons notifying %u new disk files",
+				   g_list_length (disk));
+			nemo_directory_notify_files_added (disk);
+			g_list_free_full (disk, g_object_unref);
+		}
 	}
 	g_object_unref (dir);
 	g_free (path);

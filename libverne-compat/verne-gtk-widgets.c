@@ -856,6 +856,94 @@ verne_any_dest_overlay_visible (void)
 	return any;
 }
 
+static const gchar *
+verne_dest_item_label (GtkWidget *w)
+{
+	const gchar *lab = NULL;
+
+	if (w == NULL)
+		return "";
+	if (GTK_IS_MENU_ITEM (w))
+		lab = gtk_menu_item_get_label (GTK_MENU_ITEM (w));
+	if ((lab == NULL || lab[0] == '\0') && GTK_IS_BUTTON (w))
+		lab = gtk_button_get_label (GTK_BUTTON (w));
+	return lab ? lab : "";
+}
+
+/* Dest overlay menus often have unallocated children (pick hits the box).
+ * Map clicks from measured heights and never activate separators. */
+static GtkWidget *
+verne_dest_menu_button_at (GtkWidget *box, double lx, double ly)
+{
+	GtkWidget *ch;
+	GtkWidget *hit = NULL;
+	GtkWidget *nearest = NULL;
+	double nearest_dist = G_MAXDOUBLE;
+	double y = 0;
+	int box_w;
+
+	(void) lx;
+	if (box == NULL)
+		return NULL;
+	box_w = gtk_widget_get_width (box);
+	if (box_w < 1)
+		box_w = 240;
+
+	for (ch = gtk_widget_get_first_child (box); ch;
+	     ch = gtk_widget_get_next_sibling (ch)) {
+		graphene_rect_t r;
+		double y0, y1, mid, dist;
+		int nat_h = 0;
+		gboolean have_bounds = FALSE;
+
+		if (!gtk_widget_get_visible (ch))
+			continue;
+		if (!GTK_IS_BUTTON (ch) && !GTK_IS_CHECK_BUTTON (ch))
+			continue;
+
+		if (gtk_widget_compute_bounds (ch, box, &r) &&
+		    r.size.height >= 4 && r.size.width >= 8)
+			have_bounds = TRUE;
+		if (have_bounds) {
+			y0 = r.origin.y;
+			y1 = y0 + r.size.height;
+			/* Bounds in overlay/window space: fold back into the box. */
+			if (y0 > y + 80) {
+				y0 = y;
+				y1 = y + r.size.height;
+			}
+			y = y1;
+		} else {
+			gtk_widget_measure (ch, GTK_ORIENTATION_VERTICAL, box_w,
+					    NULL, &nat_h, NULL, NULL);
+			if (nat_h < 1)
+				nat_h = GTK_IS_SEPARATOR_MENU_ITEM (ch) ? 9 : 28;
+			y0 = y;
+			y1 = y + nat_h;
+			y = y1;
+		}
+
+		if (GTK_IS_SEPARATOR_MENU_ITEM (ch)) {
+			if (ly >= y0 && ly < y1 && hit == NULL)
+				hit = ch;
+			continue;
+		}
+
+		mid = (y0 + y1) / 2.0;
+		dist = ly < mid ? (mid - ly) : (ly - mid);
+		if (dist < nearest_dist) {
+			nearest_dist = dist;
+			nearest = ch;
+		}
+		if (ly >= y0 && ly < y1)
+			hit = ch;
+	}
+
+	if (hit != NULL && !GTK_IS_SEPARATOR_MENU_ITEM (hit))
+		return hit;
+	return nearest;
+}
+
 static void
 verne_dest_overlay_pressed (GtkGestureClick *gesture, gint n_press, gdouble x, gdouble y, gpointer data)
 {
@@ -872,16 +960,20 @@ verne_dest_overlay_pressed (GtkGestureClick *gesture, gint n_press, gdouble x, g
 	while (btn != NULL && btn != box &&
 	       !GTK_IS_BUTTON (btn) && !GTK_IS_CHECK_BUTTON (btn))
 		btn = gtk_widget_get_parent (btn);
-	if (btn == NULL || btn == box)
+	if (btn == NULL || btn == box || GTK_IS_SEPARATOR_MENU_ITEM (btn))
+		btn = verne_dest_menu_button_at (box, x, y);
+	if (btn == NULL || btn == box || GTK_IS_SEPARATOR_MENU_ITEM (btn))
 		return;
 	gtk_gesture_set_state (GTK_GESTURE (gesture), GTK_EVENT_SEQUENCE_CLAIMED);
 	if (GTK_IS_MENU_ITEM (btn) && gtk_menu_item_get_submenu (GTK_MENU_ITEM (btn))) {
-		g_warning ("verne: dest overlay activate submenu %s", G_OBJECT_TYPE_NAME (btn));
+		g_warning ("verne: dest overlay activate submenu %s label=%s",
+			   G_OBJECT_TYPE_NAME (btn), verne_dest_item_label (btn));
 		verne_menu_open_submenu (btn, gtk_menu_item_get_submenu (GTK_MENU_ITEM (btn)));
 		return;
 	}
 	g_signal_emit_by_name (btn, "clicked");
-	g_warning ("verne: dest overlay activate %s", G_OBJECT_TYPE_NAME (btn));
+	g_warning ("verne: dest overlay activate %s label=%s",
+		   G_OBJECT_TYPE_NAME (btn), verne_dest_item_label (btn));
 	if (menu != NULL)
 		gtk_menu_popdown (menu);
 }
@@ -982,6 +1074,23 @@ verne_menu_popup_dest_overlay (GtkMenu *menu, int root_x, int root_y)
 	gtk_widget_set_margin_top (box, ly);
 	gtk_widget_set_visible (box, TRUE);
 	gtk_widget_set_can_target (box, TRUE);
+	{
+		GtkWidget *ch;
+		GString *dump = g_string_new ("verne: dest menu items");
+
+		for (ch = gtk_widget_get_first_child (box); ch;
+		     ch = gtk_widget_get_next_sibling (ch)) {
+			if (!gtk_widget_get_visible (ch))
+				continue;
+			gtk_widget_set_can_target (ch, !GTK_IS_SEPARATOR_MENU_ITEM (ch));
+			if (GTK_IS_BUTTON (ch) || GTK_IS_CHECK_BUTTON (ch))
+				g_string_append_printf (dump, " | %s '%s'",
+							G_OBJECT_TYPE_NAME (ch),
+							verne_dest_item_label (ch));
+		}
+		g_warning ("%s", dump->str);
+		g_string_free (dump, TRUE);
+	}
 	gtk_widget_queue_allocate (overlay);
 	gtk_widget_queue_draw (GTK_WIDGET (dest));
 	gtk_widget_set_visible (GTK_WIDGET (menu), FALSE);
@@ -1863,7 +1972,9 @@ verne_toplevel_dismiss_menus (GtkGestureClick *gesture, gint n_press, gdouble x,
 
 					if (!gtk_widget_compute_bounds (ch, box, &r))
 						continue;
-					if (r.size.width < 40 || r.size.height < 18)
+					if (r.size.width < 8 || r.size.height < 4)
+						continue;
+					if (GTK_IS_SEPARATOR_MENU_ITEM (ch))
 						continue;
 					if (lx >= r.origin.x && lx < r.origin.x + r.size.width &&
 					    ly >= r.origin.y && ly < r.origin.y + r.size.height)
@@ -1872,45 +1983,23 @@ verne_toplevel_dismiss_menus (GtkGestureClick *gesture, gint n_press, gdouble x,
 				while (btn != NULL && btn != box &&
 				       !GTK_IS_BUTTON (btn) && !GTK_IS_CHECK_BUTTON (btn))
 					btn = gtk_widget_get_parent (btn);
-				if (btn == NULL || btn == box) {
-					guint idx = 0, want;
-					guint nbtn = 0;
-
-					for (ch = gtk_widget_get_first_child (box); ch;
-					     ch = gtk_widget_get_next_sibling (ch)) {
-						if (!gtk_widget_get_visible (ch))
-							continue;
-						if (GTK_IS_BUTTON (ch) || GTK_IS_CHECK_BUTTON (ch))
-							nbtn++;
-					}
-					want = nbtn > 0 ? (guint) (ly * nbtn / mh) : 0;
-					if (want >= nbtn && nbtn > 0)
-						want = nbtn - 1;
-					for (ch = gtk_widget_get_first_child (box); ch;
-					     ch = gtk_widget_get_next_sibling (ch)) {
-						if (!gtk_widget_get_visible (ch))
-							continue;
-						if (!GTK_IS_BUTTON (ch) && !GTK_IS_CHECK_BUTTON (ch))
-							continue;
-						if (idx == want) {
-							btn = ch;
-							break;
-						}
-						idx++;
-					}
-					g_warning ("verne: dest menu y-index want=%u nbtn=%u ly=%.0f btn=%s",
-						   want, nbtn, ly, btn ? G_OBJECT_TYPE_NAME (btn) : "NULL");
-				}
+				if (btn == NULL || btn == box || GTK_IS_SEPARATOR_MENU_ITEM (btn))
+					btn = verne_dest_menu_button_at (box, lx, ly);
+				g_warning ("verne: dest menu hit ly=%.0f btn=%s label=%s",
+					   ly,
+					   btn ? G_OBJECT_TYPE_NAME (btn) : "NULL",
+					   verne_dest_item_label (btn));
 				if (button == 1 && btn != NULL && btn != box &&
+				    !GTK_IS_SEPARATOR_MENU_ITEM (btn) &&
 				    (GTK_IS_BUTTON (btn) || GTK_IS_CHECK_BUTTON (btn))) {
-					const gchar *lab = gtk_button_get_label (GTK_BUTTON (btn));
+					const gchar *lab = verne_dest_item_label (btn);
 					gboolean has_sub = GTK_IS_MENU_ITEM (btn) &&
 							   gtk_menu_item_get_submenu (GTK_MENU_ITEM (btn)) != NULL;
 
 					gtk_gesture_set_state (GTK_GESTURE (gesture),
 							       GTK_EVENT_SEQUENCE_CLAIMED);
 					g_warning ("verne: dest overlay rect-activate %s label=%s sub=%s hooked=%s",
-						   G_OBJECT_TYPE_NAME (btn), lab ? lab : "",
+						   G_OBJECT_TYPE_NAME (btn), lab,
 						   has_sub ? "yes" : "no",
 						   g_object_get_data (G_OBJECT (btn), "verne-sub-hooked") ? "yes" : "no");
 					if (w)
@@ -1946,6 +2035,7 @@ verne_toplevel_dismiss_menus (GtkGestureClick *gesture, gint n_press, gdouble x,
 				       !GTK_IS_BUTTON (btn) && !GTK_IS_CHECK_BUTTON (btn))
 					btn = gtk_widget_get_parent (btn);
 				if (button == 1 && btn != NULL && btn != walk &&
+				    !GTK_IS_SEPARATOR_MENU_ITEM (btn) &&
 				    (GTK_IS_BUTTON (btn) || GTK_IS_CHECK_BUTTON (btn))) {
 					gboolean has_sub = GTK_IS_MENU_ITEM (btn) &&
 							   gtk_menu_item_get_submenu (GTK_MENU_ITEM (btn)) != NULL;
@@ -2553,6 +2643,7 @@ gtk_separator_menu_item_init (GtkSeparatorMenuItem *item)
 
 	gtk_widget_set_sensitive (GTK_WIDGET (item), FALSE);
 	gtk_widget_set_can_focus (GTK_WIDGET (item), FALSE);
+	gtk_widget_set_can_target (GTK_WIDGET (item), FALSE);
 	gtk_widget_add_css_class (GTK_WIDGET (item), "separator");
 	gtk_widget_add_css_class (GTK_WIDGET (item), "flat");
 	gtk_button_set_has_frame (GTK_BUTTON (item), FALSE);
