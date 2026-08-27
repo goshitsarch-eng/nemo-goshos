@@ -2250,6 +2250,44 @@ verne_menu_is_ancestor_of (GtkMenu *maybe_anc, GtkMenu *desc)
 }
 
 static void
+verne_menu_hide_overlay_leftovers (GtkMenu *keep)
+{
+	GListModel *model = gtk_window_get_toplevels ();
+	guint i, n = g_list_model_get_n_items (model);
+	GtkWidget *keep_box = (keep != NULL) ? keep->box : NULL;
+
+	for (i = 0; i < n; i++) {
+		gpointer w = g_list_model_get_item (model, i);
+		GtkWidget *overlay;
+		GtkWidget *ch, *next;
+
+		if (!GTK_IS_WINDOW (w) || GTK_IS_MENU (w)) {
+			if (w)
+				g_object_unref (w);
+			continue;
+		}
+		overlay = g_object_get_data (G_OBJECT (w), "verne-file-menu-overlay");
+		if (!GTK_IS_OVERLAY (overlay))
+			overlay = g_object_get_data (G_OBJECT (w), "verne-dest-menu-overlay");
+		if (GTK_IS_OVERLAY (overlay)) {
+			for (ch = gtk_widget_get_first_child (overlay); ch; ch = next) {
+				next = gtk_widget_get_next_sibling (ch);
+				if (ch == keep_box)
+					continue;
+				if (ch == gtk_overlay_get_child (GTK_OVERLAY (overlay)))
+					continue;
+				if (!gtk_widget_has_css_class (ch, "verne-dest-menu"))
+					continue;
+				gtk_widget_set_visible (ch, FALSE);
+				gtk_widget_set_can_target (ch, FALSE);
+			}
+		}
+		if (w)
+			g_object_unref (w);
+	}
+}
+
+static void
 verne_menu_hide_others (GtkMenu *keep)
 {
 	GListModel *model = gtk_window_get_toplevels ();
@@ -2262,6 +2300,7 @@ verne_menu_hide_others (GtkMenu *keep)
 		if (w)
 			g_object_unref (w);
 	}
+	verne_menu_hide_overlay_leftovers (keep);
 }
 
 static void
