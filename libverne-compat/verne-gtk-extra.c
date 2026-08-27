@@ -379,7 +379,10 @@ void
 verne_paint_desktop_wallpaper_cairo (GtkWidget *widget, cairo_t *cr, int width, int height)
 {
 	GdkTexture *tex;
-	GdkPixbuf *pb;
+	static GdkTexture *cached_tex;
+	static GdkPixbuf *cached_pb;
+	static cairo_surface_t *cached_surface;
+	static int cached_w, cached_h;
 	int tw, th;
 	double scale, dw, dh, x, y;
 
@@ -388,27 +391,53 @@ verne_paint_desktop_wallpaper_cairo (GtkWidget *widget, cairo_t *cr, int width, 
 	tex = verne_desktop_wallpaper_for_widget (widget);
 	if (tex == NULL)
 		return;
-	pb = gdk_pixbuf_get_from_texture (tex);
-	if (pb == NULL)
-		return;
-	tw = gdk_pixbuf_get_width (pb);
-	th = gdk_pixbuf_get_height (pb);
-	if (tw <= 0 || th <= 0) {
-		g_object_unref (pb);
-		return;
+
+	if (cached_tex != tex) {
+		g_clear_object (&cached_pb);
+		g_clear_pointer (&cached_surface, cairo_surface_destroy);
+		cached_tex = tex;
+		cached_pb = gdk_pixbuf_get_from_texture (tex);
+		cached_w = 0;
+		cached_h = 0;
 	}
-	scale = MAX ((double) width / (double) tw, (double) height / (double) th);
-	dw = tw * scale;
-	dh = th * scale;
-	x = ((double) width - dw) / 2.0;
-	y = ((double) height - dh) / 2.0;
+	if (cached_pb == NULL)
+		return;
+
+	if (cached_surface == NULL || cached_w != width || cached_h != height) {
+		cairo_t *scr;
+		cairo_pattern_t *pat;
+
+		g_clear_pointer (&cached_surface, cairo_surface_destroy);
+		cached_surface = cairo_image_surface_create (CAIRO_FORMAT_ARGB32, width, height);
+		if (cairo_surface_status (cached_surface) != CAIRO_STATUS_SUCCESS) {
+			g_clear_pointer (&cached_surface, cairo_surface_destroy);
+			return;
+		}
+		scr = cairo_create (cached_surface);
+		tw = gdk_pixbuf_get_width (cached_pb);
+		th = gdk_pixbuf_get_height (cached_pb);
+		if (tw > 0 && th > 0) {
+			scale = MAX ((double) width / (double) tw, (double) height / (double) th);
+			dw = tw * scale;
+			dh = th * scale;
+			x = ((double) width - dw) / 2.0;
+			y = ((double) height - dh) / 2.0;
+			cairo_translate (scr, x, y);
+			cairo_scale (scr, scale, scale);
+			gdk_cairo_set_source_pixbuf (scr, cached_pb, 0, 0);
+			pat = cairo_get_source (scr);
+			cairo_pattern_set_filter (pat, CAIRO_FILTER_BILINEAR);
+			cairo_paint (scr);
+		}
+		cairo_destroy (scr);
+		cached_w = width;
+		cached_h = height;
+	}
+
 	cairo_save (cr);
-	cairo_translate (cr, x, y);
-	cairo_scale (cr, scale, scale);
-	gdk_cairo_set_source_pixbuf (cr, pb, 0, 0);
+	cairo_set_source_surface (cr, cached_surface, 0, 0);
 	cairo_paint (cr);
 	cairo_restore (cr);
-	g_object_unref (pb);
 }
 
 GdkWindowTypeHint

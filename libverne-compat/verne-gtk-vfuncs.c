@@ -923,7 +923,10 @@ wrapped_snapshot (GtkWidget *widget, GtkSnapshot *snapshot)
 		type = g_type_parent (type);
 	}
 
-	verne_paint_desktop_wallpaper (widget, snapshot, w, h);
+	/* Dest GTK3 draw paints an opaque cairo wallpaper over the whole
+	 * widget. Skip the extra GSK blit so we do not paint wallpaper twice. */
+	if (!(w > 0 && h > 0 && (draw || verne_widget_has_draw_handlers (widget))))
+		verne_paint_desktop_wallpaper (widget, snapshot, w, h);
 
 	if (w > 0 && h > 0 && (draw || verne_widget_has_draw_handlers (widget))) {
 		cr = gtk_snapshot_append_cairo (snapshot, &GRAPHENE_RECT_INIT (0, 0, w, h));
