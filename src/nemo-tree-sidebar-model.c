@@ -220,7 +220,7 @@ tree_node_destroy (FMTreeModel *model, TreeNode *node)
 
 	tree_node_unparent (model, node);
 
-	g_object_unref (node->file);
+	g_clear_object (&node->file);
 	g_free (node->display_name);
     g_clear_object (&node->icon);
     g_clear_object (&node->closed_icon);

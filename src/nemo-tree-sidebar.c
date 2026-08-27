@@ -1768,8 +1768,21 @@ fm_tree_view_dispose (GObject *object)
 	FMTreeView *view;
 	
 	view = FM_TREE_VIEW (object);
-	
-    g_clear_handle_id (&view->details->actions_changed_idle_id, g_source_remove);
+
+	g_clear_handle_id (&view->details->actions_changed_idle_id, g_source_remove);
+
+	/* GTK4 GtkTreeView dispose calls set_model(NULL) which unrefs the
+	 * sort model and finalizes FMTreeModel while iterating rows, then
+	 * tree_node_destroy unrefs already-freed NemoFile pointers (SIGSEGV
+	 * on Ctrl+W / last-tab close). Detach first and keep the child model
+	 * alive until the view is done with the tree. */
+	if (view->details->tree_widget != NULL &&
+	    GTK_IS_TREE_VIEW (view->details->tree_widget)) {
+		if (view->details->child_model != NULL)
+			g_object_ref (view->details->child_model);
+		gtk_tree_view_set_model (view->details->tree_widget, NULL);
+	}
+	g_clear_object (&view->details->child_model);
 
 	if (view->details->selection_changed_timer) {
 		g_source_remove (view->details->selection_changed_timer);
