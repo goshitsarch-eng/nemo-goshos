@@ -1755,9 +1755,8 @@ verne_toplevel_dismiss_menus (GtkGestureClick *gesture, gint n_press, gdouble x,
 
 					if (!gtk_widget_compute_bounds (ch, box, &r))
 						continue;
-					g_warning ("verne: dest menu child %s %.0f,%.0f %.0fx%.0f",
-						   G_OBJECT_TYPE_NAME (ch),
-						   r.origin.x, r.origin.y, r.size.width, r.size.height);
+					if (r.size.width < 40 || r.size.height < 18)
+						continue;
 					if (lx >= r.origin.x && lx < r.origin.x + r.size.width &&
 					    ly >= r.origin.y && ly < r.origin.y + r.size.height)
 						btn = ch;
@@ -1771,6 +1770,8 @@ verne_toplevel_dismiss_menus (GtkGestureClick *gesture, gint n_press, gdouble x,
 
 					for (ch = gtk_widget_get_first_child (box); ch;
 					     ch = gtk_widget_get_next_sibling (ch)) {
+						if (!gtk_widget_get_visible (ch))
+							continue;
 						if (GTK_IS_BUTTON (ch) || GTK_IS_CHECK_BUTTON (ch))
 							nbtn++;
 					}
@@ -1779,6 +1780,8 @@ verne_toplevel_dismiss_menus (GtkGestureClick *gesture, gint n_press, gdouble x,
 						want = nbtn - 1;
 					for (ch = gtk_widget_get_first_child (box); ch;
 					     ch = gtk_widget_get_next_sibling (ch)) {
+						if (!gtk_widget_get_visible (ch))
+							continue;
 						if (!GTK_IS_BUTTON (ch) && !GTK_IS_CHECK_BUTTON (ch))
 							continue;
 						if (idx == want) {
@@ -1787,14 +1790,16 @@ verne_toplevel_dismiss_menus (GtkGestureClick *gesture, gint n_press, gdouble x,
 						}
 						idx++;
 					}
-					g_warning ("verne: dest menu y-index want=%u nbtn=%u btn=%s",
-						   want, nbtn, btn ? G_OBJECT_TYPE_NAME (btn) : "NULL");
+					g_warning ("verne: dest menu y-index want=%u nbtn=%u ly=%.0f btn=%s",
+						   want, nbtn, ly, btn ? G_OBJECT_TYPE_NAME (btn) : "NULL");
 				}
 				if (button == 1 && btn != NULL && btn != box &&
 				    (GTK_IS_BUTTON (btn) || GTK_IS_CHECK_BUTTON (btn))) {
+					const gchar *lab = gtk_button_get_label (GTK_BUTTON (btn));
+
 					g_signal_emit_by_name (btn, "clicked");
-					g_warning ("verne: dest overlay rect-activate %s",
-						   G_OBJECT_TYPE_NAME (btn));
+					g_warning ("verne: dest overlay rect-activate %s label=%s",
+						   G_OBJECT_TYPE_NAME (btn), lab ? lab : "");
 				}
 				if (w)
 					g_object_unref (w);
