@@ -324,6 +324,23 @@ build_menu_add_node (GtkUIManager *self, UiNode *c, GtkWidget *shell, gboolean m
 }
 
 static void queue_update (GtkUIManager *self);
+static gboolean do_updates_idle (gpointer data);
+
+static gboolean
+ui_node_menu_mapped (UiNode *node)
+{
+	GList *l;
+
+	if (GTK_IS_MENU (node->widget) &&
+	    gtk_widget_is_visible (node->widget) &&
+	    gtk_widget_get_mapped (node->widget))
+		return TRUE;
+	for (l = node->children; l; l = l->next) {
+		if (ui_node_menu_mapped (l->data))
+			return TRUE;
+	}
+	return FALSE;
+}
 
 static void
 rebuild (GtkUIManager *self)
@@ -332,6 +349,16 @@ rebuild (GtkUIManager *self)
 
 	if (self->rebuilding)
 		return;
+	/* File-menu show merges extension items, which queues a rebuild.
+	 * Rebuilding while the overlay is mapped clear_shell_children's the
+	 * open menu and leaves a blank popover. GTK3 updates in place;
+	 * wait until every GtkMenu is hidden. */
+	if (ui_node_menu_mapped (self->root)) {
+		self->dirty = TRUE;
+		if (self->update_idle == 0)
+			self->update_idle = g_timeout_add (150, (GSourceFunc) do_updates_idle, self);
+		return;
+	}
 	self->rebuilding = TRUE;
 	self->dirty = FALSE;
 
