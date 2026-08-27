@@ -30,6 +30,7 @@
 
 #include "nemo-application.h"
 #include "nemo-progress-info-widget.h"
+#include "nemo-window.h"
 
 #include <gio/gio.h>
 #include <glib/gi18n.h>
@@ -195,6 +196,37 @@ progress_ui_handler_sort_by_active (NemoProgressUIHandler *self)
     g_list_free (l);
 }
 
+static GtkWindow *
+progress_ui_pick_transient_parent (GtkApplication *app, GtkWindow *progress)
+{
+	GList *windows, *l;
+	GtkWindow *best = NULL;
+
+	if (app == NULL)
+		return NULL;
+
+	windows = gtk_application_get_windows (app);
+	for (l = windows; l != NULL; l = l->next) {
+		GtkWindow *w = l->data;
+		int ww, hh;
+
+		if (w == progress)
+			continue;
+		if (!gtk_widget_get_visible (GTK_WIDGET (w)))
+			continue;
+		ww = gtk_widget_get_width (GTK_WIDGET (w));
+		hh = gtk_widget_get_height (GTK_WIDGET (w));
+		/* Skip the hidden 1×1 AdwApplication native titled "Verne". */
+		if (ww < 64 || hh < 64)
+			continue;
+		if (NEMO_IS_WINDOW (w))
+			return w;
+		if (best == NULL)
+			best = w;
+	}
+	return best;
+}
+
 static void
 progress_ui_handler_ensure_window (NemoProgressUIHandler *self)
 {
@@ -212,7 +244,7 @@ progress_ui_handler_ensure_window (NemoProgressUIHandler *self)
 
 	/* GTK4 + xfwm leave an unparented TYPE_DIALOG GtkWindow Withdrawn, so
 	 * File Operations never appears. Keep it a normal window and attach it
-	 * to the active file window. */
+	 * to a visible file window — not the dummy 1×1 native. */
 	gtk_window_set_resizable (GTK_WINDOW (progress_window), FALSE);
 	gtk_window_set_default_size (GTK_WINDOW (progress_window), 500, 160);
 
@@ -249,12 +281,12 @@ progress_ui_handler_ensure_window (NemoProgressUIHandler *self)
 	{
 		GtkApplication *app = GTK_APPLICATION (g_application_get_default ());
 		if (app != NULL) {
-			GtkWindow *active;
+			GtkWindow *parent;
 
 			gtk_application_add_window (app, GTK_WINDOW (progress_window));
-			active = gtk_application_get_active_window (app);
-			if (active != NULL && GTK_WIDGET (active) != progress_window)
-				gtk_window_set_transient_for (GTK_WINDOW (progress_window), active);
+			parent = progress_ui_pick_transient_parent (app, GTK_WINDOW (progress_window));
+			if (parent != NULL)
+				gtk_window_set_transient_for (GTK_WINDOW (progress_window), parent);
 		}
 	}
 	gtk_widget_set_visible (progress_window, TRUE);
