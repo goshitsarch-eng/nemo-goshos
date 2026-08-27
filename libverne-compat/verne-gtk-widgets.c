@@ -848,13 +848,15 @@ verne_menu_restore_box_to_window (GtkMenu *menu)
 	parent = gtk_widget_get_parent (box);
 	if (parent != NULL && GTK_IS_OVERLAY (parent)) {
 		g_object_ref (box);
-		gtk_widget_unparent (box);
+		verne_widget_clear_active (box);
+		gtk_overlay_remove_overlay (GTK_OVERLAY (parent), box);
 		gtk_widget_remove_css_class (box, "verne-dest-menu");
 		gtk_widget_set_size_request (box, -1, -1);
 		gtk_widget_set_margin_start (box, 0);
 		gtk_widget_set_margin_top (box, 0);
 		gtk_widget_set_margin_end (box, 0);
 		gtk_widget_set_margin_bottom (box, 0);
+		gtk_widget_set_visible (box, TRUE);
 		gtk_window_set_child (GTK_WINDOW (menu), box);
 		g_object_unref (box);
 		g_object_set_data (G_OBJECT (menu), "verne-dest-overlay", NULL);
@@ -1276,22 +1278,12 @@ verne_menu_popdown_dest_popover (GtkMenu *menu)
 {
 	GtkWidget *popover;
 	GtkWidget *box;
-	GtkWidget *parent;
 
 	if (!GTK_IS_MENU (menu))
 		return;
 	box = menu->box;
-	parent = GTK_IS_WIDGET (box) ? gtk_widget_get_parent (box) : NULL;
-	if (GTK_IS_OVERLAY (parent)) {
-		/* Leave the box parented. Unparenting during a click gesture
-		 * breaks GTK's active-state accounting and SIGSEGVs the next
-		 * File-menu overlay popup. */
+	if (GTK_IS_WIDGET (box))
 		verne_widget_clear_active (box);
-		gtk_widget_set_visible (box, FALSE);
-		gtk_widget_set_can_target (box, FALSE);
-		g_object_set_data (G_OBJECT (menu), "verne-dest-overlay", NULL);
-		return;
-	}
 	popover = g_object_get_data (G_OBJECT (menu), "verne-dest-popover");
 	verne_menu_restore_box_to_window (menu);
 	if (GTK_IS_POPOVER (popover)) {
