@@ -754,14 +754,48 @@ verne_menu_restore_box_to_window (GtkMenu *menu)
 	}
 }
 
+static gboolean
+verne_menu_box_is_dest_overlay (GtkWidget *box)
+{
+	return box != NULL && GTK_IS_WIDGET (box) &&
+	       gtk_widget_is_visible (box) &&
+	       gtk_widget_has_css_class (box, "verne-dest-menu") &&
+	       GTK_IS_OVERLAY (gtk_widget_get_parent (box));
+}
+
+static gboolean
+verne_menu_is_dest_overlay (gpointer menu)
+{
+	return GTK_IS_MENU (menu) &&
+	       verne_menu_box_is_dest_overlay (GTK_MENU (menu)->box);
+}
+
+static gboolean
+verne_any_dest_overlay_visible (void)
+{
+	GListModel *model = gtk_window_get_toplevels ();
+	guint i, n = g_list_model_get_n_items (model);
+	gboolean any = FALSE;
+
+	for (i = 0; i < n; i++) {
+		gpointer w = g_list_model_get_item (model, i);
+		if (verne_menu_is_dest_overlay (w))
+			any = TRUE;
+		if (w)
+			g_object_unref (w);
+	}
+	return any;
+}
+
 static void
 verne_dest_overlay_pressed (GtkGestureClick *gesture, gint n_press, gdouble x, gdouble y, gpointer data)
 {
 	GtkWidget *box = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (gesture));
 	GtkWidget *pick;
 	GtkWidget *btn;
+	GtkMenu *menu = GTK_IS_MENU (data) ? GTK_MENU (data) : NULL;
 
-	(void) n_press; (void) data;
+	(void) n_press;
 	if (box == NULL)
 		return;
 	pick = gtk_widget_pick (box, x, y, GTK_PICK_DEFAULT);
@@ -774,6 +808,8 @@ verne_dest_overlay_pressed (GtkGestureClick *gesture, gint n_press, gdouble x, g
 	gtk_gesture_set_state (GTK_GESTURE (gesture), GTK_EVENT_SEQUENCE_CLAIMED);
 	g_signal_emit_by_name (btn, "clicked");
 	g_warning ("verne: dest overlay activate %s", G_OBJECT_TYPE_NAME (btn));
+	if (menu != NULL)
+		gtk_menu_popdown (menu);
 }
 
 static gboolean
@@ -1577,6 +1613,7 @@ verne_toplevel_dismiss_menus (GtkGestureClick *gesture, gint n_press, gdouble x,
 {
 	GtkWidget *toplevel;
 	GtkWidget *picked;
+	gboolean dest_overlay_open;
 
 	(void) n_press; (void) data;
 	/* Never claim the sequence: this is a click-outside dismiss, not a grab. */
@@ -1585,15 +1622,10 @@ verne_toplevel_dismiss_menus (GtkGestureClick *gesture, gint n_press, gdouble x,
 	toplevel = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (gesture));
 	if (toplevel == NULL)
 		return;
+	dest_overlay_open = verne_any_dest_overlay_visible ();
 	picked = gtk_widget_pick (toplevel, x, y, GTK_PICK_DEFAULT);
 	if (picked != NULL && GTK_IS_WIDGET (picked)) {
 		GtkWidget *walk;
-		if (GTK_IS_MENU_ITEM (picked) || GTK_IS_MENU_BAR (picked) ||
-		    GTK_IS_NOTEBOOK (picked) ||
-		    gtk_widget_get_ancestor (picked, GTK_TYPE_MENU_ITEM) != NULL ||
-		    gtk_widget_get_ancestor (picked, GTK_TYPE_MENU_BAR) != NULL ||
-		    gtk_widget_get_ancestor (picked, GTK_TYPE_NOTEBOOK) != NULL)
-			return;
 		for (walk = picked; walk != NULL; walk = gtk_widget_get_parent (walk)) {
 			if (gtk_widget_has_css_class (walk, "verne-dest-menu")) {
 				GtkWidget *btn = picked;
@@ -1608,24 +1640,23 @@ verne_toplevel_dismiss_menus (GtkGestureClick *gesture, gint n_press, gdouble x,
 					g_warning ("verne: dest overlay dismiss-activate %s",
 						   G_OBJECT_TYPE_NAME (btn));
 				}
+				verne_menu_hide_others (NULL);
 				return;
 			}
 			if (gtk_widget_has_css_class (walk, "menu") && GTK_IS_BOX (walk))
 				return;
 		}
-	}
-	{
-		GListModel *model = gtk_window_get_toplevels ();
-		guint i, n = g_list_model_get_n_items (model);
-		for (i = 0; i < n; i++) {
-			gpointer w = g_list_model_get_item (model, i);
-			if (GTK_IS_MENU (w) && g_object_get_data (w, "verne-menu-hold")) {
-				g_object_unref (w);
-				return;
-			}
-			if (w)
-				g_object_unref (w);
-		}
+		/* File-window chrome: do not dismiss menus when clicking the
+		 * menubar, a menu item, or notebook tabs. Dest canvas lives
+		 * inside a notebook, so skip that guard while a dest overlay
+		 * menu is painted — otherwise click-outside never hides it. */
+		if (!dest_overlay_open &&
+		    (GTK_IS_MENU_ITEM (picked) || GTK_IS_MENU_BAR (picked) ||
+		     GTK_IS_NOTEBOOK (picked) ||
+		     gtk_widget_get_ancestor (picked, GTK_TYPE_MENU_ITEM) != NULL ||
+		     gtk_widget_get_ancestor (picked, GTK_TYPE_MENU_BAR) != NULL ||
+		     gtk_widget_get_ancestor (picked, GTK_TYPE_NOTEBOOK) != NULL))
+			return;
 	}
 	verne_menu_hide_others (NULL);
 }
@@ -1686,8 +1717,8 @@ verne_any_menu_visible (void)
 	gboolean any = FALSE;
 	for (i = 0; i < n; i++) {
 		gpointer w = g_list_model_get_item (model, i);
-		if (GTK_IS_MENU (w) && gtk_widget_get_visible (GTK_WIDGET (w)) &&
-		    g_object_get_data (w, "verne-dismissed") == NULL)
+		if (GTK_IS_MENU (w) && g_object_get_data (w, "verne-dismissed") == NULL &&
+		    (gtk_widget_get_visible (GTK_WIDGET (w)) || verne_menu_is_dest_overlay (w)))
 			any = TRUE;
 		if (w)
 			g_object_unref (w);

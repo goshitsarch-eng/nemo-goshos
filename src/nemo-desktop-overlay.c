@@ -396,13 +396,17 @@ on_close_window (GtkWidget *overlay_window,
                  GdkEvent  *event,
                  gpointer   user_data)
 {
-    g_return_val_if_fail (NEMO_IS_DESKTOP_OVERLAY (user_data), GDK_EVENT_PROPAGATE);
+    (void) event;
+    (void) user_data;
 
-    /* When the window is destroyed, kill the overlay instance also.
-     * This will end up clearing the weak pointer made in nemo-desktop-icon-grid-view.c. */
-    g_object_unref (G_OBJECT (user_data));
+    /* GTK4 close-request also destroys the native if this returns FALSE.
+     * Unref+gtk_widget_destroy here raced that default destroy and SIGSEGV'd
+     * dest. Keep the overlay GObject and just hide the window so Customize
+     * can be shown again. */
+    if (GTK_IS_WIDGET (overlay_window))
+        gtk_widget_set_visible (overlay_window, FALSE);
 
-    return GDK_EVENT_PROPAGATE;
+    return GDK_EVENT_STOP;
 }
 
 gboolean
