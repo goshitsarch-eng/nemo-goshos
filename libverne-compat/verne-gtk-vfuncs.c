@@ -635,9 +635,12 @@ ensure_controllers (GtkWidget *widget)
 		return;
 	}
 	/* Extra capture controllers on GTK4-native widgets (AppChooser,
-	 * etc.) free junk during dispose. Only Nemo/Eel classes that
-	 * installed GTK3 vfuncs need synthesized events. */
-	if (v == NULL)
+	 * etc.) free junk during dispose. Nemo/Eel classes that installed
+	 * GTK3 vfuncs need synthesized events. Stock GtkTreeView also does:
+	 * list/compact views, the places sidebar, and the tree sidebar
+	 * connect to button-press-event / motion-notify-event for DnD,
+	 * rubberband, and single-click navigation. */
+	if (v == NULL && !GTK_IS_TREE_VIEW (widget))
 		return;
 
 	click = gtk_gesture_click_new ();
