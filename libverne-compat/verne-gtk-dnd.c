@@ -347,6 +347,10 @@ static GtkWidget *pending_drop_widget;
 static GdkDrop *pending_drop;
 static double pending_drop_x, pending_drop_y;
 static gboolean drop_already_emitted;
+static GtkWidget *forward_last_dest;
+
+static void verne_reset_drop_async_controllers (void);
+static void verne_queue_gdk_drop_finish (GdkDrop *drop, GdkDragAction action);
 
 static GdkDragAction on_async_motion (GtkDropTargetAsync *self, GdkDrop *drop, double x, double y, gpointer data);
 static gboolean on_async_drop (GtkDropTargetAsync *self, GdkDrop *drop, double x, double y, gpointer data);
@@ -423,6 +427,14 @@ verne_dest_for_native_xy (GtkNative *native, double x, double y, double *out_x, 
 	return best;
 }
 
+static void
+verne_forward_leave_dest (GtkDropTargetAsync *self, GdkDrop *drop)
+{
+	if (forward_last_dest && GTK_IS_WIDGET (forward_last_dest))
+		on_async_leave (self, drop, forward_last_dest);
+	forward_last_dest = NULL;
+}
+
 static GdkDragAction
 on_forward_motion (GtkDropTargetAsync *self, GdkDrop *drop, double x, double y, gpointer data)
 {
@@ -431,6 +443,9 @@ on_forward_motion (GtkDropTargetAsync *self, GdkDrop *drop, double x, double y, 
 	double dx = x, dy = y;
 
 	dest = verne_dest_for_native_xy (GTK_NATIVE (win), x, y, &dx, &dy);
+	if (forward_last_dest && forward_last_dest != dest)
+		on_async_leave (self, drop, forward_last_dest);
+	forward_last_dest = dest;
 	if (dest == NULL)
 		return GDK_ACTION_COPY;
 	return on_async_motion (self, drop, dx, dy, dest);
@@ -449,7 +464,15 @@ on_forward_drop (GtkDropTargetAsync *self, GdkDrop *drop, double x, double y, gp
 		   dest ? G_OBJECT_TYPE_NAME (dest) : "(none)", dx, dy, x, y);
 	if (dest == NULL)
 		return FALSE;
+	forward_last_dest = dest;
 	return on_async_drop (self, drop, dx, dy, dest);
+}
+
+static void
+on_forward_leave (GtkDropTargetAsync *self, GdkDrop *drop, gpointer data)
+{
+	(void) data;
+	verne_forward_leave_dest (self, drop);
 }
 
 static void
@@ -481,6 +504,7 @@ verne_ensure_native_drop_forwarder (GtkWidget *widget)
 	g_signal_connect (async, "accept", G_CALLBACK (on_async_accept), win);
 	g_signal_connect (async, "drag-enter", G_CALLBACK (on_forward_motion), win);
 	g_signal_connect (async, "drag-motion", G_CALLBACK (on_forward_motion), win);
+	g_signal_connect (async, "drag-leave", G_CALLBACK (on_forward_leave), win);
 	g_signal_connect (async, "drop", G_CALLBACK (on_forward_drop), win);
 	gtk_widget_add_controller (win, GTK_EVENT_CONTROLLER (async));
 	g_object_set_qdata (G_OBJECT (win), forwarder_quark (), async);
@@ -491,8 +515,17 @@ verne_ensure_native_drop_forwarder (GtkWidget *widget)
 static void
 on_dest_realize_forwarder (GtkWidget *widget, gpointer data)
 {
+	gpointer p;
+
 	(void) data;
 	verne_ensure_native_drop_forwarder (widget);
+		p = g_object_get_qdata (G_OBJECT (widget), dest_quark ());
+	if (GTK_IS_DROP_TARGET_ASYNC (p) &&
+	    gtk_widget_get_native (widget) &&
+	    g_object_get_qdata (G_OBJECT (gtk_widget_get_native (widget)), forwarder_quark ())) {
+		gtk_widget_remove_controller (widget, GTK_EVENT_CONTROLLER (p));
+		g_object_set_qdata (G_OBJECT (widget), dest_quark (), NULL);
+	}
 }
 
 static void
@@ -796,7 +829,7 @@ verne_local_find_dest (VerneLocalDrag *local, double *x, double *y)
 		 * (list/compact vs places) can also contain the point via a
 		 * transform, and used to steal sidebar drops. */
 		for (w = picked; w; w = gtk_widget_get_parent (w)) {
-			if (g_object_get_qdata (G_OBJECT (w), dest_quark ()) == NULL)
+		if (g_object_get_qdata (G_OBJECT (w), dest_targets_quark ()) == NULL)
 				continue;
 			if (!verne_point_in_widget (root, w, px, py, &ox, &oy))
 				continue;
@@ -1890,12 +1923,35 @@ gtk_drag_dest_set (GtkWidget *widget, GtkDestDefaults flags, const GtkTargetEntr
 	GtkDropTargetAsync *async;
 	GdkContentFormats *formats;
 	GtkTargetList *list;
+	GtkWidget *native;
+	gpointer existing;
 
 	(void) flags;
-	async = g_object_get_qdata (G_OBJECT (widget), dest_quark ());
 	list = gtk_target_list_new (targets, (guint) MAX (n_targets, 0));
 	g_object_set_qdata_full (G_OBJECT (widget), dest_targets_quark (), list, (GDestroyNotify) gtk_target_list_unref);
 	formats = formats_from_entries (targets, n_targets);
+	verne_drop_dest_register (widget);
+	verne_schedule_native_drop_forwarder (widget);
+
+	/* A native-window GtkDropTargetAsync already owns GdkDrop. A second
+	 * controller on the dest widget keeps GTK's self->drop after
+	 * gdk_drop_finish and trips gtk_drop_target_async_handle_event
+	 * (self->drop == drop) on the next foreign drop. dest_targets qdata
+	 * still marks dests so local pick finds them. */
+	native = gtk_widget_get_native (widget) ? GTK_WIDGET (gtk_widget_get_native (widget)) : NULL;
+	if (native == NULL ||
+	    (GTK_IS_WINDOW (native) && !GTK_IS_MENU (native) &&
+	     g_object_get_qdata (G_OBJECT (native), forwarder_quark ()))) {
+		existing = g_object_get_qdata (G_OBJECT (widget), dest_quark ());
+		if (GTK_IS_DROP_TARGET_ASYNC (existing))
+			gtk_widget_remove_controller (widget, GTK_EVENT_CONTROLLER (existing));
+		g_object_set_qdata (G_OBJECT (widget), dest_quark (), NULL);
+		gdk_content_formats_unref (formats);
+		return;
+	}
+
+	existing = g_object_get_qdata (G_OBJECT (widget), dest_quark ());
+	async = GTK_IS_DROP_TARGET_ASYNC (existing) ? existing : NULL;
 	if (async == NULL) {
 		/* gtk_drop_target_async_new () takes ownership of formats. */
 		async = gtk_drop_target_async_new (formats, actions ? actions : (GDK_ACTION_COPY | GDK_ACTION_MOVE | GDK_ACTION_LINK));
@@ -1912,15 +1968,13 @@ gtk_drag_dest_set (GtkWidget *widget, GtkDestDefaults flags, const GtkTargetEntr
 		gtk_drop_target_async_set_actions (async, actions ? actions : (GDK_ACTION_COPY | GDK_ACTION_MOVE | GDK_ACTION_LINK));
 		gdk_content_formats_unref (formats);
 	}
-	verne_drop_dest_register (widget);
-	verne_schedule_native_drop_forwarder (widget);
 }
 
 void
 gtk_drag_dest_unset (GtkWidget *widget)
 {
-	GtkDropTargetAsync *async = g_object_get_qdata (G_OBJECT (widget), dest_quark ());
-	if (async)
+	gpointer async = g_object_get_qdata (G_OBJECT (widget), dest_quark ());
+	if (GTK_IS_DROP_TARGET_ASYNC (async))
 		gtk_widget_remove_controller (widget, GTK_EVENT_CONTROLLER (async));
 	g_object_set_qdata (G_OBJECT (widget), dest_quark (), NULL);
 	g_object_set_qdata (G_OBJECT (widget), dest_targets_quark (), NULL);
@@ -1930,15 +1984,16 @@ gtk_drag_dest_unset (GtkWidget *widget)
 void
 gtk_drag_dest_set_target_list (GtkWidget *widget, GtkTargetList *list)
 {
-	GtkDropTargetAsync *async = g_object_get_qdata (G_OBJECT (widget), dest_quark ());
+	gpointer async;
 	GdkContentFormats *formats;
 
 	if (list)
 		gtk_target_list_ref (list);
 	g_object_set_qdata_full (G_OBJECT (widget), dest_targets_quark (), list, (GDestroyNotify) gtk_target_list_unref);
-	if (async && list) {
+	async = g_object_get_qdata (G_OBJECT (widget), dest_quark ());
+	if (GTK_IS_DROP_TARGET_ASYNC (async) && list) {
 		formats = formats_from_list (list);
-		gtk_drop_target_async_set_formats (async, formats);
+		gtk_drop_target_async_set_formats (GTK_DROP_TARGET_ASYNC (async), formats);
 		gdk_content_formats_unref (formats);
 	}
 }
@@ -2105,7 +2160,7 @@ drop_read_emit (VerneDropRead *rd, GBytes *bytes)
 					    rd->mime ? rd->mime : "text/uri-list",
 					    bytes, rd->x, rd->y, rd->info, rd->time);
 		} else if (rd->drop && bytes == NULL) {
-			gdk_drop_finish (rd->drop, 0);
+			verne_queue_gdk_drop_finish (rd->drop, 0);
 		}
 	}
 	if (bytes)
@@ -2351,6 +2406,96 @@ gtk_drag_get_data (GtkWidget *widget, GdkDragContext *context, GdkAtom target, g
 	}
 }
 
+typedef struct {
+	GdkDrop *drop;
+	GdkDragAction action;
+} VerneDropFinish;
+
+static void
+verne_reset_drop_async_controllers (void)
+{
+	GList *toplevels, *l, *d;
+
+	forward_last_dest = NULL;
+	toplevels = gtk_window_list_toplevels ();
+	for (l = toplevels; l; l = l->next) {
+		GtkWidget *win = l->data;
+		GtkDropTargetAsync *async;
+
+		if (!GTK_IS_WINDOW (win))
+			continue;
+		async = g_object_get_qdata (G_OBJECT (win), forwarder_quark ());
+		if (async == NULL)
+			continue;
+		gtk_widget_remove_controller (win, GTK_EVENT_CONTROLLER (async));
+		g_object_set_qdata (G_OBJECT (win), forwarder_quark (), NULL);
+	}
+	g_list_free (toplevels);
+
+	for (d = verne_drop_dests; d; d = d->next) {
+		GtkWidget *dest = d->data;
+		gpointer p;
+
+		if (!GTK_IS_WIDGET (dest))
+			continue;
+		p = g_object_get_qdata (G_OBJECT (dest), dest_quark ());
+		if (GTK_IS_DROP_TARGET_ASYNC (p)) {
+			GdkContentFormats *formats;
+			GdkDragAction actions;
+			GtkDropTargetAsync *old = p;
+			GtkDropTargetAsync *async;
+
+			formats = gtk_drop_target_async_get_formats (old);
+			actions = gtk_drop_target_async_get_actions (old);
+			if (formats)
+				gdk_content_formats_ref (formats);
+			gtk_widget_remove_controller (dest, GTK_EVENT_CONTROLLER (old));
+			async = gtk_drop_target_async_new (formats,
+							   actions ? actions : (GDK_ACTION_COPY | GDK_ACTION_MOVE | GDK_ACTION_LINK));
+			gtk_event_controller_set_propagation_phase (GTK_EVENT_CONTROLLER (async), GTK_PHASE_CAPTURE);
+			g_signal_connect (async, "accept", G_CALLBACK (on_async_accept), dest);
+			g_signal_connect (async, "drag-enter", G_CALLBACK (on_async_motion), dest);
+			g_signal_connect (async, "drag-motion", G_CALLBACK (on_async_motion), dest);
+			g_signal_connect (async, "drag-leave", G_CALLBACK (on_async_leave), dest);
+			g_signal_connect (async, "drop", G_CALLBACK (on_async_drop), dest);
+			gtk_widget_add_controller (dest, GTK_EVENT_CONTROLLER (async));
+			g_object_set_qdata (G_OBJECT (dest), dest_quark (), async);
+		}
+		verne_ensure_native_drop_forwarder (dest);
+	}
+}
+
+static gboolean
+verne_drop_finish_idle (gpointer data)
+{
+	VerneDropFinish *fin = data;
+
+	if (fin->drop && GDK_IS_DROP (fin->drop)) {
+		g_warning ("gdk_drop_finish idle action=%d", (int) fin->action);
+		gdk_drop_finish (fin->drop, fin->action);
+	}
+	verne_reset_drop_async_controllers ();
+	g_clear_object (&fin->drop);
+	g_free (fin);
+	return G_SOURCE_REMOVE;
+}
+
+static void
+verne_queue_gdk_drop_finish (GdkDrop *drop, GdkDragAction action)
+{
+	VerneDropFinish *fin;
+
+	if (drop == NULL)
+		return;
+	if (g_object_get_data (G_OBJECT (drop), "verne-drop-finish-queued"))
+		return;
+	g_object_set_data (G_OBJECT (drop), "verne-drop-finish-queued", GINT_TO_POINTER (1));
+	fin = g_new0 (VerneDropFinish, 1);
+	fin->drop = g_object_ref (drop);
+	fin->action = action;
+	g_idle_add_full (G_PRIORITY_DEFAULT_IDLE, verne_drop_finish_idle, fin, NULL);
+}
+
 void
 gtk_drag_finish (gpointer context, gboolean success, gboolean del, guint32 time)
 {
@@ -2379,7 +2524,10 @@ gtk_drag_finish (gpointer context, gboolean success, gboolean del, guint32 time)
 		g_object_set_qdata (G_OBJECT (context), drop_cache_quark (), NULL);
 		g_object_set_qdata (G_OBJECT (context), drop_read_quark (), NULL);
 		g_object_set_data (G_OBJECT (context), "verne-drop-mime", NULL);
-		gdk_drop_finish (GDK_DROP (context), success ? action : 0);
+		/* Finish after DROP_START returns, then replace DropTargetAsync
+		 * so GTK's private self->drop is not left pointing at a finished
+		 * GdkDrop (next foreign drop asserts self->drop == drop). */
+		verne_queue_gdk_drop_finish (GDK_DROP (context), success ? action : 0);
 	} else if (GDK_IS_DRAG (context)) {
 		drag = GDK_DRAG (context);
 	}
