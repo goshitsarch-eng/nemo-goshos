@@ -788,6 +788,51 @@ verne_menu_dest_attach_window (GtkWidget *menu)
 	return NULL;
 }
 
+static GtkWidget *
+verne_menu_overlay_host (GtkMenu *menu)
+{
+	GtkWindow *dest;
+	GtkWidget *start;
+	GtkWidget *w;
+
+	dest = verne_menu_dest_attach_window (GTK_WIDGET (menu));
+	if (dest)
+		return GTK_WIDGET (dest);
+
+	if (!GTK_IS_MENU (menu))
+		return NULL;
+	start = menu->attach;
+	if (!GTK_IS_WIDGET (start))
+		start = g_object_get_data (G_OBJECT (menu), "verne-submenu-item");
+	for (w = start; GTK_IS_WIDGET (w); w = gtk_widget_get_parent (w)) {
+		GtkWidget *overlay;
+
+		if (GTK_IS_MENU (w))
+			continue;
+		overlay = g_object_get_data (G_OBJECT (w), "verne-file-menu-overlay");
+		if (overlay == NULL)
+			overlay = g_object_get_data (G_OBJECT (w), "verne-dest-menu-overlay");
+		if (GTK_IS_OVERLAY (overlay))
+			return w;
+		if (GTK_IS_WINDOW (w) && !GTK_IS_MENU (w))
+			return w;
+	}
+	return NULL;
+}
+
+static GtkWidget *
+verne_menu_overlay_widget (GtkWidget *host)
+{
+	GtkWidget *overlay;
+
+	if (!GTK_IS_WIDGET (host))
+		return NULL;
+	overlay = g_object_get_data (G_OBJECT (host), "verne-dest-menu-overlay");
+	if (!GTK_IS_OVERLAY (overlay))
+		overlay = g_object_get_data (G_OBJECT (host), "verne-file-menu-overlay");
+	return GTK_IS_OVERLAY (overlay) ? overlay : NULL;
+}
+
 static void
 verne_menu_restore_box_to_window (GtkMenu *menu)
 {
@@ -1007,20 +1052,20 @@ verne_dest_overlay_pressed (GtkGestureClick *gesture, gint n_press, gdouble x, g
 static gboolean
 verne_menu_popup_dest_overlay (GtkMenu *menu, int root_x, int root_y)
 {
-	GtkWindow *dest;
+	GtkWidget *host;
 	GtkWidget *overlay;
 	GtkWidget *box;
 	int lx = root_x, ly = root_y;
 
-	dest = verne_menu_dest_attach_window (GTK_WIDGET (menu));
-	if (dest == NULL) {
-		g_warning ("verne: dest overlay skip (no dest attach) menu=%s",
+	host = verne_menu_overlay_host (menu);
+	if (host == NULL) {
+		g_warning ("verne: overlay skip (no host) menu=%s",
 			   G_OBJECT_TYPE_NAME (menu));
 		return FALSE;
 	}
-	overlay = g_object_get_data (G_OBJECT (dest), "verne-dest-menu-overlay");
+	overlay = verne_menu_overlay_widget (host);
 	if (!GTK_IS_OVERLAY (overlay)) {
-		g_warning ("verne: dest overlay skip (no overlay widget)");
+		g_warning ("verne: overlay skip (no overlay widget)");
 		return FALSE;
 	}
 	box = menu->box;
@@ -1061,7 +1106,7 @@ verne_menu_popup_dest_overlay (GtkMenu *menu, int root_x, int root_y)
 	 * live pointer here moves the menu if the pointer moved during idle. */
 #ifdef GDK_WINDOWING_X11
 	{
-		GdkSurface *s = gtk_native_get_surface (GTK_NATIVE (dest));
+		GdkSurface *s = GTK_IS_NATIVE (host) ? gtk_native_get_surface (GTK_NATIVE (host)) : NULL;
 		if (s && GDK_IS_X11_SURFACE (s)) {
 			Display *dpy = gdk_x11_display_get_xdisplay (gdk_surface_get_display (s));
 			Window child = 0;
@@ -1088,20 +1133,20 @@ verne_menu_popup_dest_overlay (GtkMenu *menu, int root_x, int root_y)
 			nat_w = 240;
 		if (nat_h < 80)
 			nat_h = 80;
-		ds = gtk_native_get_surface (GTK_NATIVE (dest));
+		ds = GTK_IS_NATIVE (host) ? gtk_native_get_surface (GTK_NATIVE (host)) : NULL;
 		if (ds != NULL) {
 			dest_w = gdk_surface_get_width (ds);
 			dest_h = gdk_surface_get_height (ds);
 		}
 		if (dest_w < 64)
-			dest_w = gtk_widget_get_width (GTK_WIDGET (dest));
+			dest_w = gtk_widget_get_width (host);
 		if (dest_h < 64)
-			dest_h = gtk_widget_get_height (GTK_WIDGET (dest));
+			dest_h = gtk_widget_get_height (host);
 		if (dest_w < 64)
 			dest_w = 1920;
 		if (dest_h < 64)
 			dest_h = 1200;
-		/* Keep the whole menu on the dest canvas. Right-edge clicks
+		/* Keep the whole menu on the host window. Right-edge clicks
 		 * otherwise place a 258x392 menu mostly off-screen so Open as
 		 * Root / Customize cannot be hit. */
 		if (lx + nat_w > dest_w - 8)
@@ -1143,7 +1188,7 @@ verne_menu_popup_dest_overlay (GtkMenu *menu, int root_x, int root_y)
 		g_string_free (dump, TRUE);
 	}
 	gtk_widget_queue_allocate (overlay);
-	gtk_widget_queue_draw (GTK_WIDGET (dest));
+	gtk_widget_queue_draw (host);
 	gtk_widget_set_visible (GTK_WIDGET (menu), FALSE);
 	if (g_object_get_data (G_OBJECT (box), "verne-dest-click") == NULL) {
 		GtkGesture *click = gtk_gesture_click_new ();
@@ -1609,8 +1654,16 @@ verne_menu_keep_above (gpointer data)
 {
 	GtkWidget *w = data;
 
-	if (!GTK_IS_MENU (w) || !gtk_widget_get_visible (w) ||
+	if (!GTK_IS_MENU (w) ||
 	    g_object_get_data (G_OBJECT (w), "verne-dismissed")) {
+		verne_menu_unembed (w);
+		g_object_unref (w);
+		return G_SOURCE_REMOVE;
+	}
+	if (GTK_MENU (w)->box != NULL &&
+	    GTK_IS_OVERLAY (gtk_widget_get_parent (GTK_MENU (w)->box)))
+		return G_SOURCE_CONTINUE;
+	if (!gtk_widget_get_visible (w)) {
 		verne_menu_unembed (w);
 		g_object_unref (w);
 		return G_SOURCE_REMOVE;

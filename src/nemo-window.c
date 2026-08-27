@@ -769,7 +769,11 @@ nemo_window_constructed (GObject *self)
             adw_toast_overlay_set_child (ADW_TOAST_OVERLAY (toasts), dest_overlay);
             g_object_set_data (G_OBJECT (window), "verne-dest-menu-overlay", dest_overlay);
         } else {
-            adw_toast_overlay_set_child (ADW_TOAST_OVERLAY (toasts), toolbar_view);
+            GtkWidget *file_overlay = gtk_overlay_new ();
+
+            gtk_overlay_set_child (GTK_OVERLAY (file_overlay), toolbar_view);
+            adw_toast_overlay_set_child (ADW_TOAST_OVERLAY (toasts), file_overlay);
+            g_object_set_data (G_OBJECT (window), "verne-file-menu-overlay", file_overlay);
         }
         adw_application_window_set_content (ADW_APPLICATION_WINDOW (window), toasts);
     }
