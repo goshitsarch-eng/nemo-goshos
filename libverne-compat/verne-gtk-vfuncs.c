@@ -1714,6 +1714,23 @@ gtk_show_uri_on_window (GtkWindow *parent, const char *uri, guint32 timestamp, G
 	}
 	/* GTK3 gtk_show_uri was synchronous and filled GError so Help (F1)
 	 * could show a dialog. GtkUriLauncher is async and uses the portal,
-	 * which is disabled in this environment and swallowed failures. */
+	 * which is disabled in this environment and swallowed failures.
+	 * help: / ghelp: have no default handler here unless yelp is
+	 * registered; spawn yelp directly so F1 still opens the manual. */
+	if (g_str_has_prefix (uri, "help:") || g_str_has_prefix (uri, "ghelp:")) {
+		gchar *yelp = g_find_program_in_path ("yelp");
+
+		if (yelp != NULL) {
+			gchar *argv[3];
+			gboolean ok;
+
+			argv[0] = yelp;
+			argv[1] = (gchar *) uri;
+			argv[2] = NULL;
+			ok = g_spawn_async (NULL, argv, NULL, G_SPAWN_DEFAULT, NULL, NULL, NULL, error);
+			g_free (yelp);
+			return ok;
+		}
+	}
 	return g_app_info_launch_default_for_uri (uri, NULL, error);
 }
