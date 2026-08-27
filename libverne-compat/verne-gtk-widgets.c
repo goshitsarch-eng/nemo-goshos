@@ -682,6 +682,25 @@ verne_menu_ensure_css (void)
 		"window.popup.menu button:hover, window.popup.menu checkbutton:hover {\n"
 		"  background-color: #e6e6e6;\n"
 		"}\n"
+		"window.popup.menu button.separator,\n"
+		"popover.menu button.separator,\n"
+		"box.verne-dest-menu button.separator {\n"
+		"  min-height: 0;\n"
+		"  min-width: 0;\n"
+		"  padding: 4px 10px;\n"
+		"  background-color: transparent;\n"
+		"}\n"
+		"window.popup.menu button.separator:hover,\n"
+		"popover.menu button.separator:hover,\n"
+		"box.verne-dest-menu button.separator:hover {\n"
+		"  background-color: transparent;\n"
+		"}\n"
+		"window.popup.menu button.separator separator,\n"
+		"popover.menu button.separator separator,\n"
+		"box.verne-dest-menu button.separator separator {\n"
+		"  min-height: 1px;\n"
+		"  background-color: #d0d0d0;\n"
+		"}\n"
 		"popover.menu, popover.menu > contents, popover.menu box {\n"
 		"  background-color: #ffffff;\n"
 		"  background-image: none;\n"
@@ -2533,10 +2552,13 @@ gtk_separator_menu_item_init (GtkSeparatorMenuItem *item)
 	GtkWidget *sep;
 
 	gtk_widget_set_sensitive (GTK_WIDGET (item), FALSE);
+	gtk_widget_set_can_focus (GTK_WIDGET (item), FALSE);
 	gtk_widget_add_css_class (GTK_WIDGET (item), "separator");
+	gtk_widget_add_css_class (GTK_WIDGET (item), "flat");
 	gtk_button_set_has_frame (GTK_BUTTON (item), FALSE);
 	sep = gtk_separator_new (GTK_ORIENTATION_HORIZONTAL);
 	gtk_widget_set_hexpand (sep, TRUE);
+	gtk_widget_set_valign (sep, GTK_ALIGN_CENTER);
 	gtk_button_set_child (GTK_BUTTON (item), sep);
 }
 
