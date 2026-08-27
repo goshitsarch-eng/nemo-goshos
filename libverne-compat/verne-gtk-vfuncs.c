@@ -407,10 +407,12 @@ on_drag_update (GtkGestureDrag *drag, gdouble offset_x, gdouble offset_y, gpoint
 	guint32 time = GDK_CURRENT_TIME;
 
 	gtk_gesture_drag_get_start_point (drag, &sx, &sy);
-	if (verne_pointer_event_widget (widget, sx + offset_x, sy + offset_y) != widget &&
-	    g_object_get_data (G_OBJECT (widget), "verne-active-drag") == NULL)
-		return;
 	button = gtk_gesture_single_get_current_button (GTK_GESTURE_SINGLE (drag));
+	/* Keep delivering to the press widget while button1 is down even if
+	 * gtk_widget_pick has already moved onto a sibling dest (places
+	 * sidebar). Otherwise list/icon drag-start never exceeds threshold
+	 * when the pointer leaves the view toward the drop target. */
+	(void) data;
 	if (button == 1)
 		state |= GDK_BUTTON1_MASK;
 	else if (button == 2)
