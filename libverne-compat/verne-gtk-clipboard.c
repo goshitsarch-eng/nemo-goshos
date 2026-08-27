@@ -9,9 +9,8 @@ static GHashTable *clipboards;
 
 static void gtk_clipboard_class_init (GtkClipboardClass *c)
 {
+	/* Hyphens and underscores are the same GObject signal name. */
 	g_signal_new ("owner-change", G_TYPE_FROM_CLASS (c), G_SIGNAL_RUN_FIRST,
-		      0, NULL, NULL, NULL, G_TYPE_NONE, 1, G_TYPE_POINTER);
-	g_signal_new ("owner_change", G_TYPE_FROM_CLASS (c), G_SIGNAL_RUN_FIRST,
 		      0, NULL, NULL, NULL, G_TYPE_NONE, 1, G_TYPE_POINTER);
 }
 static void gtk_clipboard_init (GtkClipboard *c) { (void) c; }
@@ -32,15 +31,42 @@ GtkTargetList *
 gtk_target_list_new (const GtkTargetEntry *targets, guint ntarget)
 {
 	GtkTargetList *list = g_new0 (GtkTargetList, 1);
+	list->magic = VERNE_TARGET_LIST_MAGIC;
 	list->ref = 1;
 	list->entries = g_array_new (FALSE, TRUE, sizeof (GtkTargetEntry));
 	if (targets && ntarget)
 		g_array_append_vals (list->entries, targets, ntarget);
 	return list;
 }
-void gtk_target_list_unref (GtkTargetList *list) {
-	if (!list || --list->ref) return;
-	g_array_free (list->entries, TRUE);
+
+void
+gtk_target_list_ref (GtkTargetList *list)
+{
+	if (list != NULL && list->magic == VERNE_TARGET_LIST_MAGIC)
+		list->ref++;
+}
+
+void
+gtk_target_list_unref (GtkTargetList *list)
+{
+	if (list == NULL)
+		return;
+	/* qdata destroy on pathbar buttons was invoking this on GObjects
+	 * (GTypeInstance at offset 0), which then g_array_free'd an unaligned
+	 * interior pointer and aborted in malloc. */
+	if (list->magic != VERNE_TARGET_LIST_MAGIC)
+		return;
+	if (--list->ref)
+		return;
+	list->magic = 0;
+	if (list->entries != NULL) {
+		gpointer data = list->entries->data;
+		/* A corrupted GArray (pathbar qdata teardown) has an unaligned
+		 * data pointer; g_array_free then aborts in malloc. */
+		if (data == NULL || (((guintptr) data) & (sizeof (void *) - 1)) == 0)
+			g_array_free (list->entries, TRUE);
+		list->entries = NULL;
+	}
 	g_free (list);
 }
 void gtk_target_list_add (GtkTargetList *list, GdkAtom target, guint flags, guint info) {
@@ -140,12 +166,28 @@ selection_new (GdkAtom target)
 	return s;
 }
 
+static guint
+clipboard_info_for_target (GtkClipboard *clipboard, GdkAtom target)
+{
+	guint i;
+
+	if (clipboard->targets == NULL)
+		return 0;
+	for (i = 0; i < clipboard->n_targets; i++) {
+		if (g_strcmp0 (clipboard->targets[i].target, (const char *) target) == 0)
+			return clipboard->targets[i].info;
+	}
+	return 0;
+}
+
 void
 gtk_clipboard_request_contents (GtkClipboard *clipboard, GdkAtom target, GtkClipboardReceivedFunc cb, gpointer data)
 {
 	GtkSelectionData *s = selection_new (target);
+
 	if (clipboard->get_func)
-		clipboard->get_func (clipboard, s, 0, clipboard->user_data);
+		clipboard->get_func (clipboard, s, clipboard_info_for_target (clipboard, target),
+				     clipboard->user_data);
 	cb (clipboard, s, data);
 	gtk_selection_data_free (s);
 }
@@ -194,9 +236,18 @@ gtk_clipboard_request_text (GtkClipboard *clipboard, GtkClipboardTextReceivedFun
 void
 gtk_clipboard_request_targets (GtkClipboard *clipboard, GtkClipboardTargetsReceivedFunc cb, gpointer data)
 {
-	GdkAtom atoms[1] = { gdk_atom_intern ("text/plain", FALSE) };
-	(void) clipboard;
-	cb (clipboard, atoms, 1, data);
+	GdkAtom *atoms = NULL;
+	gint n = 0;
+	guint i;
+
+	if (clipboard->targets && clipboard->n_targets > 0) {
+		n = (gint) clipboard->n_targets;
+		atoms = g_new (GdkAtom, (guint) n);
+		for (i = 0; i < clipboard->n_targets; i++)
+			atoms[i] = gdk_atom_intern (clipboard->targets[i].target, FALSE);
+	}
+	cb (clipboard, atoms, n, data);
+	g_free (atoms);
 }
 
 GObject *gtk_clipboard_get_owner (GtkClipboard *clipboard) { return clipboard->owner; }
@@ -206,7 +257,8 @@ gtk_clipboard_wait_for_contents (GtkClipboard *clipboard, GdkAtom target)
 {
 	GtkSelectionData *s = selection_new (target);
 	if (clipboard->get_func)
-		clipboard->get_func (clipboard, s, 0, clipboard->user_data);
+		clipboard->get_func (clipboard, s, clipboard_info_for_target (clipboard, target),
+				     clipboard->user_data);
 	return s;
 }
 
@@ -262,8 +314,17 @@ gtk_selection_data_set (GtkSelectionData *s, GdkAtom type, gint format, const gu
 	s->type = type;
 	s->format = format;
 	g_free (s->data);
-	s->data = (length >= 0) ? g_memdup2 (data, length) : NULL;
-	s->length = length;
+	/* GTK3 always NUL-terminates; callers such as g_uri_list_extract_uris
+	 * treat get_data() as a C string. */
+	if (length >= 0 && data != NULL) {
+		s->data = g_malloc ((gsize) length + 1);
+		memcpy (s->data, data, (gsize) length);
+		s->data[length] = 0;
+		s->length = length;
+	} else {
+		s->data = NULL;
+		s->length = length;
+	}
 }
 
 void
@@ -300,24 +361,48 @@ gtk_target_table_free (GtkTargetEntry *targets, gint n_targets)
 void
 gtk_selection_data_set_uris (GtkSelectionData *s, gchar **uris)
 {
-	gchar *joined = uris ? g_strjoinv ("\r\n", uris) : g_strdup ("");
-	gtk_selection_data_set (s, gdk_atom_intern ("text/uri-list", FALSE), 8, (guchar *) joined, strlen (joined));
-	g_free (joined);
+	GString *joined = g_string_new (NULL);
+	guint i;
+
+	if (uris) {
+		for (i = 0; uris[i]; i++) {
+			g_string_append (joined, uris[i]);
+			g_string_append (joined, "\r\n");
+		}
+	}
+	gtk_selection_data_set (s, gdk_atom_intern ("text/uri-list", FALSE), 8,
+				(guchar *) joined->str, (gint) joined->len);
+	g_string_free (joined, TRUE);
 }
 
 gchar **
 gtk_selection_data_get_uris (const GtkSelectionData *s)
 {
-	if (!s || !s->data)
+	gchar *text;
+	gchar **uris;
+
+	if (!s || !s->data || s->length <= 0)
 		return NULL;
-	return g_strsplit ((char *) s->data, "\r\n", -1);
+	text = g_strndup ((const gchar *) s->data, (gsize) s->length);
+	uris = g_uri_list_extract_uris (text);
+	g_free (text);
+	return uris;
 }
 
 gboolean gtk_selection_data_targets_include_text (const GtkSelectionData *s) { (void) s; return TRUE; }
 gboolean gtk_selection_data_targets_include_uri (const GtkSelectionData *s) { (void) s; return TRUE; }
 GtkSelectionData *gtk_selection_data_copy (const GtkSelectionData *s) {
-	GtkSelectionData *n = g_memdup2 (s, sizeof (*s));
-	n->data = s->data ? g_memdup2 (s->data, s->length) : NULL;
+	GtkSelectionData *n;
+	if (!s)
+		return NULL;
+	n = g_memdup2 (s, sizeof (*s));
+	if (s->data && s->length >= 0) {
+		n->data = g_malloc ((gsize) s->length + 1);
+		memcpy (n->data, s->data, (gsize) s->length);
+		n->data[s->length] = 0;
+	} else {
+		n->data = NULL;
+	}
 	return n;
 }
 void gtk_selection_data_free (GtkSelectionData *s) { if (!s) return; g_free (s->data); g_free (s); }

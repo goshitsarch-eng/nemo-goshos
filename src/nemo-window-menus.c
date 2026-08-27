@@ -105,12 +105,17 @@ static void
 action_connect_to_server_callback (GtkAction *action,
 				   gpointer user_data)
 {
-	NemoWindow *window = NEMO_WINDOW (user_data);
+	NemoWindow *window;
 	GtkWidget *dialog;
 
-	dialog = nemo_connect_server_dialog_new (window);
+	(void) action;
+	if (!NEMO_IS_WINDOW (user_data))
+		return;
+	window = NEMO_WINDOW (user_data);
 
-	gtk_widget_show (dialog);
+	dialog = nemo_connect_server_dialog_new (window);
+	if (dialog != NULL)
+		gtk_widget_show (dialog);
 }
 
 static void
@@ -305,6 +310,16 @@ action_preferences_callback (GtkAction *action,
 }
 
 static void
+verne_about_weak_notify (gpointer data, GObject *where)
+{
+	GtkWindow *parent = data;
+
+	(void) where;
+	if (GTK_IS_WINDOW (parent))
+		g_object_set_data (G_OBJECT (parent), "verne-about-window", NULL);
+}
+
+static void
 action_about_nemo_callback (GtkAction *action,
 				gpointer user_data)
 {
@@ -325,6 +340,12 @@ action_about_nemo_callback (GtkAction *action,
 	GtkWindow *parent = GTK_WINDOW (user_data);
 	GtkWidget *about;
 
+	about = g_object_get_data (G_OBJECT (parent), "verne-about-window");
+	if (GTK_IS_WINDOW (about)) {
+		gtk_window_present (GTK_WINDOW (about));
+		return;
+	}
+
 	license_trans = g_strjoin ("\n\n", _(license[0]), _(license[1]),
 					     _(license[2]), NULL);
 
@@ -337,6 +358,9 @@ action_about_nemo_callback (GtkAction *action,
 	adw_about_window_set_application_icon (ADW_ABOUT_WINDOW (about), "folder");
 	adw_about_window_set_developer_name (ADW_ABOUT_WINDOW (about), "Linux Mint / Cinnamon");
 	gtk_window_set_transient_for (GTK_WINDOW (about), parent);
+	gtk_window_set_hide_on_close (GTK_WINDOW (about), TRUE);
+	g_object_set_data (G_OBJECT (parent), "verne-about-window", about);
+	g_object_weak_ref (G_OBJECT (about), verne_about_weak_notify, parent);
 	gtk_window_present (GTK_WINDOW (about));
 
 	g_free (license_trans);
@@ -393,8 +417,8 @@ action_nemo_manual_callback (GtkAction *action,
 						 GTK_BUTTONS_OK,
 						 _("There was an error displaying help: \n%s"),
 						 error->message);
-		g_signal_connect (G_OBJECT (dialog), "response",
-				  G_CALLBACK (gtk_widget_destroy),
+		g_signal_connect (dialog, "response",
+				  G_CALLBACK (gtk_window_destroy),
 				  NULL);
 
 		gtk_window_set_resizable (GTK_WINDOW (dialog), FALSE);
@@ -410,30 +434,46 @@ action_show_shortcuts_window (GtkAction *action,
     NemoWindow *window;
     static GtkWidget *shortcuts_window;
 
-    window = NEMO_WINDOW (user_data);
+	window = NEMO_WINDOW (user_data);
 
-    if (shortcuts_window == NULL)
-    {
-        GtkBuilder *builder;
+	if (shortcuts_window == NULL)
+	{
+		GtkBuilder *builder;
+		GError *error = NULL;
 
-        builder = gtk_builder_new_from_resource ("/org/nemo/nemo-shortcuts.ui");
-        shortcuts_window = GTK_WIDGET (gtk_builder_get_object (builder, "keyboard_shortcuts"));
+		builder = gtk_builder_new ();
+		if (!gtk_builder_add_from_resource (builder, "/org/nemo/nemo-shortcuts.ui", &error)) {
+			g_warning ("Verne: failed to load keyboard shortcuts UI: %s",
+				   error ? error->message : "unknown");
+			g_clear_error (&error);
+			g_object_unref (builder);
+			return;
+		}
+		shortcuts_window = GTK_WIDGET (gtk_builder_get_object (builder, "keyboard_shortcuts"));
+		if (!GTK_IS_WINDOW (shortcuts_window)) {
+			g_warning ("Verne: keyboard_shortcuts object missing from UI");
+			g_object_unref (builder);
+			shortcuts_window = NULL;
+			return;
+		}
 
-        gtk_window_set_position (GTK_WINDOW (shortcuts_window), GTK_WIN_POS_CENTER);
+		g_signal_connect (shortcuts_window, "destroy",
+				  G_CALLBACK (gtk_widget_destroyed), &shortcuts_window);
 
-        g_signal_connect (shortcuts_window, "destroy",
-                          G_CALLBACK (gtk_widget_destroyed), &shortcuts_window);
+		gtk_window_set_title (GTK_WINDOW (shortcuts_window), _("Keyboard Shortcuts"));
+		gtk_window_set_resizable (GTK_WINDOW (shortcuts_window), TRUE);
+		gtk_window_set_default_size (GTK_WINDOW (shortcuts_window), 760, 520);
+		/* GTK4 GtkShortcutsWindow otherwise sizes to content (~natural). */
+		gtk_widget_set_size_request (shortcuts_window, 700, 480);
 
-        g_object_unref (builder);
-    }
+		g_object_unref (builder);
+	}
 
-    if (GTK_WINDOW (window) != gtk_window_get_transient_for (GTK_WINDOW (shortcuts_window)))
-    {
-        gtk_window_set_transient_for (GTK_WINDOW (shortcuts_window), GTK_WINDOW (window));
-    }
+	if (GTK_WINDOW (window) != gtk_window_get_transient_for (GTK_WINDOW (shortcuts_window)))
+		gtk_window_set_transient_for (GTK_WINDOW (shortcuts_window), GTK_WINDOW (window));
 
-    gtk_widget_show_all (shortcuts_window);
-    gtk_window_present (GTK_WINDOW (shortcuts_window));
+	gtk_widget_show (shortcuts_window);
+	gtk_window_present (GTK_WINDOW (shortcuts_window));
 }
 
 static void
@@ -652,7 +692,7 @@ action_split_view_callback (GtkAction *action,
 		}
 
 		slot = nemo_window_get_active_slot (window);
-		if (slot != NULL) {
+		if (slot != NULL && slot->content_view != NULL) {
 			nemo_view_update_menus (slot->content_view);
 		}
 	}
@@ -1375,8 +1415,26 @@ on_file_menu_show (GtkWidget *widget, gpointer user_data)
 
     window = NEMO_WINDOW (user_data);
     view = get_current_view (window);
+    if (view != NULL)
+        nemo_view_update_actions_and_extensions (view);
+}
 
-    nemo_view_update_actions_and_extensions (view);
+static void
+nemo_window_connect_file_menu (NemoWindow *window)
+{
+    GtkWidget *menuitem;
+    GtkWidget *submenu = NULL;
+
+    menuitem = gtk_ui_manager_get_widget (nemo_window_get_ui_manager (window),
+                                          NEMO_VIEW_MENUBAR_FILE_PATH);
+    if (GTK_IS_MENU_BUTTON (menuitem))
+        submenu = GTK_WIDGET (gtk_menu_button_get_popover (GTK_MENU_BUTTON (menuitem)));
+    else if (GTK_IS_MENU_ITEM (menuitem))
+        submenu = gtk_menu_item_get_submenu (GTK_MENU_ITEM (menuitem));
+    if (submenu == NULL)
+        return;
+    g_signal_handlers_disconnect_by_func (submenu, G_CALLBACK (on_file_menu_show), window);
+    g_signal_connect (submenu, "show", G_CALLBACK (on_file_menu_show), window);
 }
 
 static const GtkActionEntry main_entries[] = {
@@ -1390,7 +1448,7 @@ static const GtkActionEntry main_entries[] = {
                                  G_CALLBACK (action_close_window_slot_callback) },
                                { "Preferences", "xsi-toolbox-symbolic",
                                  N_("Prefere_nces"),
-                                 NULL, N_("Edit Nemo preferences"),
+                                 NULL, N_("Edit Verne preferences"),
                                  G_CALLBACK (action_preferences_callback) },
 #ifdef TEXT_CHANGE_UNDO
   /* name, stock id, label */  { "Undo", NULL, N_("_Undo"),
@@ -1413,7 +1471,7 @@ static const GtkActionEntry main_entries[] = {
                                  G_CALLBACK (action_reload_callback) },
   /* name, stock id */         { "NemoHelp", "xsi-help-contents-symbolic",
   /* label, accelerator */       N_("_All Topics"), "F1",
-  /* tooltip */                  N_("Display Nemo help"),
+  /* tooltip */                  N_("Display Verne help"),
                                  G_CALLBACK (action_nemo_manual_callback) },
                                { "NemoShortcuts", "xsi-keyboard-shortcuts-symbolic",
                                  N_("_Keyboard Shortcuts"), "<control>F1",
@@ -1435,7 +1493,7 @@ static const GtkActionEntry main_entries[] = {
      label, accelerator        N_("Share and transfer files"), NULL,
      tooltip                   N_("Easily transfer files to your contacts and devices from the file manager."),
                                  G_CALLBACK (action_nemo_manual_callback) }, **/
-  /* name, stock id */         { "About Nemo", "xsi-help-about-symbolic",
+  /* name, stock id */         { "About Verne", "xsi-help-about-symbolic",
   /* label, accelerator */       N_("_About"), NULL,
   /* tooltip */                  N_("Display credits for the creators of Verne"),
                                  G_CALLBACK (action_about_nemo_callback) },
@@ -1491,7 +1549,7 @@ static const GtkActionEntry main_entries[] = {
   /* name, stock id, label */  { "Bookmarks", NULL, N_("_Bookmarks") },
   /* name, stock id, label */  { "Tabs", NULL, N_("_Tabs") },
   /* name, stock id, label */  { "New Window", NULL, N_("New _Window"),
-                                 "<control>N", N_("Open another Nemo window for the displayed location"),
+                                 "<control>N", N_("Open another Verne window for the displayed location"),
                                  G_CALLBACK (action_new_window_callback) },
   /* name, stock id, label */  { "New Tab", "xsi-tab-new-symbolic", N_("New _Tab"),
                                  "<control>T", N_("Open another tab for the displayed location"),
@@ -2006,14 +2064,12 @@ nemo_window_initialize_menus (NemoWindow *window)
 			  G_CALLBACK (connect_proxy_cb), window);
 	g_signal_connect (ui_manager, "disconnect_proxy",
 			  G_CALLBACK (disconnect_proxy_cb), window);
+	g_signal_connect_swapped (ui_manager, "actions-changed",
+				  G_CALLBACK (nemo_window_connect_file_menu), window);
 
 	/* add the UI */
 	gtk_ui_manager_add_ui_from_resource (ui_manager, "/org/nemo/nemo-shell-ui.xml", NULL);
-
-    GtkWidget *menuitem, *submenu;
-    menuitem = gtk_ui_manager_get_widget (nemo_window_get_ui_manager (window), NEMO_VIEW_MENUBAR_FILE_PATH);
-    submenu = gtk_menu_item_get_submenu (GTK_MENU_ITEM (menuitem));
-    g_signal_connect (submenu, "show", G_CALLBACK (on_file_menu_show), window);
+	nemo_window_connect_file_menu (window);
 
 	nemo_window_initialize_trash_icon_monitor (window);
 }

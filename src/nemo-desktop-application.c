@@ -60,6 +60,8 @@
 #include <fcntl.h>
 #include <errno.h>
 #include <stdlib.h>
+#include <limits.h>
+#include <unistd.h>
 #include <glib/gstdio.h>
 #include <glib/gi18n.h>
 #include <gdk/gdkx.h>
@@ -286,7 +288,7 @@ nemo_desktop_application_local_command_line (GApplication *application,
     }
 
     if (version) {
-        g_print ("nemo-desktop " VERSION "\n");
+        g_print ("Verne Desktop " VERSION "\n");
         goto out;
     }
 
@@ -351,7 +353,7 @@ nemo_desktop_application_continue_startup (NemoApplication *app)
     nemo_application_check_required_directory (app, nemo_get_desktop_directory ());
     nemo_application_check_required_directory (app, nemo_get_user_directory ());
 
-    NEMO_DESKTOP_APPLICATION (app)->priv->fdb_manager = nemo_freedesktop_dbus_new ();
+    NEMO_DESKTOP_APPLICATION (app)->priv->fdb_manager = nemo_freedesktop_dbus_new_for_desktop ();
 
 	/* register views */
 	nemo_desktop_icon_view_register ();
@@ -418,6 +420,31 @@ handler_supports_select (const gchar *exe)
     return found;
 }
 
+/* Prefer the Verne/Nemo file manager next to this binary so FileManager1
+ * fallbacks (and inode/directory opens) do not launch Thunar on XFCE. */
+static gchar *
+desktop_file_manager_executable (void)
+{
+    char buf[PATH_MAX];
+    ssize_t n;
+    gchar *dir;
+    gchar *candidate;
+
+    n = readlink ("/proc/self/exe", buf, sizeof (buf) - 1);
+    if (n <= 0) {
+        return NULL;
+    }
+    buf[n] = '\0';
+    dir = g_path_get_dirname (buf);
+    candidate = g_build_filename (dir, "nemo", NULL);
+    g_free (dir);
+    if (g_file_test (candidate, G_FILE_TEST_IS_EXECUTABLE)) {
+        return candidate;
+    }
+    g_free (candidate);
+    return NULL;
+}
+
 static void
 nemo_desktop_application_open_location (NemoApplication     *application,
                                         GFile               *location,
@@ -437,26 +464,48 @@ nemo_desktop_application_open_location (NemoApplication     *application,
     }
 
     if (location != NULL) {
-        GAppInfo *appinfo;
         GError *error = NULL;
-        GList *uri_list;
+        gchar *self_exe;
+        gchar *uri;
 
-        appinfo = g_app_info_get_default_for_type ("inode/directory", TRUE);
-        if (!appinfo) {
-            g_warning ("Cannot launch file browser, no mimetype handler for inode/directory");
+        uri = g_file_get_uri (location);
+        self_exe = desktop_file_manager_executable ();
+        if (self_exe != NULL) {
+            gchar *argv[] = { self_exe, uri, NULL };
+
+            if (!g_spawn_async (NULL, argv, NULL,
+                                G_SPAWN_SEARCH_PATH, NULL, NULL, NULL, &error)) {
+                g_warning ("Could not launch file browser %s to display %s: %s",
+                           self_exe, uri, error ? error->message : "(unknown)");
+                g_clear_error (&error);
+            }
+            g_free (self_exe);
+            g_free (uri);
             return;
         }
+        g_free (uri);
 
-        uri_list = g_list_prepend (NULL, location);
-        if (!g_app_info_launch (appinfo, uri_list, NULL, &error)) {
-            gchar *uri = g_file_get_uri (location);
-            g_warning ("Could not launch file browser to display file: %s", uri);
-            g_free (uri);
-            g_clear_error (&error);
+        {
+            GAppInfo *appinfo;
+            GList *uri_list;
+
+            appinfo = g_app_info_get_default_for_type ("inode/directory", TRUE);
+            if (!appinfo) {
+                g_warning ("Cannot launch file browser, no mimetype handler for inode/directory");
+                return;
+            }
+
+            uri_list = g_list_prepend (NULL, location);
+            if (!g_app_info_launch (appinfo, uri_list, NULL, &error)) {
+                gchar *fail_uri = g_file_get_uri (location);
+                g_warning ("Could not launch file browser to display file: %s", fail_uri);
+                g_free (fail_uri);
+                g_clear_error (&error);
+            }
+
+            g_list_free (uri_list);
+            g_clear_object (&appinfo);
         }
-
-        g_list_free (uri_list);
-        g_clear_object (&appinfo);
     }
 }
 
@@ -466,22 +515,27 @@ nemo_desktop_application_show_items (NemoApplication *application,
                                      gint             n_uris,
                                      const char      *startup_id)
 {
-    GAppInfo *appinfo;
+    GAppInfo *appinfo = NULL;
     GError *error = NULL;
     const gchar *exe;
+    gchar *self_exe;
     gint i;
 
     if (uris == NULL || n_uris == 0) {
         return;
     }
 
-    appinfo = g_app_info_get_default_for_type ("inode/directory", TRUE);
-    if (!appinfo) {
-        g_warning ("Cannot launch file browser, no mimetype handler for inode/directory");
-        return;
+    self_exe = desktop_file_manager_executable ();
+    if (self_exe != NULL) {
+        exe = self_exe;
+    } else {
+        appinfo = g_app_info_get_default_for_type ("inode/directory", TRUE);
+        if (!appinfo) {
+            g_warning ("Cannot launch file browser, no mimetype handler for inode/directory");
+            return;
+        }
+        exe = g_app_info_get_executable (appinfo);
     }
-
-    exe = g_app_info_get_executable (appinfo);
 
     if (handler_supports_select (exe)) {
         GPtrArray *argv = g_ptr_array_new_with_free_func (g_free);
@@ -517,6 +571,7 @@ nemo_desktop_application_show_items (NemoApplication *application,
         g_list_free (uri_list);
     }
 
+    g_free (self_exe);
     g_clear_object (&appinfo);
 }
 

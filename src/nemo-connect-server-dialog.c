@@ -587,7 +587,8 @@ connect_dialog_connect_to_server (NemoConnectServerDialog *dialog)
 	folder = g_uri_escape_string (t, G_URI_RESERVED_CHARS_ALLOWED_IN_PATH, FALSE);
 	g_free (t);
 
-	/* port */
+	/* port — GTK4 spinbutton text may not have been committed yet. */
+	gtk_spin_button_update (GTK_SPIN_BUTTON (dialog->details->port_spinbutton));
 	port = gtk_spin_button_get_value (GTK_SPIN_BUTTON (dialog->details->port_spinbutton));
 
 	if (port != 0 && port != meth->default_port) {
@@ -899,7 +900,7 @@ nemo_connect_server_dialog_init (NemoConnectServerDialog *dialog)
 	g_object_set (dialog->details->port_spinbutton,
 		      "digits", 0,
 		      "numeric", TRUE,
-		      "update-policy", GTK_UPDATE_IF_VALID,
+		      "update-policy", GTK_UPDATE_ALWAYS,
 		      NULL);
 	gtk_box_pack_start (GTK_BOX (hbox), dialog->details->port_spinbutton,
 			    FALSE, FALSE, 0);
@@ -1148,6 +1149,9 @@ nemo_connect_server_dialog_new (NemoWindow *window)
 	if (window) {
 		gtk_window_set_screen (GTK_WINDOW (dialog),
 				       gtk_window_get_screen (GTK_WINDOW (window)));
+		gtk_window_set_transient_for (GTK_WINDOW (dialog),
+					      GTK_WINDOW (window));
+		gtk_window_set_modal (GTK_WINDOW (dialog), TRUE);
 	}
 
 	return dialog;

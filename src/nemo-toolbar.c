@@ -119,8 +119,10 @@ toolbar_update_appearance (NemoToolbar *self)
 				self->priv->show_main_bar);
 
     if (show_location_entry) {
+        gtk_widget_show (GTK_WIDGET (self->priv->location_bar));
         gtk_stack_set_visible_child_name (GTK_STACK (self->priv->stack), "location_bar");
     } else {
+        gtk_widget_show (GTK_WIDGET (self->priv->path_bar));
         gtk_stack_set_visible_child_name (GTK_STACK (self->priv->stack), "path_bar");
     }
 
@@ -241,7 +243,9 @@ toolbar_create_toolbutton (NemoToolbar *self,
     gtk_button_set_image (GTK_BUTTON (button), image);
     action = gtk_action_group_get_action (self->priv->action_group, name);
     gtk_activatable_set_related_action (GTK_ACTIVATABLE (button), action);
-    gtk_button_set_label (GTK_BUTTON (button), NULL);
+    gtk_widget_set_hexpand (button, FALSE);
+    gtk_widget_set_vexpand (button, FALSE);
+    gtk_widget_set_size_request (button, 28, 32);
     gtk_widget_set_tooltip_text (button, gtk_action_get_tooltip (action));
     gtk_widget_set_can_focus (button, FALSE);
     gtk_style_context_add_class (gtk_widget_get_style_context (button), GTK_STYLE_CLASS_FLAT);
@@ -316,10 +320,14 @@ nemo_toolbar_constructed (GObject *obj)
 
     self->priv->path_bar = g_object_new (NEMO_TYPE_PATH_BAR, NULL);
     gtk_stack_add_named(GTK_STACK (self->priv->stack), GTK_WIDGET (self->priv->path_bar), "path_bar");
+    /* GtkStack show_all only visits the visible child. Show both pages so
+     * Ctrl+L can switch back to breadcrumbs after the location entry. */
+    gtk_widget_show (GTK_WIDGET (self->priv->path_bar));
 
     /* Entry-Like Location Bar */
     self->priv->location_bar = nemo_location_bar_new ();
     gtk_stack_add_named(GTK_STACK (self->priv->stack), GTK_WIDGET (self->priv->location_bar), "location_bar");
+    gtk_widget_show (GTK_WIDGET (self->priv->location_bar));
     gtk_widget_show_all (hbox);
 
     tool_box = gtk_tool_item_new ();
@@ -362,6 +370,8 @@ nemo_toolbar_constructed (GObject *obj)
     gtk_container_add (GTK_CONTAINER (box), self->priv->compact_view_button);
 
     gtk_container_add (GTK_CONTAINER (tool_box), GTK_WIDGET (box));
+    gtk_widget_set_hexpand (GTK_WIDGET (tool_box), FALSE);
+    gtk_widget_set_halign (GTK_WIDGET (tool_box), GTK_ALIGN_END);
     gtk_container_add (GTK_CONTAINER (self->priv->toolbar), GTK_WIDGET (tool_box));
 
     gtk_widget_show_all (GTK_WIDGET (tool_box));

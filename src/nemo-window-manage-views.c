@@ -1055,6 +1055,20 @@ create_content_view (NemoWindowSlot *slot,
         slot->new_content_view = view;
         g_object_ref (view);
     } else {
+        /* Unparent and shut down the outgoing view before constructing the
+         * replacement. GTK4 will otherwise snapshot a live GtkTreeView
+         * (or leftover canvas items) while the new view is allocated. */
+        if (slot->content_view != NULL) {
+            GtkWidget *old_widget = GTK_WIDGET (slot->content_view);
+            GtkWidget *parent;
+
+            gtk_widget_hide (old_widget);
+            if (NEMO_VIEW_GET_CLASS (slot->content_view)->shutdown)
+                NEMO_VIEW_GET_CLASS (slot->content_view)->shutdown (slot->content_view);
+            parent = gtk_widget_get_parent (old_widget);
+            if (parent != NULL)
+                gtk_container_remove (parent, old_widget);
+        }
         /* create a new content view */
         view = nemo_view_factory_create (view_id, slot);
         slot->new_content_view = view;
@@ -1219,9 +1233,16 @@ nemo_window_report_location_change (NemoWindow *window)
 static void
 real_setup_loading_floating_bar (NemoWindowSlot *slot)
 {
-	gboolean disable_chrome;
+	gboolean disable_chrome = FALSE;
+	NemoWindow *window;
 
-	g_object_get (nemo_window_slot_get_window (slot),
+	window = nemo_window_slot_get_window (slot);
+	if (!NEMO_IS_WINDOW (window)) {
+		gtk_widget_hide (slot->floating_bar);
+		return;
+	}
+
+	g_object_get (window,
 		      "disable-chrome", &disable_chrome,
 		      NULL);
 
@@ -1725,7 +1746,7 @@ display_view_selection_failure (NemoWindow *window, NemoFile *file,
 				(_("Could not display \"%s\"."),
 				 uri_for_display);
 			detail_message = g_strdup
-				(_("Nemo has no installed viewer capable of displaying the folder."));
+				(_("Verne has no installed viewer capable of displaying the folder."));
 		} else {
 			error_message = g_strdup_printf
 				(_("Could not display \"%s\"."),
@@ -1748,10 +1769,10 @@ display_view_selection_failure (NemoWindow *window, NemoFile *file,
 			error_message = g_strdup_printf (_("Could not display \"%s\"."),
 							 uri_for_display);
 			if (scheme_string != NULL) {
-				detail_message = g_strdup_printf (_("Nemo cannot handle \"%s\" locations."),
+				detail_message = g_strdup_printf (_("Verne cannot handle \"%s\" locations."),
 								  scheme_string);
 			} else {
-				detail_message = g_strdup (_("Nemo cannot handle this kind of location."));
+				detail_message = g_strdup (_("Verne cannot handle this kind of location."));
 			}
 			g_free (scheme_string);
 			break;
@@ -1793,7 +1814,8 @@ display_view_selection_failure (NemoWindow *window, NemoFile *file,
 		detail_message = g_strdup_printf (_("Error: %s\nPlease select another viewer and try again."), error->message);
 	}
 
-	eel_show_error_dialog (error_message, detail_message, NULL);
+	eel_show_error_dialog (error_message, detail_message,
+			       (window != NULL && GTK_IS_WINDOW (window)) ? GTK_WINDOW (window) : NULL);
 
 	g_free (uri_for_display);
 	g_free (error_message);

@@ -613,24 +613,21 @@ connect_fallback_signals (NemoDesktopManager *manager)
     FETCH_PRIV (manager);
 
     priv->fallback_screen = gdk_screen_get_default ();
+    priv->fallback_size_changed_id = 0;
 
-    priv->fallback_size_changed_id = g_signal_connect_swapped (priv->fallback_screen,
-                                                               "size_changed",
-                                                               G_CALLBACK (queue_update_layout),
-                                                               manager);
-
-    if (eel_check_is_wayland ()) {
+    {
         GdkDisplay *display = gdk_display_get_default ();
-
-        priv->monitor_removed_id = g_signal_connect (display,
-                                                     "monitor-removed",
-                                                     G_CALLBACK (on_monitor_removed_wayland),
-                                                     manager);
-
-        priv->monitor_added_id = g_signal_connect (display,
-                                                   "monitor-added",
-                                                   G_CALLBACK (on_monitor_added_wayland),
-                                                   manager);
+        if (priv->monitor_removed_id == 0 && display != NULL &&
+            g_signal_lookup ("monitor-removed", G_OBJECT_TYPE (display)) != 0) {
+            priv->monitor_removed_id = g_signal_connect (display,
+                                                         "monitor-removed",
+                                                         G_CALLBACK (on_monitor_removed_wayland),
+                                                         manager);
+            priv->monitor_added_id = g_signal_connect (display,
+                                                       "monitor-added",
+                                                       G_CALLBACK (on_monitor_added_wayland),
+                                                       manager);
+        }
     }
 }
 

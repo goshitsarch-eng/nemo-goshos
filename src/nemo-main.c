@@ -75,6 +75,15 @@ main (int argc, char *argv[])
 	g_set_application_name (_("Verne"));
 	verne_compat_init ();
 	adw_init ();
+	{
+		GtkSettings *settings = gtk_settings_get_default ();
+		if (settings) {
+			g_object_set (settings,
+				      "gtk-theme-name", "Adwaita",
+				      "gtk-icon-theme-name", "Adwaita",
+				      NULL);
+		}
+	}
 
 #ifdef HAVE_EXEMPI
 	xmp_init();

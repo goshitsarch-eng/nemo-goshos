@@ -88,6 +88,7 @@ json    = dependency('json-glib-1.0',               version: '>=1.6')
 gdk_pixbuf = dependency('gdk-pixbuf-2.0')
 
 x11     = dependency('x11')
+xi      = dependency('xi')
 cinnamon = []
 gail     = []
 xapp     = []

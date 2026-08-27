@@ -36,6 +36,7 @@ typedef struct
     gint v_percent;
 
     gboolean syncing;
+    GtkWidget *hosted_wrap;
 } NemoDesktopOverlayPrivate;
 
 struct _NemoDesktopOverlay
@@ -391,18 +392,68 @@ on_grid_reset_button_clicked (GtkWidget *button,
     gtk_range_set_value (range, 100.0);
 }
 
+static void
+hide_hosted_customize (NemoDesktopOverlay *overlay)
+{
+    NemoDesktopOverlayPrivate *priv = nemo_desktop_overlay_get_instance_private (overlay);
+
+    if (GTK_IS_WIDGET (priv->hosted_wrap))
+        gtk_widget_set_visible (priv->hosted_wrap, FALSE);
+    if (GTK_IS_WIDGET (priv->window))
+        gtk_widget_set_visible (GTK_WIDGET (priv->window), FALSE);
+}
+
+static void
+size_hosted_customize (GtkWidget *dest_ovl,
+                       GtkWidget *wrap)
+{
+    int nat_w = 650, nat_h = 520;
+
+    if (!GTK_IS_OVERLAY (dest_ovl) || !GTK_IS_WIDGET (wrap))
+        return;
+
+    gtk_widget_set_halign (wrap, GTK_ALIGN_CENTER);
+    gtk_widget_set_valign (wrap, GTK_ALIGN_CENTER);
+    gtk_widget_set_hexpand (wrap, FALSE);
+    gtk_widget_set_vexpand (wrap, FALSE);
+    gtk_widget_measure (wrap, GTK_ORIENTATION_HORIZONTAL, -1, NULL, &nat_w, NULL, NULL);
+    gtk_widget_measure (wrap, GTK_ORIENTATION_VERTICAL, nat_w > 0 ? nat_w : 650,
+                        NULL, &nat_h, NULL, NULL);
+    if (nat_w < 650)
+        nat_w = 650;
+    if (nat_h < 480)
+        nat_h = 480;
+    gtk_widget_set_size_request (wrap, nat_w, nat_h);
+    gtk_overlay_set_clip_overlay (GTK_OVERLAY (dest_ovl), wrap, FALSE);
+    gtk_widget_queue_allocate (dest_ovl);
+    g_warning ("verne: dest customize overlay hosted size %dx%d", nat_w, nat_h);
+}
+
+static void
+on_hosted_close_clicked (GtkButton *button,
+                         gpointer   user_data)
+{
+    (void) button;
+    hide_hosted_customize (NEMO_DESKTOP_OVERLAY (user_data));
+}
+
 static gboolean
 on_close_window (GtkWidget *overlay_window,
                  GdkEvent  *event,
                  gpointer   user_data)
 {
-    g_return_val_if_fail (NEMO_IS_DESKTOP_OVERLAY (user_data), GDK_EVENT_PROPAGATE);
+    NemoDesktopOverlay *overlay = NEMO_DESKTOP_OVERLAY (user_data);
 
-    /* When the window is destroyed, kill the overlay instance also.
-     * This will end up clearing the weak pointer made in nemo-desktop-icon-grid-view.c. */
-    g_object_unref (G_OBJECT (user_data));
+    (void) overlay_window;
+    (void) event;
 
-    return GDK_EVENT_PROPAGATE;
+    /* GTK4 close-request also destroys the native if this returns FALSE.
+     * Unref+gtk_widget_destroy here raced that default destroy and SIGSEGV'd
+     * dest. Keep the overlay GObject and just hide the window so Customize
+     * can be shown again. */
+    hide_hosted_customize (overlay);
+
+    return GDK_EVENT_STOP;
 }
 
 gboolean
@@ -568,6 +619,70 @@ show_overlay (NemoDesktopOverlay *overlay,
                                                      "configure-event",
                                                      G_CALLBACK (on_window_configure_event),
                                                      overlay);
+    }
+
+    /* Dest GSK paints over sibling X windows, so a separate Customize
+     * GtkWindow is invisible. Host the dialog body on dest's GtkOverlay. */
+    {
+        GtkWidget *dest_ovl = NULL;
+
+        if (GTK_IS_WIDGET (priv->nemo_window))
+            dest_ovl = g_object_get_data (G_OBJECT (priv->nemo_window),
+                                          "verne-dest-menu-overlay");
+        g_warning ("verne: customize dest_ovl=%s window=%s",
+                   dest_ovl ? G_OBJECT_TYPE_NAME (dest_ovl) : "NULL",
+                   priv->window ? G_OBJECT_TYPE_NAME (priv->window) : "NULL");
+        if (GTK_IS_OVERLAY (dest_ovl)) {
+            GtkWidget *child = gtk_window_get_child (priv->window);
+
+            if (!GTK_IS_WIDGET (child) && GTK_IS_WIDGET (priv->window))
+                child = gtk_widget_get_first_child (GTK_WIDGET (priv->window));
+            g_warning ("verne: customize child=%s",
+                       child ? G_OBJECT_TYPE_NAME (child) : "NULL");
+
+            if (priv->hosted_wrap == NULL && GTK_IS_WIDGET (child)) {
+                GtkWidget *bar;
+                GtkWidget *close_btn;
+                GtkWidget *title;
+
+                g_object_ref (child);
+                if (gtk_window_get_child (priv->window) == child)
+                    gtk_window_set_child (priv->window, NULL);
+                if (gtk_widget_get_parent (child) != NULL)
+                    gtk_widget_unparent (child);
+
+                priv->hosted_wrap = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
+                gtk_widget_add_css_class (priv->hosted_wrap, "background");
+                gtk_widget_add_css_class (priv->hosted_wrap, "card");
+                bar = gtk_header_bar_new ();
+                title = gtk_label_new (_("Current Monitor Layout"));
+                gtk_header_bar_set_title_widget (GTK_HEADER_BAR (bar), title);
+                close_btn = gtk_button_new_from_icon_name ("window-close-symbolic", GTK_ICON_SIZE_BUTTON);
+                gtk_widget_set_valign (close_btn, GTK_ALIGN_CENTER);
+                g_signal_connect (close_btn, "clicked",
+                                  G_CALLBACK (on_hosted_close_clicked), overlay);
+                gtk_header_bar_pack_start (GTK_HEADER_BAR (bar), close_btn);
+                gtk_box_append (GTK_BOX (priv->hosted_wrap), bar);
+                gtk_box_append (GTK_BOX (priv->hosted_wrap), child);
+                gtk_widget_set_hexpand (child, TRUE);
+                gtk_widget_set_vexpand (child, TRUE);
+                gtk_overlay_add_overlay (GTK_OVERLAY (dest_ovl), priv->hosted_wrap);
+                g_object_set_data (G_OBJECT (priv->nemo_window),
+                                   "verne-dest-customize-wrap", priv->hosted_wrap);
+                g_object_set_data (G_OBJECT (priv->hosted_wrap),
+                                   "verne-dest-customize-close", close_btn);
+                g_object_unref (child);
+            }
+            if (GTK_IS_WIDGET (priv->hosted_wrap)) {
+                gtk_widget_set_visible (priv->hosted_wrap, TRUE);
+                gtk_widget_set_can_target (priv->hosted_wrap, TRUE);
+                gtk_widget_set_visible (GTK_WIDGET (priv->window), FALSE);
+                size_hosted_customize (dest_ovl, priv->hosted_wrap);
+                if (GTK_IS_WIDGET (priv->nemo_window))
+                    gtk_widget_queue_draw (GTK_WIDGET (priv->nemo_window));
+                return;
+            }
+        }
     }
 
     gtk_window_present_with_time (priv->window, gdk_event_get_time (gtk_get_current_event ()));

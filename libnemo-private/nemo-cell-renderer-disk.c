@@ -147,21 +147,25 @@ nemo_cell_renderer_disk_set_property (GObject      *object,
 }
 
 static void
-convert_color (GdkColor *style_color, GdkRGBA *color)
-{
-    color->red = style_color->red / 65535.0;
-    color->green = style_color->green / 65535.0;
-    color->blue = style_color->blue / 65535.0;
-    color->alpha = 1;
-}
-
-static void
 use_default_color (GdkRGBA *color)
 {
     color->red = .5;
     color->green = .5;
     color->blue = .5;
     color->alpha = 1;
+}
+
+static void
+convert_color (GdkColor *style_color, GdkRGBA *color)
+{
+	if (style_color == NULL) {
+		use_default_color (color);
+		return;
+	}
+	color->red = style_color->red / 65535.0;
+	color->green = style_color->green / 65535.0;
+	color->blue = style_color->blue / 65535.0;
+	color->alpha = 1;
 }
 
 #define _270_DEG 270.0 * (M_PI/180.0)

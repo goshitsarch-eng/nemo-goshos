@@ -3,7 +3,12 @@
 #include "verne-gtk-compat.h"
 
 #include <string.h>
+#include <stdlib.h>
+#include <stdio.h>
 #include <graphene.h>
+#include <execinfo.h>
+#include <signal.h>
+#include <unistd.h>
 
 typedef struct {
 	VerneButtonEvent button_press;
@@ -52,7 +57,53 @@ typedef struct {
 } VerneVfuncs;
 
 static void (*orig_gtk_widget_realize) (GtkWidget *);
+static void (*orig_drawing_area_realize) (GtkWidget *);
 static gboolean event_signals_registered;
+static guint verne_draw_signal_id;
+
+static gboolean
+verne_widget_has_draw_handlers (GtkWidget *widget)
+{
+	if (verne_draw_signal_id == 0)
+		verne_draw_signal_id = g_signal_lookup ("draw", GTK_TYPE_WIDGET);
+	if (verne_draw_signal_id == 0 || widget == NULL)
+		return FALSE;
+	return g_signal_has_handler_pending (widget, verne_draw_signal_id, 0, FALSE);
+}
+
+static void
+verne_emit_draw_signal (GtkWidget *widget, cairo_t *cr)
+{
+	gboolean handled = FALSE;
+
+	if (widget == NULL || cr == NULL || !verne_widget_has_draw_handlers (widget))
+		return;
+	g_signal_emit (widget, verne_draw_signal_id, 0, cr, &handled);
+}
+
+static void
+verne_drawing_area_draw (GtkDrawingArea *area, cairo_t *cr, int width, int height, gpointer data)
+{
+	(void) width;
+	(void) height;
+	(void) data;
+	verne_emit_draw_signal (GTK_WIDGET (area), cr);
+}
+
+static void
+verne_drawing_area_realize (GtkWidget *widget)
+{
+	if (GTK_IS_DRAWING_AREA (widget) &&
+	    g_object_get_data (G_OBJECT (widget), "verne-draw-func") == NULL) {
+		gtk_drawing_area_set_draw_func (GTK_DRAWING_AREA (widget),
+						verne_drawing_area_draw, NULL, NULL);
+		g_object_set_data (G_OBJECT (widget), "verne-draw-func", GINT_TO_POINTER (1));
+	}
+	if (orig_drawing_area_realize)
+		orig_drawing_area_realize (widget);
+	else if (orig_gtk_widget_realize)
+		orig_gtk_widget_realize (widget);
+}
 
 static GHashTable *vfunc_table;
 static GQuark verne_controllers_quark;
@@ -92,27 +143,65 @@ ensure_vfuncs (GtkWidgetClass *klass)
 	return v;
 }
 
+static GtkWidget *
+verne_pointer_event_widget (GtkWidget *widget, double x, double y)
+{
+	GtkWidget *root, *pick, *w;
+	double rx = x, ry = y;
+
+	root = GTK_WIDGET (gtk_widget_get_root (widget));
+	if (root == NULL)
+		return widget;
+	if (!gtk_widget_translate_coordinates (widget, root, x, y, &rx, &ry))
+		return widget;
+	pick = gtk_widget_pick (root, rx, ry, GTK_PICK_DEFAULT);
+	if (pick == NULL)
+		return widget;
+	/* Prefer a descendant that installed GTK3 event controllers. If pick
+	 * is an ancestor overlay/window (AdwToastOverlay, dest chrome), keep
+	 * this widget so dest/file button-press still runs. */
+	for (w = pick; w != NULL; w = gtk_widget_get_parent (w)) {
+		if (g_object_get_qdata (G_OBJECT (w), verne_controllers_quark) == NULL)
+			continue;
+		if (w == widget || gtk_widget_is_ancestor (widget, w))
+			return widget;
+		return w;
+	}
+	return widget;
+}
+
 static void
-fill_button_event (GdkEventButton *ev, GtkGestureClick *click, gint n_press, gdouble x, gdouble y)
+fill_button_event (GdkEvent *ev, GtkGestureClick *click, gint n_press, gdouble x, gdouble y)
 {
 	GtkWidget *widget = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (click));
 	GdkEvent *ge = gtk_event_controller_get_current_event (GTK_EVENT_CONTROLLER (click));
 
 	memset (ev, 0, sizeof (*ev));
 	if (n_press >= 3)
-		ev->type = GDK_3BUTTON_PRESS;
+		ev->button.type = GDK_3BUTTON_PRESS;
 	else if (n_press == 2)
-		ev->type = GDK_2BUTTON_PRESS;
+		ev->button.type = GDK_2BUTTON_PRESS;
 	else
-		ev->type = GDK_BUTTON_PRESS;
-	ev->window = gtk_widget_get_window (widget);
-	ev->x = x;
-	ev->y = y;
-	ev->x_root = x;
-	ev->y_root = y;
-	ev->button = gtk_gesture_single_get_current_button (GTK_GESTURE_SINGLE (click));
-	ev->state = ge ? gdk_event_get_modifier_state (ge) : 0;
-	ev->time = ge ? gdk_event_get_time (ge) : GDK_CURRENT_TIME;
+		ev->button.type = GDK_BUTTON_PRESS;
+	ev->button.window = gtk_widget_get_window (widget);
+	ev->button.x = x;
+	ev->button.y = y;
+	ev->button.x_root = x;
+	ev->button.y_root = y;
+	ev->button.button = gtk_gesture_single_get_current_button (GTK_GESTURE_SINGLE (click));
+	if (ge && !verne_gdk_event_is_synth (ge)) {
+		guint native_button = gdk_button_event_get_button (ge);
+		if (native_button != 0)
+			ev->button.button = native_button;
+	}
+	ev->button.state = ge ? gdk_event_get_modifier_state (ge) : 0;
+	if (ev->button.button == 2)
+		ev->button.state |= GDK_BUTTON2_MASK;
+	else if (ev->button.button == 1)
+		ev->button.state |= GDK_BUTTON1_MASK;
+	else if (ev->button.button == 3)
+		ev->button.state |= GDK_BUTTON3_MASK;
+	ev->button.time = ge ? gdk_event_get_time (ge) : GDK_CURRENT_TIME;
 }
 
 static gboolean
@@ -124,19 +213,131 @@ emit_widget_event (GtkWidget *widget, const char *signal, gpointer event)
 }
 
 static void
-on_pressed (GtkGestureClick *click, gint n_press, gdouble x, gdouble y, gpointer data)
+emit_motion (GtkWidget *widget, gdouble x, gdouble y, guint state, guint32 time)
 {
-	GtkWidget *widget = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (click));
+	VerneVfuncs *v;
+	GdkEvent ev;
+
+	if (!GTK_IS_WIDGET (widget) || !gtk_widget_get_realized (widget) ||
+	    !gtk_widget_get_mapped (widget) ||
+	    g_object_get_data (G_OBJECT (widget), "verne-destroyed"))
+		return;
+	v = lookup_vfuncs_type (G_OBJECT_TYPE (widget));
+	memset (&ev, 0, sizeof (ev));
+	ev.motion.type = GDK_MOTION_NOTIFY;
+	ev.motion.window = gtk_widget_get_window (widget);
+	ev.motion.x = x;
+	ev.motion.y = y;
+	ev.motion.x_root = x;
+	ev.motion.y_root = y;
+	ev.motion.state = state;
+	ev.motion.time = time ? time : GDK_CURRENT_TIME;
+	verne_set_current_event (widget, &ev);
+	if (!emit_widget_event (widget, "motion-notify-event", &ev) && v && v->motion)
+		v->motion (widget, &ev.motion);
+	verne_clear_current_event ();
+}
+
+typedef struct {
+	GtkWidget *widget;
+	guint button;
+	guint state;
+	guint32 time;
+	double x;
+	double y;
+} VerneIdleClick;
+
+static gboolean
+verne_idle_second_click (gpointer data)
+{
+	VerneIdleClick *click = data;
+	GtkWidget *widget = click->widget;
+	VerneVfuncs *v;
+	GdkEvent ev;
+
+	if (GTK_IS_WIDGET (widget) && gtk_widget_get_realized (widget) &&
+	    gtk_widget_get_mapped (widget) &&
+	    g_object_get_data (G_OBJECT (widget), "verne-destroyed") == NULL) {
+		v = lookup_vfuncs_type (G_OBJECT_TYPE (widget));
+		memset (&ev, 0, sizeof (ev));
+		ev.button.type = GDK_BUTTON_PRESS;
+		ev.button.window = gtk_widget_get_window (widget);
+		ev.button.x = click->x;
+		ev.button.y = click->y;
+		ev.button.x_root = click->x;
+		ev.button.y_root = click->y;
+		ev.button.button = click->button;
+		ev.button.state = click->state;
+		ev.button.time = click->time;
+		verne_set_current_event (widget, &ev);
+		if (!emit_widget_event (widget, "button-press-event", &ev) && v && v->button_press)
+			v->button_press (widget, &ev.button);
+		ev.button.type = GDK_BUTTON_RELEASE;
+		if (!emit_widget_event (widget, "button-release-event", &ev) && v && v->button_release)
+			v->button_release (widget, &ev.button);
+		verne_clear_current_event ();
+	}
+	g_object_unref (widget);
+	g_free (click);
+	return G_SOURCE_REMOVE;
+}
+
+static void
+emit_button_press (GtkWidget *widget, GtkGestureClick *click, gint n_press, gdouble x, gdouble y)
+{
 	VerneVfuncs *v = lookup_vfuncs_type (G_OBJECT_TYPE (widget));
-	GdkEventButton ev;
+	GdkEvent ev;
 	gboolean handled = FALSE;
 
 	fill_button_event (&ev, click, n_press, x, y);
+	verne_set_current_event (widget, &ev);
 	handled = emit_widget_event (widget, "button-press-event", &ev);
 	if (!handled && v && v->button_press)
-		handled = v->button_press (widget, &ev);
-	if (handled)
-		gtk_gesture_set_state (GTK_GESTURE (click), GTK_EVENT_SEQUENCE_CLAIMED);
+		handled = v->button_press (widget, &ev.button);
+	verne_clear_current_event ();
+	(void) handled;
+}
+
+static void
+on_pressed (GtkGestureClick *click, gint n_press, gdouble x, gdouble y, gpointer data)
+{
+	GtkWidget *widget = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (click));
+
+	(void) data;
+	if (verne_pointer_event_widget (widget, x, y) != widget)
+		return;
+	/* GDK3 second-click sequence is BUTTON_PRESS then 2BUTTON_PRESS.
+	 * NemoIconContainer ignores 2BUTTON and activates from two
+	 * BUTTON_PRESS events. GTK4 GestureClick reports n_press==2 only.
+	 * Run the second BUTTON_PRESS on idle so folder activate is not
+	 * nested inside the GTK4 gesture/snapshot stack. */
+	if (n_press >= 2) {
+		VerneIdleClick *pending = g_new0 (VerneIdleClick, 1);
+		GdkEvent *ge;
+
+		pending->widget = g_object_ref (widget);
+		pending->x = x;
+		pending->y = y;
+		pending->button = gtk_gesture_single_get_current_button (GTK_GESTURE_SINGLE (click));
+		ge = gtk_event_controller_get_current_event (GTK_EVENT_CONTROLLER (click));
+		if (ge) {
+			pending->state = gdk_event_get_modifier_state (ge);
+			pending->time = gdk_event_get_time (ge);
+			pending->button = gdk_button_event_get_button (ge);
+		}
+		if (pending->button == 0)
+			pending->button = 1;
+		if (pending->button == 1)
+			pending->state |= GDK_BUTTON1_MASK;
+		g_object_set_data (G_OBJECT (widget), "verne-idle-second-click", pending);
+		return;
+	}
+	emit_button_press (widget, click, 1, x, y);
+	/* Do not claim on press. Claiming takes a GTK4 pointer grab which
+	 * suppresses GtkEventControllerMotion, so icon/list DnD never starts.
+	 * GtkGestureDrag (grouped below) delivers button-down motion instead.
+	 * Grab focus on release so list-view drag-start motion is not cancelled.
+	 */
 }
 
 static void
@@ -144,64 +345,143 @@ on_released (GtkGestureClick *click, gint n_press, gdouble x, gdouble y, gpointe
 {
 	GtkWidget *widget = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (click));
 	VerneVfuncs *v = lookup_vfuncs_type (G_OBJECT_TYPE (widget));
-	GdkEventButton ev;
+	GdkEvent ev;
+
+	if (verne_pointer_event_widget (widget, x, y) != widget)
+		return;
+	if (n_press >= 2) {
+		VerneIdleClick *pending = g_object_get_data (G_OBJECT (widget), "verne-idle-second-click");
+
+		g_object_set_data (G_OBJECT (widget), "verne-idle-second-click", NULL);
+		if (pending) {
+			g_idle_add (verne_idle_second_click, pending);
+			return;
+		}
+	}
+	/* A live GdkDrag owns the pointer; synthesizing BUTTON_RELEASE here
+	 * would cancel GTK4 DND. Complete the in-process drop instead. */
+	if (g_object_get_data (G_OBJECT (widget), "verne-active-drag")) {
+		verne_dnd_gesture_end (widget);
+		return;
+	}
 
 	fill_button_event (&ev, click, n_press, x, y);
-	ev.type = GDK_BUTTON_RELEASE;
+	ev.button.type = GDK_BUTTON_RELEASE;
+	verne_set_current_event (widget, &ev);
 	if (!emit_widget_event (widget, "button-release-event", &ev) && v && v->button_release)
-		v->button_release (widget, &ev);
+		v->button_release (widget, &ev.button);
+	verne_clear_current_event ();
+	/* After a click (not a drag), take focus off the location/search
+	 * GtkText so Ctrl+Z is file-manager Undo. */
+	if (gtk_widget_get_focusable (widget) &&
+	    g_object_get_data (G_OBJECT (widget), "verne-active-drag") == NULL)
+		gtk_widget_grab_focus (widget);
 }
 
 static void
 on_motion (GtkEventControllerMotion *motion, gdouble x, gdouble y, gpointer data)
 {
 	GtkWidget *widget = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (motion));
-	VerneVfuncs *v = lookup_vfuncs_type (G_OBJECT_TYPE (widget));
-	GdkEventMotion ev;
 	GdkEvent *ge;
+	guint state = 0;
+	guint32 time = GDK_CURRENT_TIME;
 
-	memset (&ev, 0, sizeof (ev));
+	if (verne_pointer_event_widget (widget, x, y) != widget)
+		return;
 	ge = gtk_event_controller_get_current_event (GTK_EVENT_CONTROLLER (motion));
-	ev.type = GDK_MOTION_NOTIFY;
-	ev.window = gtk_widget_get_window (widget);
-	ev.x = x;
-	ev.y = y;
-	ev.x_root = x;
-	ev.y_root = y;
-	ev.state = ge ? gdk_event_get_modifier_state (ge) : 0;
-	ev.time = ge ? gdk_event_get_time (ge) : GDK_CURRENT_TIME;
-	if (!emit_widget_event (widget, "motion-notify-event", &ev) && v && v->motion)
-		v->motion (widget, &ev);
+	if (ge) {
+		state = gdk_event_get_modifier_state (ge);
+		time = gdk_event_get_time (ge);
+	}
+	emit_motion (widget, x, y, state, time);
+}
+
+static void
+on_drag_update (GtkGestureDrag *drag, gdouble offset_x, gdouble offset_y, gpointer data)
+{
+	GtkWidget *widget = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (drag));
+	GdkEvent *ge;
+	double sx = 0, sy = 0;
+	guint button;
+	guint state = 0;
+	guint32 time = GDK_CURRENT_TIME;
+
+	gtk_gesture_drag_get_start_point (drag, &sx, &sy);
+	button = gtk_gesture_single_get_current_button (GTK_GESTURE_SINGLE (drag));
+	/* Keep delivering to the press widget while button1 is down even if
+	 * gtk_widget_pick has already moved onto a sibling dest (places
+	 * sidebar). Otherwise list/icon drag-start never exceeds threshold
+	 * when the pointer leaves the view toward the drop target. */
+	(void) data;
+	if (button == 1)
+		state |= GDK_BUTTON1_MASK;
+	else if (button == 2)
+		state |= GDK_BUTTON2_MASK;
+	else if (button == 3)
+		state |= GDK_BUTTON3_MASK;
+	ge = gtk_event_controller_get_current_event (GTK_EVENT_CONTROLLER (drag));
+	if (ge) {
+		state |= gdk_event_get_modifier_state (ge);
+		time = gdk_event_get_time (ge);
+	}
+	emit_motion (widget, sx + offset_x, sy + offset_y, state, time);
+	if (g_object_get_data (G_OBJECT (widget), "verne-active-drag"))
+		verne_dnd_local_motion (widget);
+}
+
+static void
+on_local_drag_end (GtkGestureDrag *drag, gdouble offset_x, gdouble offset_y, gpointer data)
+{
+	GtkWidget *widget = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (drag));
+
+	(void) offset_x;
+	(void) offset_y;
+	(void) data;
+	verne_dnd_gesture_end (widget);
 }
 
 static void
 on_enter (GtkEventControllerMotion *motion, gdouble x, gdouble y, gpointer data)
 {
 	GtkWidget *widget = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (motion));
-	VerneVfuncs *v = lookup_vfuncs_type (G_OBJECT_TYPE (widget));
-	GdkEventCrossing ev;
+	VerneVfuncs *v;
+	GdkEvent ev;
+
+	if (!GTK_IS_WIDGET (widget) || !gtk_widget_get_mapped (widget) ||
+	    g_object_get_data (G_OBJECT (widget), "verne-destroyed"))
+		return;
+	v = lookup_vfuncs_type (G_OBJECT_TYPE (widget));
 
 	memset (&ev, 0, sizeof (ev));
-	ev.type = GDK_ENTER_NOTIFY;
-	ev.x = x;
-	ev.y = y;
-	ev.mode = GDK_CROSSING_NORMAL;
+	ev.crossing.type = GDK_ENTER_NOTIFY;
+	ev.crossing.x = x;
+	ev.crossing.y = y;
+	ev.crossing.mode = GDK_CROSSING_NORMAL;
+	verne_set_current_event (widget, &ev);
 	if (!emit_widget_event (widget, "enter-notify-event", &ev) && v && v->enter)
-		v->enter (widget, &ev);
+		v->enter (widget, &ev.crossing);
+	verne_clear_current_event ();
 }
 
 static void
 on_leave (GtkEventControllerMotion *motion, gpointer data)
 {
 	GtkWidget *widget = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (motion));
-	VerneVfuncs *v = lookup_vfuncs_type (G_OBJECT_TYPE (widget));
-	GdkEventCrossing ev;
+	VerneVfuncs *v;
+	GdkEvent ev;
+
+	if (!GTK_IS_WIDGET (widget) ||
+	    g_object_get_data (G_OBJECT (widget), "verne-destroyed"))
+		return;
+	v = lookup_vfuncs_type (G_OBJECT_TYPE (widget));
 
 	memset (&ev, 0, sizeof (ev));
-	ev.type = GDK_LEAVE_NOTIFY;
-	ev.mode = GDK_CROSSING_NORMAL;
+	ev.crossing.type = GDK_LEAVE_NOTIFY;
+	ev.crossing.mode = GDK_CROSSING_NORMAL;
+	verne_set_current_event (widget, &ev);
 	if (!emit_widget_event (widget, "leave-notify-event", &ev) && v && v->leave)
-		v->leave (widget, &ev);
+		v->leave (widget, &ev.crossing);
+	verne_clear_current_event ();
 }
 
 static gboolean
@@ -209,27 +489,42 @@ on_key (GtkEventControllerKey *self, guint keyval, guint keycode, GdkModifierTyp
 {
 	GtkWidget *widget = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (self));
 	VerneVfuncs *v = lookup_vfuncs_type (G_OBJECT_TYPE (widget));
-	GdkEventKey ev;
+	GdkEvent ev;
+	GdkEvent *ge;
 	gboolean press = GPOINTER_TO_INT (data);
+	gboolean handled = FALSE;
+	gchar strbuf[8];
+	gunichar ch;
 
 	memset (&ev, 0, sizeof (ev));
-	ev.type = press ? GDK_KEY_PRESS : GDK_KEY_RELEASE;
-	ev.keyval = keyval;
-	ev.hardware_keycode = keycode;
-	ev.state = state;
-	ev.window = gtk_widget_get_window (widget);
+	ev.key.type = press ? GDK_KEY_PRESS : GDK_KEY_RELEASE;
+	ev.key.keyval = keyval;
+	ev.key.hardware_keycode = keycode;
+	ev.key.state = state;
+	ev.key.window = gtk_widget_get_window (widget);
+	ge = gtk_event_controller_get_current_event (GTK_EVENT_CONTROLLER (self));
+	ev.key.time = ge ? gdk_event_get_time (ge) : GDK_CURRENT_TIME;
+	ch = gdk_keyval_to_unicode (keyval);
+	if (ch != 0 && !g_unichar_iscntrl (ch)) {
+		gint n = g_unichar_to_utf8 (ch, strbuf);
+		strbuf[n] = '\0';
+		ev.key.string = strbuf;
+		ev.key.length = n;
+	}
+	verne_set_current_event (widget, &ev);
 	if (press) {
 		if (emit_widget_event (widget, "key-press-event", &ev))
-			return TRUE;
-		if (v && v->key_press)
-			return v->key_press (widget, &ev);
+			handled = TRUE;
+		else if (v && v->key_press)
+			handled = v->key_press (widget, &ev.key);
 	} else {
 		if (emit_widget_event (widget, "key-release-event", &ev))
-			return TRUE;
-		if (v && v->key_release)
-			return v->key_release (widget, &ev);
+			handled = TRUE;
+		else if (v && v->key_release)
+			handled = v->key_release (widget, &ev.key);
 	}
-	return FALSE;
+	verne_clear_current_event ();
+	return handled;
 }
 
 static gboolean
@@ -237,25 +532,32 @@ on_scroll (GtkEventControllerScroll *self, gdouble dx, gdouble dy, gpointer data
 {
 	GtkWidget *widget = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (self));
 	VerneVfuncs *v = lookup_vfuncs_type (G_OBJECT_TYPE (widget));
-	GdkEventScroll ev;
+	GdkEvent ev;
 
 	memset (&ev, 0, sizeof (ev));
-	ev.type = GDK_SCROLL;
-	ev.delta_x = dx;
-	ev.delta_y = dy;
+	ev.scroll.type = GDK_SCROLL;
+	ev.scroll.delta_x = dx;
+	ev.scroll.delta_y = dy;
 	if (dy > 0)
-		ev.direction = GDK_SCROLL_DOWN;
+		ev.scroll.direction = GDK_SCROLL_DOWN;
 	else if (dy < 0)
-		ev.direction = GDK_SCROLL_UP;
+		ev.scroll.direction = GDK_SCROLL_UP;
 	else if (dx > 0)
-		ev.direction = GDK_SCROLL_RIGHT;
+		ev.scroll.direction = GDK_SCROLL_RIGHT;
 	else
-		ev.direction = GDK_SCROLL_LEFT;
-	ev.window = gtk_widget_get_window (widget);
-	if (emit_widget_event (widget, "scroll-event", &ev))
+		ev.scroll.direction = GDK_SCROLL_LEFT;
+	ev.scroll.window = gtk_widget_get_window (widget);
+	verne_set_current_event (widget, &ev);
+	if (emit_widget_event (widget, "scroll-event", &ev)) {
+		verne_clear_current_event ();
 		return TRUE;
-	if (v && v->scroll)
-		return v->scroll (widget, &ev);
+	}
+	if (v && v->scroll) {
+		gboolean handled = v->scroll (widget, &ev.scroll);
+		verne_clear_current_event ();
+		return handled;
+	}
+	verne_clear_current_event ();
 	return FALSE;
 }
 
@@ -290,15 +592,26 @@ on_focus_leave (GtkEventControllerFocus *self, gpointer data)
 static gboolean
 on_close_request (GtkWindow *window, gpointer data)
 {
-	VerneVfuncs *v = lookup_vfuncs_type (G_OBJECT_TYPE (window));
+	VerneVfuncs *v;
 	GdkEventAny ev;
 	gboolean handled = FALSE;
 
+	(void) data;
+	if (window == NULL || !GTK_IS_WINDOW (window) ||
+	    g_object_get_data (G_OBJECT (window), "verne-destroyed"))
+		return TRUE;
+
+	v = lookup_vfuncs_type (G_OBJECT_TYPE (window));
 	memset (&ev, 0, sizeof (ev));
 	ev.type = GDK_DELETE;
 	handled = emit_widget_event (GTK_WIDGET (window), "delete-event", &ev);
 	if (!handled && v && v->delete_event)
 		handled = v->delete_event (GTK_WIDGET (window), &ev);
+	/* GTK3 delete-event handlers often gtk_widget_destroy() then return
+	 * FALSE. GTK4 would destroy the window a second time (SIGSEGV). */
+	if (!GTK_IS_WINDOW (window) ||
+	    g_object_get_data (G_OBJECT (window), "verne-destroyed"))
+		return TRUE;
 	return handled;
 }
 
@@ -334,6 +647,26 @@ ensure_controllers (GtkWidget *widget)
 		return;
 	g_object_set_qdata (G_OBJECT (widget), verne_controllers_quark, GINT_TO_POINTER (1));
 
+	if (GTK_IS_WINDOW (widget)) {
+		g_signal_connect (widget, "close-request", G_CALLBACK (on_close_request), NULL);
+		g_signal_connect (widget, "notify::maximized", G_CALLBACK (on_window_state_notify), NULL);
+		g_signal_connect (widget, "notify::fullscreened", G_CALLBACK (on_window_state_notify), NULL);
+		return;
+	}
+	/* Extra capture controllers on GTK4-native widgets (AppChooser,
+	 * etc.) free junk during dispose. Nemo/Eel classes that installed
+	 * GTK3 vfuncs need synthesized events. Stock GtkTreeView also does:
+	 * list/compact views, the places sidebar, and the tree sidebar
+	 * connect to button-press-event / motion-notify-event for DnD,
+	 * rubberband, and single-click navigation. */
+	if (v == NULL && !GTK_IS_TREE_VIEW (widget))
+		return;
+
+	if (GTK_IS_TREE_VIEW (widget)) {
+		gtk_widget_set_focusable (widget, TRUE);
+		gtk_widget_set_can_focus (widget, TRUE);
+	}
+
 	click = gtk_gesture_click_new ();
 	gtk_gesture_single_set_button (GTK_GESTURE_SINGLE (click), 0);
 	gtk_event_controller_set_propagation_phase (GTK_EVENT_CONTROLLER (click), GTK_PHASE_CAPTURE);
@@ -341,7 +674,18 @@ ensure_controllers (GtkWidget *widget)
 	g_signal_connect (click, "released", G_CALLBACK (on_released), NULL);
 	gtk_widget_add_controller (widget, GTK_EVENT_CONTROLLER (click));
 
+	{
+		GtkGesture *drag = gtk_gesture_drag_new ();
+		gtk_gesture_single_set_button (GTK_GESTURE_SINGLE (drag), 1);
+		gtk_event_controller_set_propagation_phase (GTK_EVENT_CONTROLLER (drag), GTK_PHASE_CAPTURE);
+		g_signal_connect (drag, "drag-update", G_CALLBACK (on_drag_update), NULL);
+		g_signal_connect (drag, "drag-end", G_CALLBACK (on_local_drag_end), NULL);
+		gtk_widget_add_controller (widget, GTK_EVENT_CONTROLLER (drag));
+		gtk_gesture_group (click, drag);
+	}
+
 	motion = gtk_event_controller_motion_new ();
+	gtk_event_controller_set_propagation_phase (motion, GTK_PHASE_CAPTURE);
 	g_signal_connect (motion, "motion", G_CALLBACK (on_motion), NULL);
 	g_signal_connect (motion, "enter", G_CALLBACK (on_enter), NULL);
 	g_signal_connect (motion, "leave", G_CALLBACK (on_leave), NULL);
@@ -360,13 +704,6 @@ ensure_controllers (GtkWidget *widget)
 	g_signal_connect (focus, "enter", G_CALLBACK (on_focus_enter), NULL);
 	g_signal_connect (focus, "leave", G_CALLBACK (on_focus_leave), NULL);
 	gtk_widget_add_controller (widget, focus);
-
-	if (GTK_IS_WINDOW (widget)) {
-		g_signal_connect (widget, "close-request", G_CALLBACK (on_close_request), NULL);
-		g_signal_connect (widget, "notify::maximized", G_CALLBACK (on_window_state_notify), NULL);
-		g_signal_connect (widget, "notify::fullscreened", G_CALLBACK (on_window_state_notify), NULL);
-	}
-	(void) v;
 }
 
 static VerneVfuncs *
@@ -465,6 +802,8 @@ verne_window_present_safe (GtkWindow *window)
 		return;
 	g_object_set_qdata (G_OBJECT (window), verne_presenting_quark (), GINT_TO_POINTER (1));
 
+	verne_prepare_dialog (widget);
+
 	if (!gtk_widget_get_visible (widget))
 		gtk_widget_set_visible (widget, TRUE);
 
@@ -536,24 +875,81 @@ wrapped_state_flags_changed (GtkWidget *widget, GtkStateFlags previous)
 static void
 wrapped_snapshot (GtkWidget *widget, GtkSnapshot *snapshot)
 {
-	VerneVfuncs *v = lookup_vfuncs_type (G_OBJECT_TYPE (widget));
+	GType type;
+	VerneDrawEvent draw = NULL;
+	void (*orig_snapshot) (GtkWidget *, GtkSnapshot *) = NULL;
 	int w, h;
 	cairo_t *cr;
+	GtkWidget *child;
+
+	if (g_object_get_data (G_OBJECT (widget), "verne-in-snapshot")) {
+		if (gtk_widget_get_first_child (widget)) {
+			for (child = gtk_widget_get_first_child (widget); child; child = gtk_widget_get_next_sibling (child)) {
+				if (gtk_widget_get_width (child) <= 0 || gtk_widget_get_height (child) <= 0)
+					continue;
+				gtk_widget_snapshot_child (widget, child, snapshot);
+			}
+		}
+		return;
+	}
+	g_object_set_data (G_OBJECT (widget), "verne-in-snapshot", GINT_TO_POINTER (1));
 
 	w = gtk_widget_get_width (widget);
 	h = gtk_widget_get_height (widget);
-	if (v && v->draw && w > 0 && h > 0) {
-		cr = gtk_snapshot_append_cairo (snapshot, &GRAPHENE_RECT_INIT (0, 0, w, h));
-		v->draw (widget, cr);
-		cairo_destroy (cr);
+	if (w <= 0 || h <= 0) {
+		GtkAllocation allocation;
+		gtk_widget_get_allocation (widget, &allocation);
+		if (w <= 0)
+			w = allocation.width;
+		if (h <= 0)
+			h = allocation.height;
 	}
-	if (v && v->orig_snapshot)
-		v->orig_snapshot (widget, snapshot);
+
+	/* Walk the instance type so a subclass that only overrides events still
+	 * runs the ancestor GTK3 draw (EelCanvas) and the real GTK4 snapshot
+	 * (GtkLayout). orig_snapshot is often wrapped_snapshot itself. */
+	type = G_OBJECT_TYPE (widget);
+	while (type != 0 && type != GTK_TYPE_WIDGET && type != G_TYPE_OBJECT) {
+		VerneVfuncs *cand = NULL;
+		if (vfunc_table)
+			cand = g_hash_table_lookup (vfunc_table, GSIZE_TO_POINTER (type));
+		if (cand) {
+			if (draw == NULL && cand->draw)
+				draw = cand->draw;
+			if (orig_snapshot == NULL && cand->orig_snapshot &&
+			    cand->orig_snapshot != wrapped_snapshot)
+				orig_snapshot = cand->orig_snapshot;
+		}
+		type = g_type_parent (type);
+	}
+
+	/* Dest GTK3 draw paints an opaque cairo wallpaper over the whole
+	 * widget. Skip the extra GSK blit so we do not paint wallpaper twice. */
+	if (!(w > 0 && h > 0 && (draw || verne_widget_has_draw_handlers (widget))))
+		verne_paint_desktop_wallpaper (widget, snapshot, w, h);
+
+	if (w > 0 && h > 0 && (draw || verne_widget_has_draw_handlers (widget))) {
+		if (!verne_desktop_canvas_snapshot (widget, snapshot, w, h, draw, verne_emit_draw_signal)) {
+			cr = gtk_snapshot_append_cairo (snapshot, &GRAPHENE_RECT_INIT (0, 0, w, h));
+			verne_paint_desktop_wallpaper_cairo (widget, cr, w, h);
+			if (draw)
+				draw (widget, cr);
+			verne_emit_draw_signal (widget, cr);
+			cairo_destroy (cr);
+		}
+	}
+
+	if (orig_snapshot)
+		orig_snapshot (widget, snapshot);
 	else {
-		GtkWidget *child;
-		for (child = gtk_widget_get_first_child (widget); child; child = gtk_widget_get_next_sibling (child))
+		for (child = gtk_widget_get_first_child (widget); child; child = gtk_widget_get_next_sibling (child)) {
+			if (gtk_widget_get_width (child) <= 0 || gtk_widget_get_height (child) <= 0)
+				continue;
 			gtk_widget_snapshot_child (widget, child, snapshot);
+		}
 	}
+	verne_tree_view_paint_dest_overlay (widget, snapshot);
+	g_object_set_data (G_OBJECT (widget), "verne-in-snapshot", NULL);
 }
 
 static void
@@ -571,10 +967,25 @@ wrapped_size_allocate (GtkWidget *widget, int width, int height, int baseline)
 		return;
 
 	v->in_size_allocate = TRUE;
+	/* GTK4 must record the allocation; gtk_widget_set_allocation is a no-op
+	 * in the compat layer, so GTK3 size_allocate alone leaves children
+	 * unallocated and snapshot/malloc-corrupts. */
+	if (v->orig_size_allocate)
+		v->orig_size_allocate (widget, width, height, baseline);
 	if (v->size_allocate)
 		v->size_allocate (widget, &alloc);
-	else if (v->orig_size_allocate)
-		v->orig_size_allocate (widget, width, height, baseline);
+	{
+		GtkWidget *child;
+		for (child = gtk_widget_get_first_child (widget); child; child = gtk_widget_get_next_sibling (child)) {
+			int cw = gtk_widget_get_width (child);
+			int ch = gtk_widget_get_height (child);
+			if (!gtk_widget_get_visible (child) || !gtk_widget_get_child_visible (child))
+				continue;
+			if (cw > 0 && ch > 0)
+				continue;
+			gtk_widget_allocate (child, 1, 1, -1, NULL);
+		}
+	}
 	v->in_size_allocate = FALSE;
 }
 
@@ -606,12 +1017,44 @@ wrapped_measure (GtkWidget *widget, GtkOrientation orientation, int for_size,
 static void
 wrapped_dispose (GObject *object)
 {
-	VerneVfuncs *v = lookup_vfuncs_type (G_OBJECT_TYPE (object));
+	GType type;
+	VerneVfuncs *v;
+	void (*real_dispose) (GObject *) = NULL;
 
-	if (v && v->destroy)
-		v->destroy (GTK_WIDGET (object));
-	if (v && v->orig_dispose)
-		v->orig_dispose (object);
+	if (!G_IS_OBJECT (object))
+		return;
+	if (g_object_get_data (object, "verne-in-orig-dispose"))
+		return;
+	if (g_object_get_data (object, "verne-disposing"))
+		return;
+	g_object_set_data (object, "verne-disposing", GINT_TO_POINTER (1));
+
+	if (!g_object_get_data (object, "verne-destroyed")) {
+		g_object_set_data (object, "verne-destroyed", GINT_TO_POINTER (1));
+		if (GTK_IS_WIDGET (object))
+			gtk_widget_set_visible (GTK_WIDGET (object), FALSE);
+		v = lookup_vfuncs_type (G_OBJECT_TYPE (object));
+		if (v && v->destroy)
+			v->destroy (GTK_WIDGET (object));
+	}
+
+	if (!G_IS_OBJECT (object))
+		return;
+	/* orig_dispose on a subclass is often wrapped_dispose itself (parent
+	 * class already wrapped). Walk to the first real GObject dispose. */
+	for (type = G_OBJECT_TYPE (object); type != 0 && type != G_TYPE_NONE; type = g_type_parent (type)) {
+		VerneVfuncs *cur = (vfunc_table != NULL)
+			? g_hash_table_lookup (vfunc_table, GSIZE_TO_POINTER (type))
+			: NULL;
+		if (cur && cur->orig_dispose && cur->orig_dispose != wrapped_dispose) {
+			real_dispose = cur->orig_dispose;
+			break;
+		}
+	}
+	if (real_dispose) {
+		g_object_set_data (object, "verne-in-orig-dispose", GINT_TO_POINTER (1));
+		real_dispose (object);
+	}
 }
 
 static void
@@ -633,8 +1076,9 @@ wrapped_show (GtkWidget *widget)
 	}
 
 	/* GTK4 gtk_widget_show / gtk_widget_real_show do not map toplevels.
-	 * Present after the GTK3 show hook so Adwaita chrome actually appears. */
-	if (GTK_IS_WINDOW (widget))
+	 * Present after the GTK3 show hook so Adwaita chrome actually appears.
+	 * GtkMenu is a GtkWindow but GTK3 show() on a menu does not pop it up. */
+	if (GTK_IS_WINDOW (widget) && !GTK_IS_MENU (widget))
 		verne_window_present_safe (GTK_WINDOW (widget));
 }
 
@@ -643,9 +1087,26 @@ void
 verne_gtk_widget_show (GtkWidget *widget)
 {
 	g_return_if_fail (GTK_IS_WIDGET (widget));
+	/* GTK3 gtk_widget_show() on a GtkMenu does not pop it up. */
+	if (GTK_IS_POPOVER (widget) || GTK_IS_MENU (widget))
+		return;
 	gtk_widget_set_visible (widget, TRUE);
 	if (GTK_IS_WINDOW (widget))
 		verne_window_present_safe (GTK_WINDOW (widget));
+}
+
+#undef gtk_widget_realize
+void
+verne_gtk_widget_realize (GtkWidget *widget)
+{
+	g_return_if_fail (GTK_IS_WIDGET (widget));
+	/* GtkPopover is a GtkNative but still needs a parent surface. Realizing
+	 * an unrooted menu/popover creates a popup with a NULL parent and aborts. */
+	if (GTK_IS_POPOVER (widget))
+		return;
+	if (!GTK_IS_WINDOW (widget) && gtk_widget_get_root (widget) == NULL)
+		return;
+	(gtk_widget_realize) (widget);
 }
 
 static void
@@ -698,13 +1159,14 @@ wrap_class (VerneVfuncs *v)
 	}
 	if (v->state_changed)
 		wclass->state_flags_changed = wrapped_state_flags_changed;
-	if (v->draw)
-		wclass->snapshot = wrapped_snapshot;
+	/* Always intercept snapshot so ancestor GTK3 draw (EelCanvas) runs even
+	 * when a subclass only overrides events and copies wrapped_snapshot. */
+	wclass->snapshot = wrapped_snapshot;
 	if (v->size_allocate)
 		wclass->size_allocate = wrapped_size_allocate;
 	if (v->pref_width || v->pref_height)
 		wclass->measure = wrapped_measure;
-	if (v->destroy)
+	if (v->destroy && !g_type_is_a (G_TYPE_FROM_CLASS (oclass), GTK_TYPE_WINDOW))
 		oclass->dispose = wrapped_dispose;
 	if (v->show || g_type_is_a (G_TYPE_FROM_CLASS (oclass), GTK_TYPE_WINDOW))
 		wclass->show = wrapped_show;
@@ -828,6 +1290,21 @@ verne_widget_chain_destroy (gpointer parent_class, GtkWidget *widget)
 }
 
 void
+verne_widget_invoke_destroy (GtkWidget *widget)
+{
+	VerneVfuncs *v;
+
+	if (widget == NULL)
+		return;
+	if (g_object_get_data (G_OBJECT (widget), "verne-destroyed"))
+		return;
+	g_object_set_data (G_OBJECT (widget), "verne-destroyed", GINT_TO_POINTER (1));
+	v = lookup_vfuncs_type (G_OBJECT_TYPE (widget));
+	if (v && v->destroy)
+		v->destroy (widget);
+}
+
+void
 verne_widget_chain_show (gpointer parent_class, GtkWidget *widget)
 {
 	VerneVfuncs *v = lookup_vfuncs_type (G_TYPE_FROM_CLASS (parent_class));
@@ -850,6 +1327,7 @@ gboolean
 gtk_widget_event (GtkWidget *widget, GdkEvent *event)
 {
 	const char *name = NULL;
+	gboolean handled;
 
 	g_return_val_if_fail (GTK_IS_WIDGET (widget), FALSE);
 	g_return_val_if_fail (event != NULL, FALSE);
@@ -894,13 +1372,22 @@ gtk_widget_event (GtkWidget *widget, GdkEvent *event)
 	}
 	if (name == NULL)
 		return FALSE;
-	return emit_widget_event (widget, name, event);
+	verne_set_current_event (widget, event);
+	handled = emit_widget_event (widget, name, event);
+	verne_clear_current_event ();
+	return handled;
 }
 
 static void
 global_widget_realize (GtkWidget *widget)
 {
 	ensure_controllers (widget);
+	if (GTK_IS_DRAWING_AREA (widget) &&
+	    g_object_get_data (G_OBJECT (widget), "verne-draw-func") == NULL) {
+		gtk_drawing_area_set_draw_func (GTK_DRAWING_AREA (widget),
+						verne_drawing_area_draw, NULL, NULL);
+		g_object_set_data (G_OBJECT (widget), "verne-draw-func", GINT_TO_POINTER (1));
+	}
 	if (orig_gtk_widget_realize)
 		orig_gtk_widget_realize (widget);
 }
@@ -924,6 +1411,7 @@ register_event_signals (void)
 		{ "focus-in-event", 1 },
 		{ "focus-out-event", 1 },
 		{ "delete-event", 1 },
+		{ "configure-event", 1 },
 		{ "window-state-event", 1 },
 		{ "popup-menu", 0 },
 		{ "selection-done", 0 },
@@ -931,6 +1419,7 @@ register_event_signals (void)
 		{ "event_after", 1 },
 		{ "focus", 1 },
 		{ "size-allocate", 1 },
+		{ "draw", 1 },
 	};
 	static const struct {
 		const char *name;
@@ -989,6 +1478,15 @@ register_event_signals (void)
 	}
 	orig_gtk_widget_realize = wclass->realize;
 	wclass->realize = global_widget_realize;
+	verne_draw_signal_id = g_signal_lookup ("draw", GTK_TYPE_WIDGET);
+	{
+		GtkWidgetClass *da = GTK_WIDGET_CLASS (g_type_class_ref (GTK_TYPE_DRAWING_AREA));
+		if (da->realize != verne_drawing_area_realize) {
+			orig_drawing_area_realize = da->realize;
+			da->realize = verne_drawing_area_realize;
+		}
+		g_type_class_unref (da);
+	}
 }
 
 static void
@@ -1015,19 +1513,101 @@ verne_schema_dir_ctor (void)
 }
 #endif
 
+static void
+verne_crash_handler (int sig)
+{
+	void *frames[64];
+	int n, i;
+	char buf[80];
+	int len;
+
+	len = snprintf (buf, sizeof buf, "\n*** Verne crash signal %d ***\n", sig);
+	if (len > 0)
+		write (STDERR_FILENO, buf, (size_t) len);
+	/* backtrace_symbols_fd allocates; skip it on allocator abort. */
+	if (sig != SIGABRT) {
+		n = backtrace (frames, 64);
+		for (i = 0; i < n; i++) {
+			len = snprintf (buf, sizeof buf, "  %p\n", frames[i]);
+			if (len > 0)
+				write (STDERR_FILENO, buf, (size_t) len);
+		}
+	}
+	_exit (128 + sig);
+}
+
+static void
+verne_install_crash_handler (void)
+{
+	static stack_t ss;
+	struct sigaction sa;
+
+	ss.ss_sp = malloc (SIGSTKSZ * 4);
+	ss.ss_size = ss.ss_sp ? SIGSTKSZ * 4 : 0;
+	ss.ss_flags = 0;
+	if (ss.ss_sp)
+		sigaltstack (&ss, NULL);
+
+	memset (&sa, 0, sizeof sa);
+	sa.sa_handler = verne_crash_handler;
+	sa.sa_flags = SA_ONSTACK;
+	sigaction (SIGSEGV, &sa, NULL);
+	sigaction (SIGABRT, &sa, NULL);
+	sigaction (SIGBUS, &sa, NULL);
+}
+
+static gboolean verne_forcing_icon_theme;
+
+static void
+verne_force_adwaita_icon_theme (GtkSettings *settings)
+{
+	gchar *name = NULL;
+
+	if (settings == NULL || verne_forcing_icon_theme)
+		return;
+	g_object_get (settings, "gtk-icon-theme-name", &name, NULL);
+	if (g_strcmp0 (name, "Adwaita") != 0) {
+		verne_forcing_icon_theme = TRUE;
+		g_object_set (settings, "gtk-icon-theme-name", "Adwaita", NULL);
+		verne_forcing_icon_theme = FALSE;
+	}
+	g_free (name);
+}
+
+static void
+verne_on_icon_theme_changed (GObject *settings, GParamSpec *pspec, gpointer data)
+{
+	(void) pspec;
+	(void) data;
+	verne_force_adwaita_icon_theme (GTK_SETTINGS (settings));
+}
+
 void
 verne_compat_init (void)
 {
 	static gboolean inited;
+	GtkSettings *settings;
 
 	verne_set_uninstalled_schema_dir ();
 	if (inited)
 		return;
 	inited = TRUE;
+	verne_install_crash_handler ();
 	verne_controllers_quark = g_quark_from_static_string ("verne-controllers");
 	if (vfunc_table == NULL)
 		vfunc_table = g_hash_table_new (g_direct_hash, g_direct_equal);
 	register_event_signals ();
+
+	settings = gtk_settings_get_default ();
+	if (settings) {
+		g_object_set (settings,
+			      "gtk-theme-name", "Adwaita",
+			      "gtk-icon-theme-name", "Adwaita",
+			      NULL);
+		g_signal_connect (settings, "notify::gtk-icon-theme-name",
+				  G_CALLBACK (verne_on_icon_theme_changed), NULL);
+		verne_force_adwaita_icon_theme (settings);
+	}
 }
 
 GdkSurface *
@@ -1080,47 +1660,48 @@ gtk_widget_set_allocation (GtkWidget *widget, const GtkAllocation *allocation)
 	(void) allocation;
 }
 
+static GdkMonitor *
+verne_default_monitor (void)
+{
+	GdkDisplay *d = gdk_display_get_default ();
+	GListModel *list;
+
+	if (d == NULL)
+		return NULL;
+	list = gdk_display_get_monitors (d);
+	if (g_list_model_get_n_items (list) == 0)
+		return NULL;
+	return g_list_model_get_item (list, 0);
+}
+
 int
 verne_screen_width (void)
 {
-	GdkDisplay *d = gdk_display_get_default ();
-	GdkMonitor *m = d ? gdk_display_get_monitor_at_surface (d, NULL) : NULL;
+	GdkMonitor *m = verne_default_monitor ();
 	GdkRectangle r;
+	int width = 1920;
 
-	if (m == NULL && d != NULL) {
-		GListModel *list = gdk_display_get_monitors (d);
-		if (g_list_model_get_n_items (list) > 0)
-			m = g_list_model_get_item (list, 0);
-		if (m) {
-			gdk_monitor_get_geometry (m, &r);
-			g_object_unref (m);
-			return r.width;
-		}
-	}
 	if (m) {
 		gdk_monitor_get_geometry (m, &r);
-		return r.width;
+		width = r.width;
+		g_object_unref (m);
 	}
-	return 1920;
+	return width;
 }
 
 int
 verne_screen_height (void)
 {
-	GdkDisplay *d = gdk_display_get_default ();
-	GListModel *list;
-	GdkMonitor *m;
+	GdkMonitor *m = verne_default_monitor ();
 	GdkRectangle r;
+	int height = 1080;
 
-	if (d == NULL)
-		return 1080;
-	list = gdk_display_get_monitors (d);
-	if (g_list_model_get_n_items (list) == 0)
-		return 1080;
-	m = g_list_model_get_item (list, 0);
-	gdk_monitor_get_geometry (m, &r);
-	g_object_unref (m);
-	return r.height;
+	if (m) {
+		gdk_monitor_get_geometry (m, &r);
+		height = r.height;
+		g_object_unref (m);
+	}
+	return height;
 }
 
 int
@@ -1163,10 +1744,32 @@ gtk_icon_size_lookup (GtkIconSize size, gint *width, gint *height)
 gboolean
 gtk_show_uri_on_window (GtkWindow *parent, const char *uri, guint32 timestamp, GError **error)
 {
-	GtkUriLauncher *launcher = gtk_uri_launcher_new (uri);
+	(void) parent;
 	(void) timestamp;
-	gtk_uri_launcher_launch (launcher, parent, NULL, NULL, NULL);
-	g_object_unref (launcher);
-	(void) error;
-	return TRUE;
+	if (uri == NULL || uri[0] == '\0') {
+		g_set_error (error, G_IO_ERROR, G_IO_ERROR_INVALID_ARGUMENT,
+			     "Missing URI");
+		return FALSE;
+	}
+	/* GTK3 gtk_show_uri was synchronous and filled GError so Help (F1)
+	 * could show a dialog. GtkUriLauncher is async and uses the portal,
+	 * which is disabled in this environment and swallowed failures.
+	 * help: / ghelp: have no default handler here unless yelp is
+	 * registered; spawn yelp directly so F1 still opens the manual. */
+	if (g_str_has_prefix (uri, "help:") || g_str_has_prefix (uri, "ghelp:")) {
+		gchar *yelp = g_find_program_in_path ("yelp");
+
+		if (yelp != NULL) {
+			gchar *argv[3];
+			gboolean ok;
+
+			argv[0] = yelp;
+			argv[1] = (gchar *) uri;
+			argv[2] = NULL;
+			ok = g_spawn_async (NULL, argv, NULL, G_SPAWN_DEFAULT, NULL, NULL, NULL, error);
+			g_free (yelp);
+			return ok;
+		}
+	}
+	return g_app_info_launch_default_for_uri (uri, NULL, error);
 }

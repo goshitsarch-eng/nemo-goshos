@@ -15,9 +15,12 @@ struct _GtkClipboard {
 };
 
 struct _GtkTargetList {
+	guint32 magic;
 	guint ref;
 	GArray *entries;
 };
+
+#define VERNE_TARGET_LIST_MAGIC 0x56544C31u /* VTL1 */
 
 void verne_clipboard_install_content (GtkClipboard *clipboard);
 

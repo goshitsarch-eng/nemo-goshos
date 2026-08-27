@@ -33,6 +33,7 @@
 
 #include "nemo-actions.h"
 #include "nemo-desktop-icon-view.h"
+#include "nemo-desktop-window.h"
 #include "nemo-error-reporting.h"
 #include "nemo-list-view.h"
 #include "nemo-mime-actions.h"
@@ -43,6 +44,9 @@
 
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <unistd.h>
+#include <limits.h>
+#include <sys/wait.h>
 
 #include <gdk/gdkx.h>
 #include <gdk/gdkkeysyms.h>
@@ -355,6 +359,9 @@ static void     reset_filter_state                             (NemoView      *v
 
 static void     nemo_view_merge_menus                      (NemoView      *view);
 static void     nemo_view_unmerge_menus                    (NemoView      *view);
+static void     nemo_view_notify_parent                    (GObject       *object,
+							    GParamSpec    *pspec,
+							    gpointer       data);
 static void     nemo_view_init_show_hidden_files           (NemoView      *view);
 static void     clipboard_changed_callback                     (NemoClipboardMonitor *monitor,
 								NemoView      *view);
@@ -873,7 +880,15 @@ nemo_view_update_menus (NemoView *view)
 {
 	g_return_if_fail (NEMO_IS_VIEW (view));
 
+	if (view->details == NULL || gtk_widget_in_destruction (GTK_WIDGET (view))) {
+		return;
+	}
+
 	if (!view->details->active) {
+		return;
+	}
+
+	if (view->details->dir_action_group == NULL) {
 		return;
 	}
 
@@ -1418,7 +1433,9 @@ choose_program (NemoView *view,
 
     gtk_box_pack_start (GTK_BOX (content), chooser, TRUE, TRUE, 0);
 
+    gtk_window_set_default_size (GTK_WINDOW (dialog), 520, 480);
     gtk_widget_show_all (dialog);
+    gtk_window_present (GTK_WINDOW (dialog));
 
 	g_signal_connect_object (dialog, "response",
 				 G_CALLBACK (app_chooser_dialog_response_cb),
@@ -1787,10 +1804,10 @@ select_pattern (NemoView *view)
 	grid = gtk_grid_new ();
 	g_object_set (grid,
 		      "orientation", GTK_ORIENTATION_VERTICAL,
-		      "border-width", 6,
 		      "row-spacing", 6,
 		      "column-spacing", 12,
 		      NULL);
+	gtk_container_set_border_width (GTK_CONTAINER (grid), 6);
 
 	gtk_container_add (GTK_CONTAINER (grid), label);
 	gtk_grid_attach_next_to (GTK_GRID (grid), entry, label,
@@ -1833,7 +1850,12 @@ hidden_files_mode_changed (NemoWindow *window,
 {
 	NemoView *directory_view;
 
+	if (!NEMO_IS_WINDOW (window) || !NEMO_IS_VIEW (callback_data))
+		return;
+
 	directory_view = NEMO_VIEW (callback_data);
+	if (directory_view->details->window == NULL)
+		return;
 
 	nemo_view_init_show_hidden_files (directory_view);
 }
@@ -2542,12 +2564,17 @@ slot_inactive (NemoWindowSlot *slot,
 static void slot_changed_pane (NemoWindowSlot *slot,
 			       NemoView *view)
 {
-	g_signal_handlers_disconnect_matched (view->details->window,
-					      G_SIGNAL_MATCH_DATA, 0, 0,
-					      NULL, NULL, view);
+	if (view->details->window != NULL) {
+		g_signal_handlers_disconnect_matched (view->details->window,
+						      G_SIGNAL_MATCH_DATA, 0, 0,
+						      NULL, NULL, view);
+	}
 
 	view->details->window = nemo_window_slot_get_window (slot);
 	schedule_update_menus (view);
+
+	if (view->details->window == NULL)
+		return;
 
 	g_signal_connect_object (view->details->window,
 		"hidden-files-mode-changed", G_CALLBACK (hidden_files_mode_changed),
@@ -2794,6 +2821,11 @@ nemo_view_init (NemoView *view)
 
 	gtk_widget_show (GTK_WIDGET (view));
 
+	/* GTK4 dropped GtkWidget::parent-set. Merge view menus when the
+	 * widget is parented into an already-active slot. */
+	g_signal_connect (view, "notify::parent",
+			  G_CALLBACK (nemo_view_notify_parent), NULL);
+
 	g_signal_connect_swapped (nemo_preferences,
 				  "changed::" NEMO_PREFERENCES_ENABLE_DELETE,
 				  G_CALLBACK (schedule_update_menus_callback), view);
@@ -2882,6 +2914,10 @@ real_unmerge_menus (NemoView *view)
 
 	ui_manager = nemo_window_get_ui_manager (view->details->window);
 
+	if (view->details->dir_action_group != NULL) {
+		g_object_remove_weak_pointer (G_OBJECT (view->details->dir_action_group),
+					      (gpointer *) &view->details->dir_action_group);
+	}
 	nemo_ui_unmerge_ui (ui_manager,
 				&view->details->dir_merge_id,
 				&view->details->dir_action_group);
@@ -2925,6 +2961,11 @@ nemo_view_destroy (GtkWidget *object)
 	GList *node, *next;
 
 	view = NEMO_VIEW (object);
+
+	remove_update_menus_timeout_callback (view);
+
+	if (NEMO_VIEW_GET_CLASS (view)->shutdown)
+		NEMO_VIEW_GET_CLASS (view)->shutdown (view);
 
 	disconnect_model_handlers (view);
 
@@ -3075,6 +3116,9 @@ nemo_view_display_selection_info (NemoView *view)
 	NemoFile *file;
 
 	g_return_if_fail (NEMO_IS_VIEW (view));
+	g_return_if_fail (view->details != NULL);
+	if (view->details->slot != NULL && !NEMO_IS_WINDOW_SLOT (view->details->slot))
+		return;
 
 	selection = nemo_view_get_selection (view);
 
@@ -3918,6 +3962,11 @@ update_menus_timeout_callback (gpointer data)
 {
 	NemoView *view;
 	view = NEMO_VIEW (data);
+
+	if (!NEMO_IS_VIEW (view) || view->details == NULL ||
+	    gtk_widget_in_destruction (GTK_WIDGET (view))) {
+		return FALSE;
+	}
 
 	g_object_ref (G_OBJECT (view));
 
@@ -4789,7 +4838,10 @@ menu_item_show_image (GtkUIManager *ui_manager,
     g_free (path);
 
     if (!ignore_gtk_pref) {
-        g_object_get (gtk_settings_get_default (), "gtk-menu-images", &show, NULL);
+        GtkSettings *settings = gtk_settings_get_default ();
+        if (settings != NULL &&
+            g_object_class_find_property (G_OBJECT_GET_CLASS (settings), "gtk-menu-images") != NULL)
+            g_object_get (settings, "gtk-menu-images", &show, NULL);
 
         if (!show && !gtk_image_menu_item_get_always_show_image (menuitem)) {
             return;
@@ -6784,6 +6836,9 @@ create_popup_menu (NemoView *view, const char *popup_path)
 
 	menu = gtk_ui_manager_get_widget (nemo_window_get_ui_manager (view->details->window),
 					  popup_path);
+	if (menu == NULL)
+		return NULL;
+	gtk_menu_attach_to_widget (GTK_MENU (menu), GTK_WIDGET (view), NULL);
 	gtk_menu_set_screen (GTK_MENU (menu),
 			     gtk_widget_get_screen (GTK_WIDGET (view)));
 	gtk_widget_show (GTK_WIDGET (menu));
@@ -6817,14 +6872,17 @@ copy_or_cut_files (NemoView *view,
 
     clipboard = nemo_clipboard_get (GTK_WIDGET (view));
 
+	/* Publish clipboard_info before gtk_clipboard_set_with_data so the
+	 * GTK4 content provider can serialize gnome-copied-files / uri-list
+	 * immediately (including remote ftp:// URIs). */
+	nemo_clipboard_monitor_set_clipboard_info (nemo_clipboard_monitor_get (), &info);
+
     gtk_clipboard_set_with_data (clipboard,
                                  targets, n_targets,
                                  nemo_get_clipboard_callback, nemo_clear_clipboard_callback,
                                  NULL);
     gtk_clipboard_set_can_store (clipboard, NULL, 0);
     gtk_target_table_free (targets, n_targets);
-
-	nemo_clipboard_monitor_set_clipboard_info (nemo_clipboard_monitor_get (), &info);
 
 	count = g_list_length (clipboard_contents);
 	if (count == 1) {
@@ -7084,6 +7142,11 @@ paste_clipboard_data (NemoView *view,
 	item_uris = nemo_clipboard_get_uri_list_from_selection_data (selection_data, &cut,
 									 copied_files_atom);
 
+	g_warning ("paste_clipboard_data dest=%s n=%u cut=%d first=%s",
+		   destination_uri ? destination_uri : "(null)",
+		   g_list_length (item_uris), cut,
+		   (item_uris && item_uris->data) ? (char *) item_uris->data : "(none)");
+
 	if (item_uris == NULL|| destination_uri == NULL) {
 		nemo_window_slot_set_status (view->details->slot,
 						 _("There is nothing on the clipboard to paste."),
@@ -7190,10 +7253,39 @@ paste_into (NemoView *view,
 					data);
 }
 
+static void open_as_admin (NemoView *view, const gchar *path);
+
+typedef struct {
+	NemoView *view;
+	gchar *path;
+	gboolean desktop;
+} VerneOpenAsRootData;
+
+static gchar *verne_file_manager_executable (void);
+static void verne_spawn_file_manager_admin (const gchar *path);
+
 static void
 cb_open_as_root_watch (GPid pid, gint status, gpointer user_data)
 {
-    g_spawn_close_pid(pid);
+	VerneOpenAsRootData *data = user_data;
+	gboolean failed = TRUE;
+
+	g_spawn_close_pid (pid);
+	if (WIFEXITED (status) && WEXITSTATUS (status) == 0)
+		failed = FALSE;
+	if (failed && data != NULL && data->path != NULL) {
+		g_warning ("pkexec Open as Root exited %d, opening admin://", status);
+		if (data->desktop)
+			verne_spawn_file_manager_admin (data->path);
+		else if (data->view != NULL && NEMO_IS_VIEW (data->view))
+			open_as_admin (data->view, data->path);
+	}
+	if (data != NULL) {
+		if (data->view != NULL)
+			g_object_remove_weak_pointer (G_OBJECT (data->view), (gpointer *) &data->view);
+		g_free (data->path);
+		g_free (data);
+	}
 }
 
 static void
@@ -7205,24 +7297,162 @@ open_as_admin (NemoView *view, const gchar *path) {
     nemo_window_slot_open_location (view->details->slot, location, 0);
 }
 
+static gchar *
+verne_running_executable (void)
+{
+	char buf[PATH_MAX];
+	ssize_t n;
+
+	n = readlink ("/proc/self/exe", buf, sizeof (buf) - 1);
+	if (n > 0) {
+		buf[n] = '\0';
+		return g_strdup (buf);
+	}
+	return g_strdup ("nemo");
+}
+
+static gchar *
+verne_file_manager_executable (void)
+{
+	gchar *exe;
+	gchar *base;
+	gchar *dir;
+	gchar *fm;
+
+	exe = verne_running_executable ();
+	base = g_path_get_basename (exe);
+	if (g_strcmp0 (base, "nemo-desktop") != 0) {
+		g_free (base);
+		return exe;
+	}
+	dir = g_path_get_dirname (exe);
+	fm = g_build_filename (dir, "nemo", NULL);
+	g_free (dir);
+	g_free (exe);
+	g_free (base);
+	if (g_file_test (fm, G_FILE_TEST_IS_EXECUTABLE))
+		return fm;
+	g_free (fm);
+	return g_strdup ("nemo");
+}
+
+static gboolean
+verne_view_is_desktop (NemoView *view)
+{
+	if (view == NULL || view->details->window == NULL)
+		return FALSE;
+	return NEMO_IS_DESKTOP_WINDOW (view->details->window);
+}
+
+static gchar *
+verne_admin_uri_for_path (const gchar *path)
+{
+	GFile *file;
+	gchar *file_uri;
+	gchar *admin_uri;
+
+	file = g_file_new_for_path (path);
+	file_uri = g_file_get_uri (file);
+	g_object_unref (file);
+	if (file_uri != NULL && g_str_has_prefix (file_uri, "file://"))
+		admin_uri = g_strconcat ("admin://", file_uri + 7, NULL);
+	else
+		admin_uri = g_strdup_printf ("admin://%s", path);
+	g_free (file_uri);
+	return admin_uri;
+}
+
+static void
+verne_spawn_file_manager_admin (const gchar *path)
+{
+	gchar *exe;
+	gchar *uri;
+	gchar *argv[6];
+	GError *error = NULL;
+
+	if (path == NULL || path[0] == '\0')
+		return;
+
+	exe = verne_file_manager_executable ();
+	uri = verne_admin_uri_for_path (path);
+	argv[0] = exe;
+	argv[1] = (gchar *) "--no-desktop";
+	argv[2] = (gchar *) "--existing-window";
+	argv[3] = uri;
+	argv[4] = NULL;
+	if (!g_spawn_async (NULL, argv, NULL, G_SPAWN_SEARCH_PATH, NULL, NULL, NULL, &error)) {
+		g_warning ("Open as Root admin:// launch failed: %s", error->message);
+		g_clear_error (&error);
+	} else {
+		g_warning ("Open as Root launching %s --existing-window %s", exe, uri);
+	}
+	g_free (exe);
+	g_free (uri);
+}
+
 static void
 open_as_root (NemoView *view, const gchar *path)
 {
-    if (eel_check_is_wayland ()) {
-        open_as_admin (view, path);
-        return;
-    }
+	gchar *exe;
+	gchar *folder;
+	gchar *argv[5];
+	GPid pid = 0;
+	GError *error = NULL;
+	VerneOpenAsRootData *data;
+	gboolean desktop;
+	gchar *pkexec;
 
-    gchar *argv[4];
-    argv[0] = (gchar *)"pkexec";
-    argv[1] = (gchar *)"nemo";
-    argv[2] = g_strdup (path);
-    argv[3] = NULL;
-    GPid pid;
-    g_spawn_async(NULL, argv, NULL, G_SPAWN_SEARCH_PATH | G_SPAWN_DO_NOT_REAP_CHILD,
-                  NULL, NULL, &pid, NULL);
-    g_child_watch_add(pid, (GChildWatchFunc)cb_open_as_root_watch, NULL);
-    g_free (argv[2]);
+	if (path == NULL || path[0] == '\0')
+		return;
+
+	desktop = verne_view_is_desktop (view);
+	pkexec = g_find_program_in_path ("pkexec");
+
+	/* Dest has no file-browser window to navigate. Never open admin://
+	 * in the dest slot (that SIGABRTs: target_window == NULL). */
+	if (desktop || pkexec == NULL || eel_check_is_wayland ()) {
+		g_free (pkexec);
+		if (desktop)
+			verne_spawn_file_manager_admin (path);
+		else
+			open_as_admin (view, path);
+		return;
+	}
+	g_free (pkexec);
+
+	exe = verne_file_manager_executable ();
+	folder = g_strdup (path);
+	argv[0] = (gchar *) "pkexec";
+	argv[1] = exe;
+	argv[2] = (gchar *) "--no-desktop";
+	argv[3] = folder;
+	argv[4] = NULL;
+
+	data = g_new0 (VerneOpenAsRootData, 1);
+	data->view = view;
+	data->path = g_strdup (path);
+	data->desktop = desktop;
+	if (view != NULL)
+		g_object_add_weak_pointer (G_OBJECT (view), (gpointer *) &data->view);
+
+	if (!g_spawn_async (NULL, argv, NULL,
+			    G_SPAWN_SEARCH_PATH | G_SPAWN_DO_NOT_REAP_CHILD,
+			    NULL, NULL, &pid, &error)) {
+		g_warning ("pkexec Open as Root failed: %s", error->message);
+		g_clear_error (&error);
+		if (data->view != NULL)
+			g_object_remove_weak_pointer (G_OBJECT (data->view), (gpointer *) &data->view);
+		g_free (data->path);
+		g_free (data);
+		if (desktop)
+			verne_spawn_file_manager_admin (path);
+		else
+			open_as_admin (view, path);
+	} else {
+		g_child_watch_add (pid, (GChildWatchFunc) cb_open_as_root_watch, data);
+	}
+	g_free (exe);
+	g_free (folder);
 }
 
 static void
@@ -8290,6 +8520,9 @@ nemo_view_init_show_hidden_files (NemoView *view)
 		return;
 	}
 
+	if (!NEMO_IS_WINDOW (view->details->window))
+		return;
+
 	mode = nemo_window_get_hidden_files_mode (view->details->window);
 
     if (mode == NEMO_WINDOW_SHOW_HIDDEN_FILES_ENABLE) {
@@ -8681,6 +8914,8 @@ real_merge_menus (NemoView *view)
 	action_group = gtk_action_group_new ("DirViewActions");
 	gtk_action_group_set_translation_domain (action_group, GETTEXT_PACKAGE);
 	view->details->dir_action_group = action_group;
+	g_object_add_weak_pointer (G_OBJECT (action_group),
+				   (gpointer *) &view->details->dir_action_group);
 
 	gtk_action_group_add_actions (action_group,
 				      directory_view_entries, G_N_ELEMENTS (directory_view_entries),
@@ -9734,6 +9969,10 @@ real_update_menus (NemoView *view)
 	gboolean show_properties;
     gboolean first_selected_is_pinned;
     gboolean trash_supported;
+
+	if (view->details->dir_action_group == NULL) {
+		return;
+	}
 
 	selection = nemo_view_get_selection (view);
 	selection_count = g_list_length (selection);
@@ -11418,24 +11657,24 @@ nemo_view_scroll_event (GtkWidget *widget,
 
 
 static void
-nemo_view_parent_set (GtkWidget *widget,
-			  GtkWidget *old_parent)
+nemo_view_notify_parent (GObject    *object,
+			 GParamSpec *pspec,
+			 gpointer    data)
 {
 	NemoView *view;
 	GtkWidget *parent;
 
-	view = NEMO_VIEW (widget);
-
-	parent = gtk_widget_get_parent (widget);
-	g_assert (parent == NULL || old_parent == NULL);
+	(void) pspec;
+	(void) data;
+	view = NEMO_VIEW (object);
+	parent = gtk_widget_get_parent (GTK_WIDGET (view));
 
 	if (parent != NULL) {
-		g_assert (old_parent == NULL);
-
-		if (view->details->slot ==
-		    nemo_window_get_active_slot (view->details->window)) {
+		if (view->details->window != NULL &&
+		    view->details->slot ==
+		    nemo_window_get_active_slot (view->details->window) &&
+		    !view->details->active) {
 			view->details->active = TRUE;
-
 			nemo_view_merge_menus (view);
 			schedule_update_menus (view);
 		}

@@ -292,8 +292,10 @@ mount_removed_callback (GVolumeMonitor *monitor,
 
 	/* Construct a list of windows to be closed. Do not add the non-closable windows to the list. */
 	for (node = window_list; node != NULL; node = node->next) {
+		if (!NEMO_IS_WINDOW (node->data))
+			continue;
 		window = NEMO_WINDOW (node->data);
-		if (window != NULL) {
+		if (window != NULL && window->details != NULL) {
 			GList *l;
 			GList *lp;
 			GFile *saved_location;
@@ -916,7 +918,7 @@ nemo_main_application_local_command_line (GApplication *application,
 	}
 
 	if (version) {
-		g_print ("nemo " VERSION "\n");
+		g_print ("Verne " VERSION "\n");
 		goto out;
 	}
 
@@ -1097,7 +1099,7 @@ menu_state_changed_callback (NemoMainApplication *self)
                                          GTK_DIALOG_MODAL,
                                          GTK_MESSAGE_INFO,
                                          GTK_BUTTONS_OK,
-                                         _("Nemo's main menu is now hidden"));
+                                         _("Verne's main menu is now hidden"));
 
         gchar *secondary;
         secondary = g_strdup_printf (_("You have chosen to hide the main menu.  You can get it back temporarily by:\n\n"

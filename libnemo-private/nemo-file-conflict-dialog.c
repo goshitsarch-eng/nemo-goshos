@@ -531,7 +531,7 @@ nemo_file_conflict_dialog_init (NemoFileConflictDialog *fcd)
 
 	/* Setup the hboxes to pack file infos into */
 	alignment = gtk_alignment_new (0.0, 0.0, 0.0, 0.0);
-	g_object_set (alignment, "left-padding", 12, NULL);
+	gtk_alignment_set_padding (alignment, 0, 0, 12, 0);
 	vbox2 = gtk_box_new (GTK_ORIENTATION_VERTICAL, 12);
 	gtk_container_add (GTK_CONTAINER (alignment), vbox2);
 	gtk_box_pack_start (GTK_BOX (vbox), alignment, FALSE, FALSE, 0);

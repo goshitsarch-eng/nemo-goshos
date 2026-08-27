@@ -1001,6 +1001,14 @@ align_icons (NemoIconContainer *container)
 static void
 redo_layout_internal (NemoIconContainer *container)
 {
+    EelCanvas *canvas = EEL_CANVAS (container);
+    gboolean nested_layout;
+
+    nested_layout = canvas->in_layout;
+    canvas->in_layout = TRUE;
+    canvas->current_item = NULL;
+    canvas->new_current_item = NULL;
+
     container->details->fixed_text_height = -1;
 
     if (NEMO_ICON_CONTAINER_GET_CLASS (container)->finish_adding_new_icons != NULL) {
@@ -1031,6 +1039,9 @@ redo_layout_internal (NemoIconContainer *container)
 
 	process_pending_icon_to_reveal (container);
 	process_pending_icon_to_rename (container);
+
+	if (!nested_layout)
+		canvas->in_layout = FALSE;
 }
 
 static gboolean
@@ -1057,11 +1068,15 @@ unschedule_redo_layout (NemoIconContainer *container)
 static void
 schedule_redo_layout (NemoIconContainer *container)
 {
-	if (container->details->idle_id == 0
-	    && container->details->has_been_allocated) {
-		container->details->idle_id = g_idle_add
-			(redo_layout_callback, container);
+	if (container->details->idle_id == 0) {
+		if (container->details->has_been_allocated) {
+			container->details->idle_id = g_idle_add
+				(redo_layout_callback, container);
+		} else {
+			gtk_widget_queue_allocate (GTK_WIDGET (container));
+		}
 	}
+	gtk_widget_queue_draw (GTK_WIDGET (container));
 }
 
 void
@@ -2812,18 +2827,19 @@ size_allocate (GtkWidget *widget,
 {
 	NemoIconContainer *container;
 	gboolean need_layout_redone;
-	GtkAllocation wid_allocation;
 
 	container = NEMO_ICON_CONTAINER (widget);
 
 	need_layout_redone = !container->details->has_been_allocated;
-	gtk_widget_get_allocation (widget, &wid_allocation);
 
-	if (allocation->width != wid_allocation.width) {
+	/* Compare against the last size we laid out, not gtk_widget_get_allocation.
+	 * GTK4 records the widget size before this vfunc runs, so get_allocation
+	 * already equals *allocation and would never trigger a relayout. */
+	if (allocation->width != container->details->last_allocated_width) {
 		need_layout_redone = TRUE;
 	}
 
-	if (allocation->height != wid_allocation.height) {
+	if (allocation->height != container->details->last_allocated_height) {
 		need_layout_redone = TRUE;
 	}
 
@@ -2845,7 +2861,8 @@ size_allocate (GtkWidget *widget,
 	}
 	container->details->size_allocation_count++;
 	if (container->details->size_allocation_count > 2 &&
-	    allocation->width >= wid_allocation.width) {
+	    container->details->last_allocated_width > 1 &&
+	    allocation->width >= container->details->last_allocated_width) {
 		need_layout_redone = FALSE;
 	}
 
@@ -2860,6 +2877,8 @@ size_allocate (GtkWidget *widget,
 	verne_widget_chain_size_allocate (nemo_icon_container_parent_class, widget, allocation);
 
 	container->details->has_been_allocated = TRUE;
+	container->details->last_allocated_width = allocation->width;
+	container->details->last_allocated_height = allocation->height;
 
 	if (need_layout_redone) {
 		nemo_icon_container_redo_layout (container);
@@ -4543,7 +4562,7 @@ nemo_icon_container_class_init (NemoIconContainerClass *class)
 		                NULL, NULL,
 		                g_cclosure_marshal_generic,
 		                G_TYPE_BOOLEAN, 1,
-				GDK_TYPE_EVENT);
+				G_TYPE_POINTER);
 	signals[ACTIVATE]
 		= g_signal_new ("activate",
 		                G_TYPE_FROM_CLASS (class),
@@ -4865,7 +4884,7 @@ nemo_icon_container_class_init (NemoIconContainerClass *class)
                         g_signal_accumulator_true_handled, NULL,
                         g_cclosure_marshal_generic,
                         G_TYPE_BOOLEAN, 1,
-                        GDK_TYPE_EVENT);
+                        G_TYPE_POINTER);
 
 	/* GtkWidget class.  */
 
@@ -4949,6 +4968,8 @@ nemo_icon_container_init (NemoIconContainer *container)
 	details->font_size_table[NEMO_ZOOM_LEVEL_LARGEST] = 0 * PANGO_SCALE;
 
     details->fixed_text_height = -1;
+    details->last_allocated_width = -1;
+    details->last_allocated_height = -1;
 
     details->view_constants = g_new0 (NemoViewLayoutConstants, 1);
 
@@ -5840,7 +5861,7 @@ nemo_icon_container_add (NemoIconContainer *container,
 void
 nemo_icon_container_layout_now (NemoIconContainer *container)
 {
-	if (container->details->idle_id != 0) {
+	if (container->details->idle_id != 0 || container->details->new_icons != NULL) {
 		unschedule_redo_layout (container);
 		redo_layout_internal (container);
 	}
@@ -6605,6 +6626,10 @@ nemo_icon_container_update_tooltip_text (NemoIconContainer  *container,
     }
 
     icon = item->user_data;
+    if (icon == NULL || icon->data == NULL) {
+        gtk_widget_set_tooltip_text (GTK_WIDGET (container), "");
+        return;
+    }
     file = NEMO_FILE (icon->data);
 
     text = NULL;

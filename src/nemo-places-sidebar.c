@@ -46,6 +46,7 @@
 #include <libnemo-private/nemo-action-manager.h>
 #include <libnemo-private/nemo-action.h>
 #include <libnemo-private/nemo-ui-utilities.h>
+#include <libnemo-private/nemo-icon-info.h>
 
 #include <eel/eel-debug.h>
 #include <eel/eel-gtk-extensions.h>
@@ -227,9 +228,10 @@ static void update_places                              (NemoPlacesSidebar *sideb
 static void update_places_on_idle                      (NemoPlacesSidebar *sidebar);
 static void rebuild_menu                               (NemoPlacesSidebar *sidebar);
 static void actions_changed                            (gpointer user_data);
-/* Identifiers for target types */
+/* Identifiers for target types. Never use 0: unset drag_data_info is 0
+ * and would look like GTK_TREE_MODEL_ROW, rejecting file drops on Home/Desktop. */
 enum {
-  GTK_TREE_MODEL_ROW,
+  GTK_TREE_MODEL_ROW = 1,
   TEXT_URI_LIST
 };
 
@@ -241,6 +243,7 @@ static const GtkTargetEntry nemo_shortcuts_source_targets[] = {
 /* Target types for dropping into the shortcuts list */
 static const GtkTargetEntry nemo_shortcuts_drop_targets [] = {
 	{ (char *)"GTK_TREE_MODEL_ROW", GTK_TARGET_SAME_WIDGET, GTK_TREE_MODEL_ROW },
+	{ (char *)"x-special/gnome-icon-list", 0, TEXT_URI_LIST },
 	{ (char *)"text/uri-list", 0, TEXT_URI_LIST }
 };
 
@@ -749,6 +752,9 @@ update_places (NemoPlacesSidebar *sidebar)
 
 	DEBUG ("Updating places sidebar");
 
+    if (sidebar->tree_view == NULL || sidebar->store == NULL)
+        return;
+
     sidebar->updating_sidebar = TRUE;
 
 	model = NULL;
@@ -763,6 +769,9 @@ update_places (NemoPlacesSidebar *sidebar)
 				    &last_iter,
 				    PLACES_SIDEBAR_COLUMN_URI, &last_uri, -1);
 	}
+	/* GTK4 GtkTreeView keeps filter iters across store rebuilds and then
+	 * aborts in do_validate_rows (stamp mismatch → heap corruption). */
+	gtk_tree_view_set_model (sidebar->tree_view, NULL);
 	gtk_tree_store_clear (sidebar->store);
 
 	sidebar->devices_header_added = FALSE;
@@ -1296,6 +1305,8 @@ update_places (NemoPlacesSidebar *sidebar)
                 		   _("Browse the contents of the network"), 0, FALSE,
                            cat_iter);
 
+	gtk_tree_view_set_model (sidebar->tree_view, GTK_TREE_MODEL (sidebar->store_filter));
+
 	/* restore selection */
     restore_expand_state (sidebar);
 	sidebar_update_restore_selection (sidebar, location, last_uri);
@@ -1378,6 +1389,30 @@ drive_changed_callback (GVolumeMonitor *volume_monitor,
 			NemoPlacesSidebar *sidebar)
 {
 	update_places_on_idle (sidebar);
+}
+
+/* GTK4 GestureClick/Motion report widget-relative coordinates. GtkTreeView
+ * get_path_at_pos expects bin-window coords, matching the list-view helper. */
+static void
+places_translate_xy (GtkTreeView *tree_view, gdouble *x, gdouble *y)
+{
+	int bx, by;
+
+	gtk_tree_view_convert_widget_to_bin_window_coords (tree_view,
+							   (int) *x, (int) *y,
+							   &bx, &by);
+	*x = bx;
+	*y = by;
+}
+
+static void
+places_translate_xy_int (GtkTreeView *tree_view, int *x, int *y)
+{
+	int bx, by;
+
+	gtk_tree_view_convert_widget_to_bin_window_coords (tree_view, *x, *y, &bx, &by);
+	*x = bx;
+	*y = by;
 }
 
 static gboolean
@@ -1611,8 +1646,109 @@ get_drag_type (NemoPlacesSidebar *sidebar,
         /* or else you want to drag items INTO the existing bookmarks */
         return GTK_TREE_VIEW_DROP_INTO_OR_BEFORE;
     }
+    }
+
+
+static gboolean
+places_try_path_at (GtkTreeView *tree_view,
+		    int x, int y,
+		    GtkTreePath **path,
+		    GtkTreeViewDropPosition *pos)
+{
+	g_clear_pointer (path, gtk_tree_path_free);
+	if (gtk_tree_view_get_dest_row_at_pos (tree_view, x, y, path, pos) &&
+	    *path != NULL)
+		return TRUE;
+	g_clear_pointer (path, gtk_tree_path_free);
+	if (gtk_tree_view_get_path_at_pos (tree_view, x, y, path, NULL, NULL, NULL) &&
+	    *path != NULL) {
+		*pos = GTK_TREE_VIEW_DROP_INTO_OR_BEFORE;
+		return TRUE;
+	}
+	g_clear_pointer (path, gtk_tree_path_free);
+	return FALSE;
 }
 
+/* GTK4 drop x,y are widget-relative. get_path_at_pos still wants bin-window
+ * coords, and the two spaces often miss the row. Walk visible row rectangles
+ * so Home/Desktop/Trash file drops still hit. */
+static gboolean
+places_path_from_drop_xy (GtkTreeView *tree_view,
+			  int x, int y,
+			  GtkTreePath **path,
+			  GtkTreeViewDropPosition *pos)
+{
+	GtkTreeModel *model;
+	GtkTreeIter iter;
+	GtkTreeViewColumn *col;
+	GtkTreePath *best = NULL;
+	int best_dist = G_MAXINT;
+	int wx, wy, bx, by;
+	int trials[3][2];
+	int n = 0, i;
+
+	*path = NULL;
+	trials[n][0] = x;
+	trials[n][1] = y;
+	n++;
+	gtk_tree_view_convert_widget_to_bin_window_coords (tree_view, x, y, &bx, &by);
+	if (bx != x || by != y) {
+		trials[n][0] = bx;
+		trials[n][1] = by;
+		n++;
+	}
+	gtk_tree_view_convert_bin_window_to_widget_coords (tree_view, x, y, &wx, &wy);
+	if ((wx != x || wy != y) && (n < 2 || wx != trials[1][0] || wy != trials[1][1])) {
+		trials[n][0] = wx;
+		trials[n][1] = wy;
+		n++;
+	}
+	for (i = 0; i < n; i++) {
+		if (places_try_path_at (tree_view, trials[i][0], trials[i][1], path, pos))
+			return TRUE;
+	}
+
+	model = gtk_tree_view_get_model (tree_view);
+	col = gtk_tree_view_get_column (tree_view, 1);
+	if (col == NULL)
+		col = gtk_tree_view_get_column (tree_view, 0);
+	if (model == NULL || col == NULL || !gtk_tree_model_get_iter_first (model, &iter))
+		return FALSE;
+
+	do {
+		GtkTreePath *ip;
+		GdkRectangle area;
+		int dist;
+
+		ip = gtk_tree_model_get_path (model, &iter);
+		gtk_tree_view_get_background_area (tree_view, ip, col, &area);
+		if (y >= area.y && y < area.y + MAX (area.height, 1)) {
+			*path = ip;
+			*pos = GTK_TREE_VIEW_DROP_INTO_OR_BEFORE;
+			gtk_tree_path_free (best);
+			return TRUE;
+		}
+		if (y < area.y)
+			dist = area.y - y;
+		else
+			dist = y - (area.y + area.height);
+		if (dist < best_dist) {
+			best_dist = dist;
+			gtk_tree_path_free (best);
+			best = ip;
+		} else {
+			gtk_tree_path_free (ip);
+		}
+	} while (gtk_tree_model_iter_next (model, &iter));
+
+	if (best != NULL && best_dist <= 28) {
+		*path = best;
+		*pos = GTK_TREE_VIEW_DROP_INTO_OR_BEFORE;
+		return TRUE;
+	}
+	gtk_tree_path_free (best);
+	return FALSE;
+}
 
 /* Computes the appropriate row and position for dropping */
 static gboolean
@@ -1629,11 +1765,9 @@ compute_drop_position (GtkTreeView *tree_view,
 	SectionType section_type;
     gchar *drop_target_uri = NULL;
 
-	if (!gtk_tree_view_get_dest_row_at_pos (tree_view,
-						x, y,
-						path, pos)) {
+	*path = NULL;
+	if (!places_path_from_drop_xy (tree_view, x, y, path, pos))
 		return FALSE;
-	}
 	model = gtk_tree_view_get_model (tree_view);
 
 	gtk_tree_model_get_iter (model, &iter, *path);
@@ -1668,6 +1802,30 @@ compute_drop_position (GtkTreeView *tree_view,
             *pos = GTK_TREE_VIEW_DROP_AFTER;
             g_free (drop_target_uri);
             return TRUE;
+        } else if (!(sidebar->drag_data_received &&
+		     sidebar->drag_data_info == GTK_TREE_MODEL_ROW)) {
+		/* File transfer onto an expanded heading: land in the first child
+		 * (Home under My Computer) instead of rejecting the drop. */
+		GtkTreeIter child;
+
+		if (gtk_tree_model_iter_children (model, &child, &iter)) {
+			gtk_tree_path_free (*path);
+			*path = gtk_tree_model_get_path (model, &child);
+			iter = child;
+			g_free (drop_target_uri);
+			drop_target_uri = NULL;
+			gtk_tree_model_get (model, &iter,
+					    PLACES_SIDEBAR_COLUMN_ROW_TYPE, &place_type,
+					    PLACES_SIDEBAR_COLUMN_SECTION_TYPE, &section_type,
+					    PLACES_SIDEBAR_COLUMN_URI, &drop_target_uri,
+					    -1);
+			*pos = GTK_TREE_VIEW_DROP_INTO_OR_BEFORE;
+			if (place_type == PLACES_HEADING ||
+			    drop_target_uri == NULL || drop_target_uri[0] == '\0')
+				goto fail;
+		} else {
+			goto fail;
+		}
         } else {
             goto fail;
         }
@@ -1702,6 +1860,21 @@ compute_drop_position (GtkTreeView *tree_view,
 	    sidebar->drag_data_info == GTK_TREE_MODEL_ROW) {
 		/* bookmark rows are never dragged into other bookmark rows */
 		*pos = GTK_TREE_VIEW_DROP_AFTER;
+	}
+
+	/* File transfers onto Home/Desktop/devices/network must land IN the
+	 * place. XDG rows otherwise treat the top/bottom quarter as bookmark
+	 * reorder, which GTK4 bin-vs-widget coords often miss entirely. */
+	if (!(sidebar->drag_data_received &&
+	      sidebar->drag_data_info == GTK_TREE_MODEL_ROW) &&
+	    place_type != PLACES_HEADING &&
+	    drop_target_uri != NULL && drop_target_uri[0] != '\0' &&
+	    g_strcmp0 (drop_target_uri, "recent:///") != 0 &&
+	    (section_type == SECTION_COMPUTER ||
+	     section_type == SECTION_XDG_BOOKMARKS ||
+	     section_type == SECTION_DEVICES ||
+	     section_type == SECTION_NETWORK)) {
+		*pos = GTK_TREE_VIEW_DROP_INTO_OR_BEFORE;
 	}
 
 	return TRUE;
@@ -1794,6 +1967,8 @@ drag_motion_callback (GtkTreeView *tree_view,
 	gboolean res;
 
     action = 0;
+
+	places_translate_xy_int (tree_view, &x, &y);
 
 	if (!sidebar->drag_data_received) {
 		if (!get_drag_data (tree_view, context, time)) {
@@ -1972,6 +2147,9 @@ get_selected_iter (NemoPlacesSidebar *sidebar,
 {
 	GtkTreeSelection *selection;
 
+	if (sidebar->tree_view == NULL)
+		return FALSE;
+
 	selection = gtk_tree_view_get_selection (sidebar->tree_view);
 
 	return gtk_tree_selection_get_selected (selection, NULL, iter);
@@ -2063,11 +2241,18 @@ drag_data_received_callback (GtkWidget *widget,
 	gboolean success;
 
 	tree_view = GTK_TREE_VIEW (widget);
+	places_translate_xy_int (tree_view, &x, &y);
 
 	if (!sidebar->drag_data_received) {
-		if (gtk_selection_data_get_target (selection_data) != GDK_NONE &&
-		    info == TEXT_URI_LIST) {
+		GdkAtom received_target = gtk_selection_data_get_target (selection_data);
+		const char *target_name = received_target ? (const char *) received_target : "";
+
+		if (received_target != GDK_NONE &&
+		    (info == TEXT_URI_LIST ||
+		     g_strcmp0 (target_name, "text/uri-list") == 0 ||
+		     g_strcmp0 (target_name, "x-special/gnome-icon-list") == 0)) {
 			sidebar->drag_list = build_selection_list ((const gchar *) gtk_selection_data_get_data (selection_data));
+			info = TEXT_URI_LIST;
 		} else {
 			sidebar->drag_list = NULL;
 		}
@@ -2084,6 +2269,8 @@ drag_data_received_callback (GtkWidget *widget,
 	/* Compute position */
 	success = compute_drop_position (tree_view, x, y, &tree_path, &tree_pos, sidebar);
 	if (!success) {
+		g_warning ("places drop rejected xy=%d,%d info=%d received=%d",
+			   x, y, sidebar->drag_data_info, sidebar->drag_data_received);
 		goto out;
 	}
 
@@ -2124,7 +2311,12 @@ drag_data_received_callback (GtkWidget *widget,
 			success = TRUE;
 			break;
 		default:
-			g_assert_not_reached ();
+			if (gtk_selection_data_get_length (selection_data) > 0) {
+				bookmarks_drop_uris (sidebar, selection_data, position, section_type);
+				success = TRUE;
+			} else {
+				success = FALSE;
+			}
 			break;
 		}
 	} else {
@@ -2146,9 +2338,16 @@ drag_data_received_callback (GtkWidget *widget,
 			gtk_tree_model_get (model, &iter,
 					    PLACES_SIDEBAR_COLUMN_URI, &drop_uri,
 					    -1);
+			g_warning ("places drop into uri=%s pos=%d xy=%d,%d action=%d",
+				   drop_uri ? drop_uri : "(null)", (int) tree_pos, x, y,
+				   (int) real_action);
 
 			switch (info) {
+			case GTK_TREE_MODEL_ROW:
+				success = FALSE;
+				break;
 			case TEXT_URI_LIST:
+			default:
 				selection_list = build_selection_list ((const gchar *) gtk_selection_data_get_data (selection_data));
 				uris = uri_list_from_selection (selection_list);
 
@@ -2170,12 +2369,6 @@ drag_data_received_callback (GtkWidget *widget,
 				nemo_drag_destroy_selection_list (selection_list);
 				g_list_free (uris);
 				success = TRUE;
-				break;
-			case GTK_TREE_MODEL_ROW:
-				success = FALSE;
-				break;
-			default:
-				g_assert_not_reached ();
 				break;
 			}
 
@@ -3566,14 +3759,7 @@ rebuild_menu (NemoPlacesSidebar *sidebar)
         GtkWidget *menu = gtk_ui_manager_get_widget (sidebar->ui_manager, "/selection");
         gtk_menu_set_screen (GTK_MENU (menu), gtk_widget_get_screen (GTK_WIDGET (sidebar->window)));
         sidebar->popup_menu = menu;
-
-#if GTK_CHECK_VERSION (3, 24, 8)
-        g_signal_connect (sidebar->popup_menu, "realize",
-                          G_CALLBACK (popup_menu_realized),
-                          sidebar);
-        gtk_widget_realize (sidebar->popup_menu);
-#endif
-
+        gtk_menu_attach_to_widget (GTK_MENU (menu), GTK_WIDGET (sidebar), NULL);
         gtk_widget_show (menu);
     }
 
@@ -3606,12 +3792,13 @@ bookmarks_button_release_event_cb (GtkWidget *widget,
 
 	tree_view = GTK_TREE_VIEW (widget);
 	model = gtk_tree_view_get_model (tree_view);
+	places_translate_xy (tree_view, &event->x, &event->y);
 
 	if (event->button == GDK_BUTTON_PRIMARY) {
-
-		if (event->window != gtk_tree_view_get_bin_window (tree_view)) {
-			return FALSE;
-		}
+		/* GTK4 synthesizes events on the widget surface; skip the GTK3
+		 * bin-window identity check so Places clicks still activate.
+		 * row-activated is the primary GTK4 path; this remains a fallback
+		 * when the TreeView gesture does not emit it. */
 
 		res = gtk_tree_view_get_path_at_pos (tree_view, (int) event->x, (int) event->y,
 						     &path, NULL, NULL, NULL);
@@ -3650,6 +3837,7 @@ bookmarks_button_press_event_cb (GtkWidget             *widget,
 
 	tree_view = GTK_TREE_VIEW (widget);
 	model = gtk_tree_view_get_model (tree_view);
+	places_translate_xy (tree_view, &event->x, &event->y);
 	gtk_tree_view_get_path_at_pos (tree_view, (int) event->x, (int) event->y,
 				       &path, NULL, NULL, NULL);
 
@@ -3737,6 +3925,8 @@ motion_notify_cb (GtkWidget         *widget,
     if (editing) {
         return GDK_EVENT_PROPAGATE;
     }
+
+    places_translate_xy (GTK_TREE_VIEW (widget), &event->x, &event->y);
 
     model = gtk_tree_view_get_model (GTK_TREE_VIEW (sidebar->tree_view));
 
@@ -3943,7 +4133,12 @@ row_activated_cb (GtkTreeView       *tree_view,
             sidebar->network_expanded = !sidebar->network_expanded;
         }
         restore_expand_state (sidebar);
+        return;
     }
+
+    /* GTK4 TreeView hit-testing owns single-click activation. The GTK3
+     * button-release path often never runs (claimed gestures / event window). */
+    open_selected_bookmark (sidebar, model, &iter, 0);
 }
 
 static void
@@ -3988,8 +4183,9 @@ trash_state_changed_cb (NemoTrashMonitor *trash_monitor,
 
 	sidebar = NEMO_PLACES_SIDEBAR (data);
 
-	/* The trash icon changed, update the sidebar */
-	update_places (sidebar);
+	/* The trash icon changed; rebuild on idle so we are not inside a
+	 * GtkTreeView validation pass (GTK4 stamp mismatch / heap abort). */
+	update_places_on_idle (sidebar);
 
 	reset_menu (sidebar);
 }
@@ -4032,9 +4228,12 @@ icon_cell_renderer_func (GtkTreeViewColumn *column,
 			 gpointer user_data)
 {
 	PlaceType type;
+	GIcon *gicon = NULL;
+	GdkPixbuf *pixbuf = NULL;
 
 	gtk_tree_model_get (model, iter,
 			    PLACES_SIDEBAR_COLUMN_ROW_TYPE, &type,
+			    PLACES_SIDEBAR_COLUMN_GICON, &gicon,
 			    -1);
 
 	if (type == PLACES_HEADING) {
@@ -4044,10 +4243,33 @@ icon_cell_renderer_func (GtkTreeViewColumn *column,
 	} else {
 		g_object_set (cell,
 			      "visible", TRUE,
-                  "xpad", 3,
-                  "ypad", 2,
+			      "xpad", 3,
+			      "ypad", 2,
 			      NULL);
+		if (gicon && G_IS_THEMED_ICON (gicon)) {
+			const gchar *const *names = g_themed_icon_get_names (G_THEMED_ICON (gicon));
+			const char *name = (names && names[0]) ? verne_map_icon_name (names[0]) : NULL;
+			GObjectClass *klass = G_OBJECT_GET_CLASS (cell);
+
+			if (g_object_class_find_property (klass, "gicon"))
+				g_object_set (cell, "gicon", NULL, NULL);
+			if (g_object_class_find_property (klass, "pixbuf"))
+				g_object_set (cell, "pixbuf", NULL, NULL);
+			if (g_object_class_find_property (klass, "texture"))
+				g_object_set (cell, "texture", NULL, NULL);
+			if (g_object_class_find_property (klass, "icon-name"))
+				g_object_set (cell, "icon-name", name, NULL);
+		} else if (gicon) {
+			NemoIconInfo *info = nemo_icon_info_lookup (gicon, 16, 1);
+			pixbuf = nemo_icon_info_get_pixbuf_nodefault (info);
+			nemo_icon_info_unref (info);
+			verne_cell_renderer_set_pixbuf (cell, pixbuf);
+			g_clear_object (&pixbuf);
+		} else {
+			verne_cell_renderer_set_pixbuf (cell, NULL);
+		}
 	}
+	g_clear_object (&gicon);
 }
 
 static void
@@ -4181,6 +4403,7 @@ nemo_places_sidebar_init (NemoPlacesSidebar *sidebar)
 	tree_view = GTK_TREE_VIEW (nemo_places_tree_view_new ());
 
 	gtk_tree_view_set_headers_visible (tree_view, FALSE);
+	gtk_tree_view_set_activate_on_single_click (tree_view, TRUE);
 
     primary_column = GTK_TREE_VIEW_COLUMN (gtk_tree_view_column_new ());
     gtk_tree_view_column_set_max_width (GTK_TREE_VIEW_COLUMN (primary_column), NEMO_ICON_SIZE_SMALLER);
@@ -4216,12 +4439,9 @@ nemo_places_sidebar_init (NemoPlacesSidebar *sidebar)
 	/* icon renderer */
 	cell = gtk_cell_renderer_pixbuf_new ();
     g_object_set (cell,
-                  "follow-state", TRUE,
+                  "icon-size", GTK_ICON_SIZE_NORMAL,
                   NULL);
 	gtk_tree_view_column_pack_start (primary_column, cell, FALSE);
-	gtk_tree_view_column_set_attributes (primary_column, cell,
-					     "gicon", PLACES_SIDEBAR_COLUMN_GICON,
-					     NULL);
 	gtk_tree_view_column_set_cell_data_func (primary_column, cell,
 						 icon_cell_renderer_func,
 						 sidebar, NULL);
@@ -4269,7 +4489,6 @@ nemo_places_sidebar_init (NemoPlacesSidebar *sidebar)
 	gtk_tree_view_column_set_attributes (sidebar->eject_column, cell,
 					     "visible", PLACES_SIDEBAR_COLUMN_EJECT,
 					     "icon-name", PLACES_SIDEBAR_COLUMN_EJECT_ICON,
-                         "stock-size", PLACES_SIDEBAR_COLUMN_EJECT_ICON_SIZE,
                          NULL);
 
     /* eject icon trailing padding (adjusts to always avoid overlay-scrollbars) */
@@ -4417,9 +4636,26 @@ static void
 nemo_places_sidebar_dispose (GObject *object)
 {
 	NemoPlacesSidebar *sidebar;
+	GtkTreeView *tree_view;
 
 	sidebar = NEMO_PLACES_SIDEBAR (object);
 
+	if (sidebar->update_places_on_idle_id != 0) {
+		g_source_remove (sidebar->update_places_on_idle_id);
+		sidebar->update_places_on_idle_id = 0;
+	}
+
+	tree_view = sidebar->tree_view;
+	if (tree_view != NULL) {
+		GtkTreeSelection *selection;
+
+		selection = gtk_tree_view_get_selection (tree_view);
+		g_signal_handlers_disconnect_by_data (selection, sidebar);
+		g_signal_handlers_disconnect_by_data (tree_view, sidebar);
+		gtk_tree_view_set_model (tree_view, NULL);
+		/* GTK4 child teardown finalizes this view unsafely. Keep it alive. */
+		g_object_ref (tree_view);
+	}
 	sidebar->window = NULL;
 	sidebar->tree_view = NULL;
 
@@ -4449,6 +4685,7 @@ nemo_places_sidebar_dispose (GObject *object)
         sidebar->update_places_on_idle_id = 0;
     }
 
+	g_clear_object (&sidebar->store_filter);
 	g_clear_object (&sidebar->store);
 
     g_clear_pointer (&sidebar->top_bookend_uri, g_free);

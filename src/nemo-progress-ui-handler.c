@@ -30,6 +30,7 @@
 
 #include "nemo-application.h"
 #include "nemo-progress-info-widget.h"
+#include "nemo-window.h"
 
 #include <gio/gio.h>
 #include <glib/gi18n.h>
@@ -136,9 +137,17 @@ progress_window_delete_event (GtkWidget *widget,
     gtk_widget_hide (widget);
 
     self->priv->should_show_status_icon = TRUE;
+    g_message ("File Operations hidden; showing status icon");
     progress_ui_handler_update_status_icon (self);
 
     return TRUE;
+}
+
+static gboolean
+progress_window_close_request (GtkWindow *window,
+			       NemoProgressUIHandler *self)
+{
+    return progress_window_delete_event (GTK_WIDGET (window), NULL, self);
 }
 
 static void
@@ -187,6 +196,37 @@ progress_ui_handler_sort_by_active (NemoProgressUIHandler *self)
     g_list_free (l);
 }
 
+static GtkWindow *
+progress_ui_pick_transient_parent (GtkApplication *app, GtkWindow *progress)
+{
+	GList *windows, *l;
+	GtkWindow *best = NULL;
+
+	if (app == NULL)
+		return NULL;
+
+	windows = gtk_application_get_windows (app);
+	for (l = windows; l != NULL; l = l->next) {
+		GtkWindow *w = l->data;
+		int ww, hh;
+
+		if (w == progress)
+			continue;
+		if (!gtk_widget_get_visible (GTK_WIDGET (w)))
+			continue;
+		ww = gtk_widget_get_width (GTK_WIDGET (w));
+		hh = gtk_widget_get_height (GTK_WIDGET (w));
+		/* Skip the hidden 1×1 AdwApplication native titled "Verne". */
+		if (ww < 64 || hh < 64)
+			continue;
+		if (NEMO_IS_WINDOW (w))
+			return w;
+		if (best == NULL)
+			best = w;
+	}
+	return best;
+}
+
 static void
 progress_ui_handler_ensure_window (NemoProgressUIHandler *self)
 {
@@ -202,9 +242,11 @@ progress_ui_handler_ensure_window (NemoProgressUIHandler *self)
 	progress_window = xapp_gtk_window_new (GTK_WINDOW_TOPLEVEL);
 	self->priv->progress_window = progress_window;
 
-    gtk_window_set_type_hint (GTK_WINDOW (progress_window), GDK_WINDOW_TYPE_HINT_DIALOG);
-    gtk_window_set_resizable (GTK_WINDOW (progress_window), FALSE);
-    gtk_window_set_default_size (GTK_WINDOW (progress_window), 500, -1);
+	/* GTK4 + xfwm leave an unparented TYPE_DIALOG GtkWindow Withdrawn, so
+	 * File Operations never appears. Keep it a normal window and attach it
+	 * to a visible file window — not the dummy 1×1 native. */
+	gtk_window_set_resizable (GTK_WINDOW (progress_window), FALSE);
+	gtk_window_set_default_size (GTK_WINDOW (progress_window), 500, 160);
 
 	gtk_window_set_title (GTK_WINDOW (progress_window),
 			      _("File Operations"));
@@ -227,19 +269,36 @@ progress_ui_handler_ensure_window (NemoProgressUIHandler *self)
     priv->list = w;
     gtk_container_add (GTK_CONTAINER (frame), w);
 
-    g_object_set (priv->list,
-                  "margin-left", 5,
-                  "margin-right", 5,
-                  "margin-top", 5,
-                  "margin-bottom", 5,
-                  NULL);
+    gtk_widget_set_margin_start (priv->list, 5);
+    gtk_widget_set_margin_end (priv->list, 5);
+    gtk_widget_set_margin_top (priv->list, 5);
+    gtk_widget_set_margin_bottom (priv->list, 5);
 
     gtk_box_pack_start (GTK_BOX (main_box), frame, FALSE, FALSE, 0);
     gtk_widget_show_all (main_box);
+    gtk_widget_set_visible (progress_window, TRUE);
 
+	{
+		GtkApplication *app = GTK_APPLICATION (g_application_get_default ());
+		if (app != NULL) {
+			GtkWindow *parent;
+
+			gtk_application_add_window (app, GTK_WINDOW (progress_window));
+			parent = progress_ui_pick_transient_parent (app, GTK_WINDOW (progress_window));
+			if (parent != NULL)
+				gtk_window_set_transient_for (GTK_WINDOW (progress_window), parent);
+		}
+	}
+	gtk_widget_set_visible (progress_window, TRUE);
+	gtk_window_present (GTK_WINDOW (progress_window));
+
+	gtk_window_set_hide_on_close (GTK_WINDOW (progress_window), TRUE);
 	g_signal_connect (progress_window,
 			  "delete-event",
 			  (GCallback) progress_window_delete_event, self);
+	g_signal_connect (progress_window,
+			  "close-request",
+			  (GCallback) progress_window_close_request, self);
 }
 
 static void
@@ -364,7 +423,8 @@ handle_new_progress_info (NemoProgressUIHandler *self,
 	if (self->priv->active_infos == 1) {
 		/* this is the only active operation, present the window */
 		progress_ui_handler_add_to_window (self, info);
-        gtk_window_present (GTK_WINDOW (self->priv->progress_window));
+		gtk_widget_set_visible (self->priv->progress_window, TRUE);
+		gtk_window_present (GTK_WINDOW (self->priv->progress_window));
         gchar *details = nemo_progress_info_get_details (info);
 		gtk_window_set_title (GTK_WINDOW (self->priv->progress_window), details);
         g_free (details);

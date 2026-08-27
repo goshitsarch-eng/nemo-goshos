@@ -36,12 +36,17 @@ gtk_container_add (gpointer container_ptr, GtkWidget *child)
 	if (G_TYPE_CHECK_INSTANCE_TYPE (container, gtk_container_get_type ()) &&
 	    !GTK_IS_WINDOW (container) && !GTK_IS_BOX (container) &&
 	    !GTK_IS_GRID (container) && !GTK_IS_NOTEBOOK (container) &&
-	    !GTK_IS_DIALOG (container)) {
+	    !GTK_IS_OVERLAY (container) && !GTK_IS_DIALOG (container)) {
 		GtkContainerClass *klass = (GtkContainerClass *) G_OBJECT_GET_CLASS (container);
 		if (klass && klass->add) {
 			klass->add (GTK_CONTAINER (container), child);
 			return;
 		}
+	}
+
+	if (GTK_IS_DIALOG (container)) {
+		gtk_box_append (GTK_BOX (gtk_dialog_get_content_area (GTK_DIALOG (container))), child);
+		return;
 	}
 
 	if (GTK_IS_WINDOW (container)) {
@@ -71,7 +76,11 @@ gtk_container_add (gpointer container_ptr, GtkWidget *child)
 	} else if (GTK_IS_REVEALER (container)) {
 		gtk_revealer_set_child (GTK_REVEALER (container), child);
 	} else if (GTK_IS_OVERLAY (container)) {
-		if (gtk_overlay_get_child (GTK_OVERLAY (container)) == NULL)
+		GtkWidget *main_child = gtk_overlay_get_child (GTK_OVERLAY (container));
+		/* Extra overlay widgets (floating bar, etc.) must not steal the
+		 * main child slot. After a view switch the previous main child is
+		 * gone — always restore content with set_child, not add_overlay. */
+		if (main_child == NULL || main_child == child)
 			gtk_overlay_set_child (GTK_OVERLAY (container), child);
 		else
 			gtk_overlay_add_overlay (GTK_OVERLAY (container), child);
@@ -102,8 +111,11 @@ gtk_container_add (gpointer container_ptr, GtkWidget *child)
 		gtk_action_bar_set_center_widget (GTK_ACTION_BAR (container), child);
 	} else if (GTK_IS_HEADER_BAR (container)) {
 		gtk_header_bar_set_title_widget (GTK_HEADER_BAR (container), child);
-	} else if (GTK_IS_DIALOG (container)) {
-		gtk_box_append (GTK_BOX (gtk_dialog_get_content_area (GTK_DIALOG (container))), child);
+	} else if (GTK_IS_BUTTON (container)) {
+		/* GTK4 GtkButton owns a single child; gtk_widget_set_parent
+		 * leaves that child unaccounted for and aborts on dispose
+		 * (pathbar Home/xdg buttons pack a GtkBox of image+label). */
+		gtk_button_set_child (GTK_BUTTON (container), child);
 	} else if (GTK_IS_BIN (container)) {
 		GtkBin *bin = GTK_BIN (container);
 		if (bin->child)
@@ -122,9 +134,22 @@ gtk_container_remove (gpointer container_ptr, GtkWidget *child)
 	g_return_if_fail (GTK_IS_WIDGET (container));
 	g_return_if_fail (GTK_IS_WIDGET (child));
 
+	if (VERNE_IS_SCROLLED_WINDOW (container)) {
+		GtkWidget *inner = verne_scrolled_window_get_inner (container);
+		GtkWidget *sw_child;
+
+		sw_child = (gtk_scrolled_window_get_child) (GTK_SCROLLED_WINDOW (inner));
+		if (sw_child == child)
+			(gtk_scrolled_window_set_child) (GTK_SCROLLED_WINDOW (inner), NULL);
+		else if (child == inner)
+			gtk_box_remove (GTK_BOX (container), child);
+		return;
+	}
+
 	if (G_TYPE_CHECK_INSTANCE_TYPE (container, gtk_container_get_type ()) &&
 	    !GTK_IS_WINDOW (container) && !GTK_IS_BOX (container) &&
-	    !GTK_IS_GRID (container) && !GTK_IS_NOTEBOOK (container)) {
+	    !GTK_IS_GRID (container) && !GTK_IS_NOTEBOOK (container) &&
+	    !GTK_IS_OVERLAY (container) && !GTK_IS_DIALOG (container)) {
 		GtkContainerClass *klass = (GtkContainerClass *) G_OBJECT_GET_CLASS (container);
 		if (klass && klass->remove) {
 			klass->remove (GTK_CONTAINER (container), child);
@@ -138,6 +163,17 @@ gtk_container_remove (gpointer container_ptr, GtkWidget *child)
 		gtk_grid_remove (GTK_GRID (container), child);
 	else if (GTK_IS_WINDOW (container) && gtk_window_get_child (GTK_WINDOW (container)) == child)
 		gtk_window_set_child (GTK_WINDOW (container), NULL);
+	else if (GTK_IS_OVERLAY (container)) {
+		if (gtk_overlay_get_child (GTK_OVERLAY (container)) == child)
+			gtk_overlay_set_child (GTK_OVERLAY (container), NULL);
+		else
+			gtk_overlay_remove_overlay (GTK_OVERLAY (container), child);
+	} else if (GTK_IS_REVEALER (container) && gtk_revealer_get_child (GTK_REVEALER (container)) == child)
+		gtk_revealer_set_child (GTK_REVEALER (container), NULL);
+	else if (GTK_IS_VIEWPORT (container) && gtk_viewport_get_child (GTK_VIEWPORT (container)) == child)
+		gtk_viewport_set_child (GTK_VIEWPORT (container), NULL);
+	else if (GTK_IS_EXPANDER (container) && gtk_expander_get_child (GTK_EXPANDER (container)) == child)
+		gtk_expander_set_child (GTK_EXPANDER (container), NULL);
 	else if (GTK_IS_SCROLLED_WINDOW (container))
 		gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (container), NULL);
 	else if (GTK_IS_FRAME (container))
@@ -155,6 +191,9 @@ gtk_container_remove (gpointer container_ptr, GtkWidget *child)
 			gtk_paned_set_start_child (GTK_PANED (container), NULL);
 		else if (gtk_paned_get_end_child (GTK_PANED (container)) == child)
 			gtk_paned_set_end_child (GTK_PANED (container), NULL);
+	} else if (GTK_IS_BUTTON (container)) {
+		if (gtk_button_get_child (GTK_BUTTON (container)) == child)
+			gtk_button_set_child (GTK_BUTTON (container), NULL);
 	} else if (GTK_IS_BIN (container)) {
 		GtkBin *bin = GTK_BIN (container);
 		if (bin->child == child) {
@@ -275,10 +314,53 @@ gtk_box_set_child_packing (GtkBox *box, GtkWidget *child, gboolean expand, gbool
 		gtk_widget_set_margin_start (child, padding);
 }
 
+static void
+verne_paned_replace_child (GtkPaned *paned, GtkWidget *child, gboolean end)
+{
+	GtkWidget *old;
+	GtkWidget *keep;
+
+	g_return_if_fail (GTK_IS_PANED (paned));
+	old = end ? (gtk_paned_get_end_child) (paned) : (gtk_paned_get_start_child) (paned);
+	if (old == child)
+		return;
+	keep = end ? (gtk_paned_get_start_child) (paned) : (gtk_paned_get_end_child) (paned);
+	if (old != NULL) {
+		GtkRoot *root = gtk_widget_get_root (GTK_WIDGET (paned));
+
+		/* GTK4 GtkPaned warns and can dispose the native when
+		 * gtk_paned_set_focus_child() runs on a child already torn
+		 * down. Move focus off the outgoing child first. */
+		if (keep != NULL)
+			gtk_widget_set_focus_child (GTK_WIDGET (paned), keep);
+		if (GTK_IS_WINDOW (root)) {
+			GtkWidget *focus = gtk_window_get_focus (GTK_WINDOW (root));
+			if (focus == NULL || focus == old || gtk_widget_is_ancestor (focus, old))
+				gtk_window_set_focus (GTK_WINDOW (root), NULL);
+		}
+	}
+	if (end)
+		(gtk_paned_set_end_child) (paned, child);
+	else
+		(gtk_paned_set_start_child) (paned, child);
+}
+
+void
+verne_gtk_paned_set_start_child (GtkPaned *paned, GtkWidget *child)
+{
+	verne_paned_replace_child (paned, child, FALSE);
+}
+
+void
+verne_gtk_paned_set_end_child (GtkPaned *paned, GtkWidget *child)
+{
+	verne_paned_replace_child (paned, child, TRUE);
+}
+
 void
 gtk_paned_pack1 (GtkPaned *paned, GtkWidget *child, gboolean resize, gboolean shrink)
 {
-	gtk_paned_set_start_child (paned, child);
+	verne_gtk_paned_set_start_child (paned, child);
 	gtk_paned_set_resize_start_child (paned, resize);
 	gtk_paned_set_shrink_start_child (paned, shrink);
 }
@@ -286,7 +368,7 @@ gtk_paned_pack1 (GtkPaned *paned, GtkWidget *child, gboolean resize, gboolean sh
 void
 gtk_paned_pack2 (GtkPaned *paned, GtkWidget *child, gboolean resize, gboolean shrink)
 {
-	gtk_paned_set_end_child (paned, child);
+	verne_gtk_paned_set_end_child (paned, child);
 	gtk_paned_set_resize_end_child (paned, resize);
 	gtk_paned_set_shrink_end_child (paned, shrink);
 }
@@ -294,20 +376,111 @@ gtk_paned_pack2 (GtkPaned *paned, GtkWidget *child, gboolean resize, gboolean sh
 void
 gtk_widget_destroy (GtkWidget *widget)
 {
+	GtkWidget *parent;
+
 	if (widget == NULL)
 		return;
-	if (GTK_IS_WINDOW (widget))
-		gtk_window_destroy (GTK_WINDOW (widget));
-	else if (gtk_widget_get_parent (widget))
-		gtk_container_remove (gtk_widget_get_parent (widget), widget);
-	else
+	if (g_object_get_data (G_OBJECT (widget), "verne-destroyed") != NULL &&
+	    GTK_IS_WINDOW (widget))
+		return;
+
+	/* Hold a ref across unparent so dispose matches GTK3 gtk_widget_destroy.
+	 * Windows must run the GTK3 destroy vfunc too (e.g. NemoPropertiesWindow
+	 * removes itself from the reuse hash); skipping that left gtk_window_present
+	 * calling into a disposed dialog on the next ShowItemProperties. */
+	g_object_ref (widget);
+
+	verne_widget_invoke_destroy (widget);
+
+	if (!GTK_IS_WIDGET (widget)) {
 		g_object_unref (widget);
+		return;
+	}
+
+	parent = gtk_widget_get_parent (widget);
+	if (parent != NULL)
+		gtk_container_remove (parent, widget);
+	else if (GTK_IS_WINDOW (widget)) {
+		gtk_widget_set_visible (widget, FALSE);
+		gtk_window_destroy (GTK_WINDOW (widget));
+	}
+
+	g_object_unref (widget);
+}
+
+#define VERNE_NO_SHOW_ALL_KEY "verne-no-show-all"
+
+void
+gtk_widget_set_no_show_all (GtkWidget *widget, gboolean no_show_all)
+{
+	if (widget == NULL)
+		return;
+	g_object_set_data (G_OBJECT (widget), VERNE_NO_SHOW_ALL_KEY,
+			   no_show_all ? GINT_TO_POINTER (TRUE) : NULL);
+}
+
+gboolean
+gtk_widget_get_no_show_all (GtkWidget *widget)
+{
+	if (widget == NULL)
+		return FALSE;
+	return g_object_get_data (G_OBJECT (widget), VERNE_NO_SHOW_ALL_KEY) != NULL;
 }
 
 void
 gtk_widget_show_all (GtkWidget *widget)
 {
 	GtkWidget *child;
+
+	if (widget == NULL)
+		return;
+	/* GTK3: no_show_all skips this widget and its descendants. */
+	if (gtk_widget_get_no_show_all (widget))
+		return;
+	{
+		GtkAction *action = g_object_get_data (G_OBJECT (widget), "verne-action");
+		if (action && !gtk_action_get_visible (action)) {
+			gtk_widget_set_no_show_all (widget, TRUE);
+			gtk_widget_set_visible (widget, FALSE);
+			return;
+		}
+	}
+	/* GTK3 gtk_widget_show_all() on a GtkMenu shows items, not the popup. */
+	if (GTK_IS_POPOVER (widget) || GTK_IS_MENU (widget)) {
+		GtkWidget *box = GTK_IS_MENU (widget) ? gtk_menu_get_box (GTK_MENU (widget))
+						      : gtk_popover_get_child (GTK_POPOVER (widget));
+		if (box)
+			gtk_widget_show_all (box);
+		return;
+	}
+	/* GtkStack owns child visibility. Recursing would unhide the
+	 * "No applications found" page on GtkAppChooserWidget. */
+	if (GTK_IS_STACK (widget)) {
+		GtkWidget *visible;
+
+		gtk_widget_set_visible (widget, TRUE);
+		visible = gtk_stack_get_visible_child (GTK_STACK (widget));
+		if (visible)
+			gtk_widget_show_all (visible);
+		return;
+	}
+	/* Overlay extras (File/dest menus) stay hidden until popped up. */
+	if (GTK_IS_OVERLAY (widget)) {
+		GtkWidget *main_child = gtk_overlay_get_child (GTK_OVERLAY (widget));
+
+		gtk_widget_set_visible (widget, TRUE);
+		if (main_child)
+			gtk_widget_show_all (main_child);
+		for (child = gtk_widget_get_first_child (widget); child;
+		     child = gtk_widget_get_next_sibling (child)) {
+			if (child == main_child)
+				continue;
+			if (!gtk_widget_get_visible (child) || gtk_widget_get_no_show_all (child))
+				continue;
+			gtk_widget_show_all (child);
+		}
+		return;
+	}
 	gtk_widget_set_visible (widget, TRUE);
 	for (child = gtk_widget_get_first_child (widget); child; child = gtk_widget_get_next_sibling (child))
 		gtk_widget_show_all (child);
@@ -328,33 +501,82 @@ gtk_scrolled_window_add_with_viewport (GtkScrolledWindow *sw, GtkWidget *child)
 	gtk_scrolled_window_set_child (sw, child);
 }
 
-static gint dialog_response;
-static GMainLoop *dialog_loop;
+typedef struct {
+	gint response;
+	GMainLoop *loop;
+} VerneDialogRun;
 
 static void
 dialog_response_cb (GtkDialog *dialog, gint response, gpointer data)
 {
-	(void) dialog;
+	VerneDialogRun *run = data;
+
+	if ((response == GTK_RESPONSE_ACCEPT || response == GTK_RESPONSE_OK) &&
+	    (GTK_IS_FILE_CHOOSER (dialog) || verne_is_file_chooser (dialog))) {
+		GtkFileFilter *filter = gtk_file_chooser_get_filter (dialog);
+		GFile *file = gtk_file_chooser_get_file (dialog);
+		gboolean ok = verne_file_filter_accepts_file (filter, file);
+		if (file)
+			g_object_unref (file);
+		if (!ok)
+			return;
+	}
+	run->response = response;
+	if (run->loop)
+		g_main_loop_quit (run->loop);
+}
+
+static gboolean
+verne_dialog_close_request (GtkWindow *window, gpointer data)
+{
 	(void) data;
-	dialog_response = response;
-	if (dialog_loop)
-		g_main_loop_quit (dialog_loop);
+	gtk_widget_set_visible (GTK_WIDGET (window), FALSE);
+	if (GTK_IS_DIALOG (window))
+		gtk_dialog_response (GTK_DIALOG (window), GTK_RESPONSE_DELETE_EVENT);
+	return TRUE;
+}
+
+void
+verne_prepare_dialog (GtkWidget *widget)
+{
+	GtkApplication *app;
+	GtkWindow *active;
+
+	if (widget == NULL || !GTK_IS_DIALOG (widget))
+		return;
+	if (g_object_get_data (G_OBJECT (widget), "verne-dialog-prepared"))
+		return;
+	g_object_set_data (G_OBJECT (widget), "verne-dialog-prepared", GINT_TO_POINTER (1));
+
+	gtk_window_set_hide_on_close (GTK_WINDOW (widget), TRUE);
+	g_signal_connect (widget, "close-request", G_CALLBACK (verne_dialog_close_request), NULL);
+
+	if (gtk_window_get_transient_for (GTK_WINDOW (widget)) == NULL) {
+		app = GTK_APPLICATION (g_application_get_default ());
+		if (app) {
+			active = gtk_application_get_active_window (app);
+			if (active && GTK_WIDGET (active) != widget)
+				gtk_window_set_transient_for (GTK_WINDOW (widget), active);
+		}
+	}
 }
 
 gint
 gtk_dialog_run (GtkDialog *dialog)
 {
+	VerneDialogRun run = { GTK_RESPONSE_NONE, NULL };
 	gulong id;
-	dialog_response = GTK_RESPONSE_NONE;
-	dialog_loop = g_main_loop_new (NULL, FALSE);
-	id = g_signal_connect (dialog, "response", G_CALLBACK (dialog_response_cb), NULL);
+
+	run.loop = g_main_loop_new (NULL, FALSE);
+	id = g_signal_connect (dialog, "response", G_CALLBACK (dialog_response_cb), &run);
+	verne_prepare_dialog (GTK_WIDGET (dialog));
 	gtk_window_set_modal (GTK_WINDOW (dialog), TRUE);
 	gtk_widget_set_visible (GTK_WIDGET (dialog), TRUE);
-	g_main_loop_run (dialog_loop);
+	gtk_window_present (GTK_WINDOW (dialog));
+	g_main_loop_run (run.loop);
 	g_signal_handler_disconnect (dialog, id);
-	g_main_loop_unref (dialog_loop);
-	dialog_loop = NULL;
-	return dialog_response;
+	g_main_loop_unref (run.loop);
+	return run.response;
 }
 
 GtkWidget *

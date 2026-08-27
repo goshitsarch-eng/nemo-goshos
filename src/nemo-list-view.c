@@ -431,6 +431,37 @@ button_event_modifies_selection (GdkEventButton *event)
 	return (event->state & (GDK_CONTROL_MASK | GDK_SHIFT_MASK)) != 0;
 }
 
+/* GTK4 GestureClick/Motion report widget-relative coordinates. GtkTreeView
+ * get_path_at_pos / is_blank_at_pos expect bin-window coords (below the
+ * column headers). GTK3 delivered events on the bin GdkWindow already. */
+static void
+list_view_translate_event_xy (GtkTreeView *tree_view, gdouble *x, gdouble *y)
+{
+	int bx, by;
+
+	gtk_tree_view_convert_widget_to_bin_window_coords (tree_view,
+							   (int) *x, (int) *y,
+							   &bx, &by);
+	*x = bx;
+	*y = by;
+}
+
+static gboolean
+list_view_event_in_tree (GtkTreeView *tree_view, GdkWindow *event_window)
+{
+	GdkWindow *bin;
+
+	if (event_window == NULL)
+		return TRUE;
+	bin = gtk_tree_view_get_bin_window (tree_view);
+	if (event_window == bin)
+		return TRUE;
+	/* GTK4: gtk_tree_view_get_bin_window is the native GdkSurface. */
+	if (event_window == gtk_widget_get_window (GTK_WIDGET (tree_view)))
+		return TRUE;
+	return FALSE;
+}
+
 static void
 nemo_list_view_did_not_drag (NemoListView *view,
 				 GdkEventButton *event)
@@ -441,6 +472,7 @@ nemo_list_view_did_not_drag (NemoListView *view,
 
 	tree_view = view->details->tree_view;
 	selection = gtk_tree_view_get_selection (tree_view);
+	list_view_translate_event_xy (tree_view, &event->x, &event->y);
 
 	if (gtk_tree_view_get_path_at_pos (tree_view, event->x, event->y,
 					   &path, NULL, NULL, NULL)) {
@@ -644,9 +676,10 @@ motion_notify_callback (GtkWidget *widget,
 
 	view = NEMO_LIST_VIEW (callback_data);
 
-    if (event->window != gtk_tree_view_get_bin_window (GTK_TREE_VIEW (widget))) {
+    if (!list_view_event_in_tree (GTK_TREE_VIEW (widget), event->window)) {
         return GDK_EVENT_PROPAGATE;
     }
+    list_view_translate_event_xy (GTK_TREE_VIEW (widget), &event->x, &event->y);
 
 	if (click_policy == NEMO_CLICK_POLICY_SINGLE) {
 		GtkTreePath *old_hover_path;
@@ -1126,9 +1159,10 @@ button_press_callback (GtkWidget *widget, GdkEventButton *event, gpointer callba
         return GDK_EVENT_STOP;
     }
 
-	if (event->window != gtk_tree_view_get_bin_window (tree_view)) {
+	if (!list_view_event_in_tree (tree_view, event->window)) {
 		return GDK_EVENT_PROPAGATE;
 	}
+	list_view_translate_event_xy (tree_view, &event->x, &event->y);
 
     if (!nemo_view_get_active (NEMO_VIEW (view)) && gtk_tree_selection_count_selected_rows (selection) > 0) {
         NemoWindowSlot *slot = nemo_view_get_nemo_window_slot (NEMO_VIEW (view));
@@ -2462,6 +2496,9 @@ on_size_allocation_changed (GtkWidget    *widget,
     GtkAdjustment *adjustment;
     gdouble page_size, upper;
 
+    (void) widget;
+    (void) allocation;
+
     adjustment = gtk_scrollable_get_hadjustment (GTK_SCROLLABLE (view->details->tree_view));
     g_object_get (adjustment, "page-size", &page_size, "upper", &upper, NULL);
 
@@ -2475,8 +2512,6 @@ on_size_allocation_changed (GtkWidget    *widget,
     else {
         gtk_widget_set_margin_bottom (GTK_WIDGET (view->details->tree_view), 0);
     }
-
-    gtk_widget_queue_allocate (widget);
 }
 
 static void
@@ -4157,6 +4192,29 @@ nemo_list_view_using_manual_layout (NemoView *view)
 }
 
 static void
+nemo_list_view_shutdown (NemoView *view)
+{
+	NemoListView *list_view;
+
+	list_view = NEMO_LIST_VIEW (view);
+
+	/* Detach the tree before NemoView unrefs the directory. Otherwise
+	 * overlay unparent snapshots the list against freed NemoFile rows
+	 * and compact-view creation aborts in the allocator. */
+	g_signal_handlers_disconnect_by_func (gtk_settings_get_default (), update_date_fonts, list_view);
+	g_signal_handlers_disconnect_by_func (nemo_preferences, update_date_fonts, list_view);
+	g_signal_handlers_disconnect_by_func (gnome_interface_preferences, update_date_fonts, list_view);
+
+	if (list_view->details->tree_view != NULL) {
+		g_signal_handlers_disconnect_matched (list_view->details->tree_view,
+						      G_SIGNAL_MATCH_DATA, 0, 0, NULL, NULL, list_view);
+		gtk_tree_view_set_model (list_view->details->tree_view, NULL);
+	}
+	if (list_view->details->model != NULL)
+		nemo_list_model_set_drag_view (list_view->details->model, NULL, 0, 0);
+}
+
+static void
 nemo_list_view_dispose (GObject *object)
 {
 	NemoListView *list_view;
@@ -4165,6 +4223,10 @@ nemo_list_view_dispose (GObject *object)
 
     g_signal_handlers_disconnect_by_func (gtk_settings_get_default (), update_date_fonts, list_view);
     g_signal_handlers_disconnect_by_func (nemo_preferences, update_date_fonts, list_view);
+    g_signal_handlers_disconnect_by_func (gnome_interface_preferences, update_date_fonts, list_view);
+
+	if (list_view->details->tree_view && GTK_IS_TREE_VIEW (list_view->details->tree_view))
+		gtk_tree_view_set_model (list_view->details->tree_view, NULL);
 
 	if (list_view->details->model) {
 		stop_cell_editing (list_view);
@@ -4393,6 +4455,8 @@ nemo_list_view_class_init (NemoListViewClass *class)
 
 	G_OBJECT_CLASS (class)->dispose = nemo_list_view_dispose;
 	G_OBJECT_CLASS (class)->finalize = nemo_list_view_finalize;
+
+	nemo_view_class->shutdown = nemo_list_view_shutdown;
 
 	nemo_view_class->add_file = nemo_list_view_add_file;
 	nemo_view_class->begin_loading = nemo_list_view_begin_loading;

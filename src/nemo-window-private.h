@@ -102,6 +102,7 @@ struct NemoWindowDetails
         gboolean disable_chrome;
 
         guint sidebar_width_handler_id;
+        guint present_idle_id;
 
         guint menu_state_changed_id;
 

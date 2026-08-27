@@ -346,7 +346,10 @@ nemo_location_entry_activate (GtkEntry *entry)
 		g_free (uri_scheme);
 	}
 
-	GTK_ENTRY_CLASS (nemo_location_entry_parent_class)->activate (entry);
+	/* GTK4's GtkEntry default activate vfunc is NULL; the signal
+	 * still runs instance handlers (location-changed) after this. */
+	if (GTK_ENTRY_CLASS (nemo_location_entry_parent_class)->activate != NULL)
+		GTK_ENTRY_CLASS (nemo_location_entry_parent_class)->activate (entry);
 }
 
 static void

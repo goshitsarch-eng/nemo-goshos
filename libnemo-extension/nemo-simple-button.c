@@ -100,10 +100,7 @@ nemo_simple_button_new_from_file (const gchar *path, int icon_size)
   }
 
   if (surface) {
-    image = gtk_image_new ();
-    g_object_set (image,
-                  "surface", surface,
-                  NULL);
+    image = gtk_image_new_from_surface (surface);
     gtk_button_set_image (GTK_BUTTON (w), image);
   }
 

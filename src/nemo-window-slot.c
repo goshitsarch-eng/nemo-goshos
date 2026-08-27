@@ -198,8 +198,15 @@ void
 nemo_window_slot_set_query_editor_visible (NemoWindowSlot *slot,
 					       gboolean            visible)
 {
-    gtk_widget_hide (slot->no_search_results_box);
-    nemo_window_slot_hide_filter_bar (slot);
+	if (slot == NULL)
+		return;
+
+	if (slot->no_search_results_box != NULL)
+		gtk_widget_hide (slot->no_search_results_box);
+	nemo_window_slot_hide_filter_bar (slot);
+
+	if (slot->query_editor == NULL)
+		return;
 
 	if (visible) {
 		ensure_query_editor (slot);
@@ -604,7 +611,8 @@ nemo_window_slot_make_hosting_pane_active (NemoWindowSlot *slot)
 NemoWindow *
 nemo_window_slot_get_window (NemoWindowSlot *slot)
 {
-	g_assert (NEMO_IS_WINDOW_SLOT (slot));
+	g_return_val_if_fail (NEMO_IS_WINDOW_SLOT (slot), NULL);
+	g_return_val_if_fail (slot->pane != NULL, NULL);
 	return slot->pane->window;
 }
 
@@ -769,7 +777,8 @@ real_slot_set_short_status (NemoWindowSlot *slot,
 {
 
 	gboolean show_statusbar;
-	gboolean disable_chrome;
+	gboolean disable_chrome = FALSE;
+	NemoWindow *window;
 
 	nemo_floating_bar_cleanup_actions (NEMO_FLOATING_BAR (slot->floating_bar));
 	nemo_floating_bar_set_show_spinner (NEMO_FLOATING_BAR (slot->floating_bar),
@@ -778,9 +787,11 @@ real_slot_set_short_status (NemoWindowSlot *slot,
 	show_statusbar = g_settings_get_boolean (nemo_window_state,
 						 NEMO_WINDOW_STATE_START_WITH_STATUS_BAR);
 
-	g_object_get (nemo_window_slot_get_window (slot),
-		      "disable-chrome", &disable_chrome,
-		      NULL);
+	window = nemo_window_slot_get_window (slot);
+	if (NEMO_IS_WINDOW (window))
+		g_object_get (window,
+			      "disable-chrome", &disable_chrome,
+			      NULL);
 
 	if (status == NULL || show_statusbar || disable_chrome) {
 		gtk_widget_hide (slot->floating_bar);
@@ -869,7 +880,7 @@ nemo_window_slot_set_status (NemoWindowSlot *slot,
 	}
 
 	window = nemo_window_slot_get_window (slot);
-	if (slot == nemo_window_get_active_slot (window)) {
+	if (NEMO_IS_WINDOW (window) && slot == nemo_window_get_active_slot (window)) {
 		nemo_window_push_status (window, slot->status_text);
 	}
 }

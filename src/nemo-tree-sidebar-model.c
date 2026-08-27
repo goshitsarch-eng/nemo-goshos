@@ -220,11 +220,11 @@ tree_node_destroy (FMTreeModel *model, TreeNode *node)
 
 	tree_node_unparent (model, node);
 
-	g_object_unref (node->file);
+	g_clear_object (&node->file);
 	g_free (node->display_name);
-    g_clear_object (&node->icon);
-    g_clear_object (&node->closed_icon);
-    g_clear_object (&node->open_icon);
+	g_clear_object (&node->icon);
+	g_clear_object (&node->closed_icon);
+	g_clear_object (&node->open_icon);
 
 	g_assert (node->done_loading_id == 0);
 	g_assert (node->files_added_id == 0);
@@ -266,11 +266,11 @@ get_menu_icon_for_file (TreeNode *node,
     NemoFile *parent_file;
 	GIcon *gicon, *emblem_icon, *emblemed_icon;
 	GEmblem *emblem;
-	int size;
 	GList *emblem_icons, *l;
 
-	size = nemo_get_icon_size_for_stock_size (GTK_ICON_SIZE_MENU);
-	gicon = G_ICON (nemo_file_get_icon_pixbuf (file, size, TRUE, node->icon_scale, flags));
+	gicon = nemo_file_get_gicon (file, flags);
+	if (gicon == NULL)
+		return NULL;
 
     parent_file = NULL;
 
@@ -303,7 +303,11 @@ tree_node_get_icon (TreeNode *node,
                     NemoFileIconFlags flags)
 {
 	if (node->parent == NULL) {
-		return node->icon;
+		/* closed_icon / open_icon take ownership of this ref. Returning
+		 * the same GThemedIcon pointer without a ref made
+		 * tree_node_destroy triple-unref it after GtkTreeView dropped
+		 * its cached GValues (SIGSEGV on Ctrl+W). */
+		return node->icon != NULL ? g_object_ref (node->icon) : NULL;
 	}
 	return get_menu_icon_for_file (node, node->file, flags);
 }

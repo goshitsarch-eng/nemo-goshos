@@ -243,6 +243,12 @@ struct NemoIconContainerDetails {
         /* Set to TRUE after first allocation has been done */
 	gboolean has_been_allocated;
 
+	/* GTK4 applies the widget size before our size_allocate vfunc, so
+	 * gtk_widget_get_allocation already matches the new allocation and
+	 * cannot detect a resize. Track the last size we laid out against. */
+	int last_allocated_width;
+	int last_allocated_height;
+
 	int size_allocation_count;
 	guint size_allocation_count_id;
     int renaming_allocation_count;

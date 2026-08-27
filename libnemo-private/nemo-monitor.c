@@ -115,10 +115,6 @@ dir_changed (GFileMonitor* monitor,
 	}
 
 	switch (event_type) {
-        case G_FILE_MONITOR_EVENT_MOVED:
-        case G_FILE_MONITOR_EVENT_RENAMED:
-        case G_FILE_MONITOR_EVENT_MOVED_IN:
-        case G_FILE_MONITOR_EVENT_MOVED_OUT:
 	default:
 	case G_FILE_MONITOR_EVENT_CHANGED:
 		/* ignore */
@@ -128,10 +124,21 @@ dir_changed (GFileMonitor* monitor,
 		nemo_file_changes_queue_file_changed (child);
 		break;
 	case G_FILE_MONITOR_EVENT_DELETED:
+	case G_FILE_MONITOR_EVENT_MOVED_OUT:
 		nemo_file_changes_queue_file_removed (child);
 		break;
 	case G_FILE_MONITOR_EVENT_CREATED:
+	case G_FILE_MONITOR_EVENT_MOVED_IN:
 		nemo_file_changes_queue_file_added (child);
+		break;
+	case G_FILE_MONITOR_EVENT_MOVED:
+	case G_FILE_MONITOR_EVENT_RENAMED:
+		if (other_file != NULL) {
+			nemo_file_changes_queue_file_moved (child, other_file);
+		} else {
+			nemo_file_changes_queue_file_removed (child);
+			nemo_file_changes_queue_file_added (child);
+		}
 		break;
 
 	case G_FILE_MONITOR_EVENT_PRE_UNMOUNT:

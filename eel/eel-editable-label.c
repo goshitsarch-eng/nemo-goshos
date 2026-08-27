@@ -55,7 +55,12 @@ enum {
   PROP_JUSTIFY,
   PROP_WRAP,
   PROP_CURSOR_POSITION,
-  PROP_SELECTION_BOUND
+  PROP_SELECTION_BOUND,
+  PROP_EDITABLE_FLAG,
+  PROP_WIDTH_CHARS,
+  PROP_MAX_WIDTH_CHARS,
+  PROP_XALIGN,
+  PROP_ENABLE_UNDO
 };
 
 static guint signals[LAST_SIGNAL] = { 0 };
@@ -356,6 +361,42 @@ eel_editable_label_class_init (EelEditableLabelClass *class)
                                                      G_MAXINT,
                                                      0,
                                                      G_PARAM_READABLE));
+
+  g_object_class_install_property (gobject_class,
+                                   PROP_EDITABLE_FLAG,
+                                   g_param_spec_boolean ("editable",
+                                                         _("Editable"),
+                                                         _("Whether the text can be modified."),
+                                                         TRUE,
+                                                         G_PARAM_READWRITE));
+  g_object_class_install_property (gobject_class,
+                                   PROP_WIDTH_CHARS,
+                                   g_param_spec_int ("width-chars",
+                                                     _("Width in chars"),
+                                                     _("Desired width of the label, in characters."),
+                                                     -1, G_MAXINT, -1,
+                                                     G_PARAM_READWRITE));
+  g_object_class_install_property (gobject_class,
+                                   PROP_MAX_WIDTH_CHARS,
+                                   g_param_spec_int ("max-width-chars",
+                                                     _("Maximum width in chars"),
+                                                     _("Maximum desired width of the label, in characters."),
+                                                     -1, G_MAXINT, -1,
+                                                     G_PARAM_READWRITE));
+  g_object_class_install_property (gobject_class,
+                                   PROP_XALIGN,
+                                   g_param_spec_float ("xalign",
+                                                       _("X align"),
+                                                       _("Horizontal alignment, from 0.0 to 1.0."),
+                                                       0.0, 1.0, 0.5,
+                                                       G_PARAM_READWRITE));
+  g_object_class_install_property (gobject_class,
+                                   PROP_ENABLE_UNDO,
+                                   g_param_spec_boolean ("enable-undo",
+                                                         _("Enable undo"),
+                                                         _("Whether undo/redo is enabled."),
+                                                         FALSE,
+                                                         G_PARAM_READWRITE));
   
   /*
    * Key bindings
@@ -548,7 +589,13 @@ eel_editable_label_set_property (GObject      *object,
       break;
     case PROP_WRAP:
       eel_editable_label_set_line_wrap (label, g_value_get_boolean (value));
-      break;	  
+      break;
+    case PROP_EDITABLE_FLAG:
+    case PROP_WIDTH_CHARS:
+    case PROP_MAX_WIDTH_CHARS:
+    case PROP_XALIGN:
+    case PROP_ENABLE_UNDO:
+      break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
       break;
@@ -587,6 +634,19 @@ eel_editable_label_get_property (GObject     *object,
 					 label->text + label->selection_anchor);
       g_value_set_int (value, offset);
       break;
+    case PROP_EDITABLE_FLAG:
+      g_value_set_boolean (value, TRUE);
+      break;
+    case PROP_WIDTH_CHARS:
+    case PROP_MAX_WIDTH_CHARS:
+      g_value_set_int (value, -1);
+      break;
+    case PROP_XALIGN:
+      g_value_set_float (value, 0.5f);
+      break;
+    case PROP_ENABLE_UNDO:
+      g_value_set_boolean (value, FALSE);
+      break;
 
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
@@ -608,6 +668,7 @@ eel_editable_label_init (EelEditableLabel *label)
   label->n_bytes = 0;
   
   gtk_widget_set_can_focus (GTK_WIDGET (label), TRUE);
+  gtk_widget_set_focusable (GTK_WIDGET (label), TRUE);
   gtk_style_context_add_class (gtk_widget_get_style_context (GTK_WIDGET (label)),
                                GTK_STYLE_CLASS_ENTRY);
 

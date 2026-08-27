@@ -418,6 +418,12 @@ struct _EelCanvas {
 
 	/* For use by internal pick_current_item() function */
 	unsigned int in_repick : 1;
+
+	/* Ignore pointer events while the item tree is being torn down. */
+	unsigned int destroying : 1;
+
+	/* Ignore pointer events while size_allocate relayouts icons. */
+	unsigned int in_layout : 1;
 };
 
 struct _EelCanvasClass {

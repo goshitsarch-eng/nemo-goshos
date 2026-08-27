@@ -430,7 +430,13 @@ remove_settings_signal (NemoPathBar *path_bar,
 static void
 nemo_path_bar_dispose (GObject *object)
 {
-    remove_settings_signal (NEMO_PATH_BAR (object), gtk_widget_get_screen (GTK_WIDGET (object)));
+    NemoPathBar *path_bar = NEMO_PATH_BAR (object);
+    GtkWidget *child;
+
+    remove_settings_signal (path_bar, gtk_widget_get_screen (GTK_WIDGET (object)));
+
+    while ((child = gtk_widget_get_first_child (GTK_WIDGET (path_bar))) != NULL)
+        gtk_widget_unparent (child);
 
     G_OBJECT_CLASS (nemo_path_bar_parent_class)->dispose (object);
 }

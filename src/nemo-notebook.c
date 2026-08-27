@@ -287,20 +287,21 @@ nemo_notebook_sync_loading (NemoNotebook *notebook,
 	icon = GTK_WIDGET (g_object_get_data (G_OBJECT (tab_label), "icon"));
 	g_return_if_fail (spinner != NULL && icon != NULL);
 
-	active = FALSE;
-	g_object_get (spinner, "active", &active, NULL);
+	active = GTK_IS_SPINNER (spinner) && gtk_spinner_get_spinning (GTK_SPINNER (spinner));
 	if (active == slot->allow_stop)	{
 		return;
 	}
 
 	if (slot->allow_stop) {
-		gtk_widget_hide (icon);
+		if (GTK_IS_WIDGET (icon))
+			gtk_widget_hide (icon);
 		gtk_widget_show (spinner);
 		gtk_spinner_start (GTK_SPINNER (spinner));
 	} else {
 		gtk_spinner_stop (GTK_SPINNER (spinner));
 		gtk_widget_hide (spinner);
-		gtk_widget_show (icon);
+		if (GTK_IS_WIDGET (icon))
+			gtk_widget_show (icon);
 	}
 }
 

@@ -307,6 +307,9 @@ struct NemoViewClass {
 	/* Get the id string for this view. Its a constant string, not memory managed */
 	const char *   (* get_view_id)            (NemoView          *view);
 
+	/* GTK4: detach widgets/models before NemoView unrefs the directory. */
+	void           (* shutdown)               (NemoView          *view);
+
 	/* Return the uri of the first visible file */	
 	char *         (* get_first_visible_file) (NemoView          *view);
 	/* Scroll the view so that the file specified by the uri is at the top

@@ -1,5 +1,6 @@
 #include "config.h"
 #include "verne-gtk-compat.h"
+#include <string.h>
 
 enum {
 	ACTION_PROP_0,
@@ -12,6 +13,7 @@ enum {
 	ACTION_PROP_STOCK_ID,
 	ACTION_PROP_SHORT_LABEL,
 	ACTION_PROP_IS_IMPORTANT,
+	ACTION_PROP_GICON,
 	ACTION_N_PROPS
 };
 
@@ -57,6 +59,9 @@ gtk_action_set_property (GObject *object, guint prop_id, const GValue *value, GP
 	case ACTION_PROP_IS_IMPORTANT:
 		action->is_important = g_value_get_boolean (value);
 		break;
+	case ACTION_PROP_GICON:
+		gtk_action_set_gicon (action, g_value_get_object (value));
+		break;
 	default:
 		G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
 		break;
@@ -95,6 +100,9 @@ gtk_action_get_property (GObject *object, guint prop_id, GValue *value, GParamSp
 	case ACTION_PROP_IS_IMPORTANT:
 		g_value_set_boolean (value, action->is_important);
 		break;
+	case ACTION_PROP_GICON:
+		g_value_set_object (value, action->gicon);
+		break;
 	default:
 		G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
 		break;
@@ -111,6 +119,8 @@ gtk_action_finalize (GObject *object)
 	g_free (action->tooltip);
 	g_free (action->stock_id);
 	g_free (action->icon_name);
+	g_free (action->accelerator);
+	g_free (action->accel_path);
 	g_clear_object (&action->gicon);
 	G_OBJECT_CLASS (gtk_action_parent_class)->finalize (object);
 }
@@ -160,6 +170,8 @@ gtk_action_class_init (GtkActionClass *klass)
 		g_param_spec_string ("short_label", NULL, NULL, NULL, G_PARAM_READWRITE));
 	g_object_class_install_property (oclass, ACTION_PROP_IS_IMPORTANT,
 		g_param_spec_boolean ("is-important", NULL, NULL, FALSE, G_PARAM_READWRITE));
+	g_object_class_install_property (oclass, ACTION_PROP_GICON,
+		g_param_spec_object ("gicon", NULL, NULL, G_TYPE_ICON, G_PARAM_READWRITE));
 }
 
 static void
@@ -191,53 +203,113 @@ gtk_action_activate (GtkAction *action)
 
 const gchar *gtk_action_get_name (GtkAction *action) { return action ? action->name : NULL; }
 void gtk_action_set_sensitive (GtkAction *action, gboolean sensitive) {
-	if (!action || action->sensitive == sensitive) return;
+	if (!action || !GTK_IS_ACTION (action) || action->sensitive == sensitive) return;
 	action->sensitive = sensitive;
 	g_object_notify (G_OBJECT (action), "sensitive");
 }
 gboolean gtk_action_get_sensitive (GtkAction *action) { return action ? action->sensitive : FALSE; }
 gboolean gtk_action_is_sensitive (GtkAction *action) { return gtk_action_get_sensitive (action); }
 void gtk_action_set_visible (GtkAction *action, gboolean visible) {
-	if (!action || action->visible == visible) return;
+	if (!action || !GTK_IS_ACTION (action) || action->visible == visible) return;
 	action->visible = visible;
 	g_object_notify (G_OBJECT (action), "visible");
 }
 gboolean gtk_action_get_visible (GtkAction *action) { return action ? action->visible : FALSE; }
 void gtk_action_set_label (GtkAction *action, const gchar *label) {
+	g_return_if_fail (GTK_IS_ACTION (action));
 	g_free (action->label); action->label = g_strdup (label);
 	g_object_notify (G_OBJECT (action), "label");
 }
 const gchar *gtk_action_get_label (GtkAction *action) { return action ? action->label : NULL; }
 void gtk_action_set_short_label (GtkAction *action, const gchar *label) {
+	g_return_if_fail (GTK_IS_ACTION (action));
 	g_free (action->short_label); action->short_label = g_strdup (label);
 	g_object_notify (G_OBJECT (action), "short_label");
 }
 const gchar *gtk_action_get_short_label (GtkAction *action) { return action && action->short_label ? action->short_label : gtk_action_get_label (action); }
 void gtk_action_set_tooltip (GtkAction *action, const gchar *tooltip) {
+	g_return_if_fail (GTK_IS_ACTION (action));
 	g_free (action->tooltip); action->tooltip = g_strdup (tooltip);
 	g_object_notify (G_OBJECT (action), "tooltip");
 }
 const gchar *gtk_action_get_tooltip (GtkAction *action) { return action ? action->tooltip : NULL; }
 void gtk_action_set_icon_name (GtkAction *action, const gchar *icon_name) {
+	g_return_if_fail (GTK_IS_ACTION (action));
 	g_free (action->icon_name); action->icon_name = g_strdup (icon_name);
 	g_object_notify (G_OBJECT (action), "icon-name");
 }
 const gchar *gtk_action_get_icon_name (GtkAction *action) { return action ? action->icon_name : NULL; }
 void gtk_action_set_gicon (GtkAction *action, GIcon *icon) {
+	if (action == NULL)
+		return;
 	g_clear_object (&action->gicon);
-	if (icon) action->gicon = g_object_ref (icon);
+	if (icon)
+		action->gicon = g_object_ref (icon);
+	g_object_notify (G_OBJECT (action), "gicon");
 }
 GIcon *gtk_action_get_gicon (GtkAction *action) { return action ? action->gicon : NULL; }
 void gtk_action_set_stock_id (GtkAction *action, const gchar *stock_id) {
+	g_return_if_fail (GTK_IS_ACTION (action));
 	g_free (action->stock_id); action->stock_id = g_strdup (stock_id);
 }
 const gchar *gtk_action_get_stock_id (GtkAction *action) { return action ? action->stock_id : NULL; }
 void gtk_action_set_is_important (GtkAction *action, gboolean is_important) { if (action) action->is_important = is_important; }
 gboolean gtk_action_get_is_important (GtkAction *action) { return action ? action->is_important : FALSE; }
-void gtk_action_set_accel_path (GtkAction *action, const gchar *accel_path) { (void) action; (void) accel_path; }
-void gtk_action_set_accel_group (GtkAction *action, gpointer accel_group) { (void) action; (void) accel_group; }
-void gtk_action_connect_accelerator (GtkAction *action) { (void) action; }
-void gtk_action_disconnect_accelerator (GtkAction *action) { (void) action; }
+
+void
+gtk_action_set_accel_path (GtkAction *action, const gchar *accel_path)
+{
+	GtkAccelKey key;
+
+	if (action == NULL)
+		return;
+	g_free (action->accel_path);
+	action->accel_path = g_strdup (accel_path);
+	if (accel_path && action->accelerator && action->accelerator[0]) {
+		guint accel_key = 0;
+		GdkModifierType accel_mods = 0;
+
+		gtk_accelerator_parse (action->accelerator, &accel_key, &accel_mods);
+		if (accel_key)
+			gtk_accel_map_add_entry (accel_path, accel_key, accel_mods);
+	}
+	memset (&key, 0, sizeof key);
+	if (accel_path && gtk_accel_map_lookup_entry (accel_path, &key) && key.accel_key) {
+		gchar *name = gtk_accelerator_name (key.accel_key, key.accel_mods);
+		g_free (action->accelerator);
+		action->accelerator = name;
+	}
+}
+
+const gchar *
+gtk_action_get_accel_path (GtkAction *action)
+{
+	return action ? action->accel_path : NULL;
+}
+
+void
+gtk_action_set_accel_group (GtkAction *action, gpointer accel_group)
+{
+	if (action)
+		action->accel_group = accel_group;
+}
+
+void
+gtk_action_connect_accelerator (GtkAction *action)
+{
+	if (action == NULL || action->accel_group == NULL || action->accelerator == NULL)
+		return;
+	verne_accel_group_connect_action (action->accel_group, action, action->accelerator);
+}
+
+void
+gtk_action_disconnect_accelerator (GtkAction *action)
+{
+	if (action == NULL || action->accel_group == NULL)
+		return;
+	verne_accel_group_disconnect_action (action->accel_group, action);
+}
+
 void gtk_action_set_visible_horizontal (GtkAction *action, gboolean visible) { if (action) action->visible_horizontal = visible; }
 GList *gtk_action_get_proxies (GtkAction *action) { (void) action; return NULL; }
 void gtk_action_block_activate (GtkAction *action) { (void) action; }
@@ -268,11 +340,19 @@ gtk_toggle_action_get_property (GObject *object, guint prop_id, GValue *value, G
 		G_OBJECT_CLASS (gtk_toggle_action_parent_class)->get_property (object, prop_id, value, pspec);
 }
 
+static void
+gtk_toggle_action_real_activate (GtkAction *action)
+{
+	GtkToggleAction *toggle = GTK_TOGGLE_ACTION (action);
+	gtk_toggle_action_set_active (toggle, !toggle->active);
+}
+
 static void gtk_toggle_action_class_init (GtkToggleActionClass *klass)
 {
 	GObjectClass *oc = G_OBJECT_CLASS (klass);
 	oc->set_property = gtk_toggle_action_set_property;
 	oc->get_property = gtk_toggle_action_get_property;
+	GTK_ACTION_CLASS (klass)->activate = gtk_toggle_action_real_activate;
 	toggle_signals[TOGGLE_TOGGLED] =
 		g_signal_new ("toggled", G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_FIRST,
 			      G_STRUCT_OFFSET (GtkToggleActionClass, toggled), NULL, NULL, NULL, G_TYPE_NONE, 0);
@@ -310,8 +390,18 @@ static guint radio_signals[RADIO_LAST];
 
 G_DEFINE_TYPE (GtkRadioAction, gtk_radio_action, GTK_TYPE_TOGGLE_ACTION)
 
+void gtk_radio_action_set_current_value (GtkRadioAction *action, gint value);
+
+static void
+gtk_radio_action_real_activate (GtkAction *action)
+{
+	GtkRadioAction *radio = GTK_RADIO_ACTION (action);
+	gtk_radio_action_set_current_value (radio, radio->value);
+}
+
 static void gtk_radio_action_class_init (GtkRadioActionClass *klass)
 {
+	GTK_ACTION_CLASS (klass)->activate = gtk_radio_action_real_activate;
 	radio_signals[RADIO_CHANGED] =
 		g_signal_new ("changed", G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_FIRST,
 			      G_STRUCT_OFFSET (GtkRadioActionClass, changed), NULL, NULL, NULL,
@@ -347,6 +437,17 @@ gtk_radio_action_set_current_value (GtkRadioAction *action, gint value)
 {
 	GSList *l;
 	GtkRadioAction *current = NULL;
+	GtkRadioAction *emit_on;
+	static gboolean in_set_current;
+
+	if (!action || in_set_current)
+		return;
+	for (l = action->group; l; l = l->next) {
+		GtkRadioAction *r = l->data;
+		if (r->value == value && gtk_toggle_action_get_active (GTK_TOGGLE_ACTION (r)))
+			return;
+	}
+	in_set_current = TRUE;
 	for (l = action->group; l; l = l->next) {
 		GtkRadioAction *r = l->data;
 		gboolean match = (r->value == value);
@@ -354,8 +455,14 @@ gtk_radio_action_set_current_value (GtkRadioAction *action, gint value)
 		if (match)
 			current = r;
 	}
-	if (current)
-		g_signal_emit (action, radio_signals[RADIO_CHANGED], 0, current);
+	if (current == NULL) {
+		in_set_current = FALSE;
+		return;
+	}
+	/* Nemo connects "changed" to the first action in the group. */
+	emit_on = action->group ? action->group->data : action;
+	g_signal_emit (emit_on, radio_signals[RADIO_CHANGED], 0, current);
+	in_set_current = FALSE;
 }
 
 gint
@@ -380,6 +487,7 @@ struct _GtkActionGroup {
 	GtkTranslateFunc translate_func;
 	gpointer translate_data;
 	GDestroyNotify translate_notify;
+	GtkAccelGroup *accel;
 };
 
 G_DEFINE_TYPE (GtkActionGroup, gtk_action_group, G_TYPE_OBJECT)
@@ -388,10 +496,19 @@ static void
 gtk_action_group_finalize (GObject *object)
 {
 	GtkActionGroup *group = GTK_ACTION_GROUP (object);
+	GHashTable *actions;
+
 	g_free (group->name);
-	g_hash_table_destroy (group->actions);
+	group->name = NULL;
+	/* Steal the table first. Unreffing GtkActions during destroy can
+	 * re-enter menu updates which look up this group. */
+	actions = group->actions;
+	group->actions = NULL;
+	if (actions)
+		g_hash_table_destroy (actions);
 	if (group->translate_notify)
 		group->translate_notify (group->translate_data);
+	group->translate_notify = NULL;
 	G_OBJECT_CLASS (gtk_action_group_parent_class)->finalize (object);
 }
 
@@ -427,6 +544,8 @@ const gchar *gtk_action_group_get_name (GtkActionGroup *group) { return group->n
 GtkAction *
 gtk_action_group_get_action (GtkActionGroup *group, const gchar *action_name)
 {
+	if (group == NULL || group->actions == NULL || action_name == NULL)
+		return NULL;
 	return g_hash_table_lookup (group->actions, action_name);
 }
 
@@ -442,6 +561,8 @@ GList *
 gtk_action_group_list_actions (GtkActionGroup *group)
 {
 	GList *list = NULL;
+	if (group == NULL || group->actions == NULL)
+		return NULL;
 	g_hash_table_foreach (group->actions, list_action, &list);
 	return list;
 }
@@ -455,9 +576,60 @@ gtk_action_group_add_action (GtkActionGroup *group, GtkAction *action)
 void
 gtk_action_group_add_action_with_accel (GtkActionGroup *group, GtkAction *action, const gchar *accelerator)
 {
-	(void) accelerator;
+	gchar *path = NULL;
+
 	if (action->name)
 		g_hash_table_insert (group->actions, g_strdup (action->name), g_object_ref (action));
+	if (accelerator && accelerator[0] != '\0') {
+		g_free (action->accelerator);
+		action->accelerator = g_strdup (accelerator);
+	}
+	if (group->name && action->name)
+		path = g_strdup_printf ("<Actions>/%s/%s", group->name, action->name);
+	if (path) {
+		gtk_action_set_accel_path (action, path);
+		g_free (path);
+	}
+	if (group->accel)
+		gtk_action_set_accel_group (action, group->accel);
+	if (group->accel && action->accelerator)
+		verne_accel_group_connect_action (group->accel, action, action->accelerator);
+}
+
+void
+verne_action_group_bind_accels (GtkActionGroup *group, GtkAccelGroup *accel)
+{
+	GList *actions, *l;
+
+	if (group == NULL || accel == NULL)
+		return;
+	group->accel = accel;
+	actions = gtk_action_group_list_actions (group);
+	for (l = actions; l; l = l->next) {
+		GtkAction *a = l->data;
+		if (a == NULL)
+			continue;
+		gtk_action_set_accel_group (a, accel);
+		if (a->accelerator)
+			verne_accel_group_connect_action (accel, a, a->accelerator);
+	}
+	g_list_free (actions);
+}
+
+void
+verne_action_group_unbind_accels (GtkActionGroup *group, GtkAccelGroup *accel)
+{
+	GList *actions, *l;
+
+	if (group == NULL || accel == NULL)
+		return;
+	actions = gtk_action_group_list_actions (group);
+	for (l = actions; l; l = l->next) {
+		GtkAction *a = l->data;
+		if (a)
+			verne_accel_group_disconnect_action (accel, a);
+	}
+	g_list_free (actions);
 }
 
 void
@@ -530,7 +702,7 @@ gtk_action_group_add_radio_actions (GtkActionGroup *group, const GtkRadioActionE
 			first = a;
 		if (entries[i].value == value)
 			gtk_toggle_action_set_active (GTK_TOGGLE_ACTION (a), TRUE);
-		gtk_action_group_add_action (group, GTK_ACTION (a));
+		gtk_action_group_add_action_with_accel (group, GTK_ACTION (a), entries[i].accelerator);
 		g_object_unref (a);
 	}
 	if (first) {

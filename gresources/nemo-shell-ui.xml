@@ -124,7 +124,7 @@
 		<menuitem action="NemoHelpLost"/>
 		<menuitem action="NemoHelpShare"/>    -->
 		<separator/>
-		<menuitem name="About Nemo" action="About Nemo"/>
+		<menuitem name="About Verne" action="About Verne"/>
 	</menu>
 </menubar>
 <popup name="background">
