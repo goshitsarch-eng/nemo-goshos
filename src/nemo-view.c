@@ -876,12 +876,15 @@ nemo_view_update_menus (NemoView *view)
 {
 	g_return_if_fail (NEMO_IS_VIEW (view));
 
+	if (view->details == NULL || gtk_widget_in_destruction (GTK_WIDGET (view))) {
+		return;
+	}
+
 	if (!view->details->active) {
 		return;
 	}
 
-	if (view->details->dir_action_group == NULL ||
-	    !GTK_IS_ACTION_GROUP (view->details->dir_action_group)) {
+	if (view->details->dir_action_group == NULL) {
 		return;
 	}
 
@@ -2895,6 +2898,10 @@ real_unmerge_menus (NemoView *view)
 
 	ui_manager = nemo_window_get_ui_manager (view->details->window);
 
+	if (view->details->dir_action_group != NULL) {
+		g_object_remove_weak_pointer (G_OBJECT (view->details->dir_action_group),
+					      (gpointer *) &view->details->dir_action_group);
+	}
 	nemo_ui_unmerge_ui (ui_manager,
 				&view->details->dir_merge_id,
 				&view->details->dir_action_group);
@@ -2938,6 +2945,8 @@ nemo_view_destroy (GtkWidget *object)
 	GList *node, *next;
 
 	view = NEMO_VIEW (object);
+
+	remove_update_menus_timeout_callback (view);
 
 	if (NEMO_VIEW_GET_CLASS (view)->shutdown)
 		NEMO_VIEW_GET_CLASS (view)->shutdown (view);
@@ -3934,6 +3943,11 @@ update_menus_timeout_callback (gpointer data)
 {
 	NemoView *view;
 	view = NEMO_VIEW (data);
+
+	if (!NEMO_IS_VIEW (view) || view->details == NULL ||
+	    gtk_widget_in_destruction (GTK_WIDGET (view))) {
+		return FALSE;
+	}
 
 	g_object_ref (G_OBJECT (view));
 
@@ -8711,6 +8725,8 @@ real_merge_menus (NemoView *view)
 	action_group = gtk_action_group_new ("DirViewActions");
 	gtk_action_group_set_translation_domain (action_group, GETTEXT_PACKAGE);
 	view->details->dir_action_group = action_group;
+	g_object_add_weak_pointer (G_OBJECT (action_group),
+				   (gpointer *) &view->details->dir_action_group);
 
 	gtk_action_group_add_actions (action_group,
 				      directory_view_entries, G_N_ELEMENTS (directory_view_entries),
@@ -9765,8 +9781,7 @@ real_update_menus (NemoView *view)
     gboolean first_selected_is_pinned;
     gboolean trash_supported;
 
-	if (view->details->dir_action_group == NULL ||
-	    !GTK_IS_ACTION_GROUP (view->details->dir_action_group)) {
+	if (view->details->dir_action_group == NULL) {
 		return;
 	}
 

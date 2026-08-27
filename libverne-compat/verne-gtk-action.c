@@ -544,7 +544,7 @@ const gchar *gtk_action_group_get_name (GtkActionGroup *group) { return group->n
 GtkAction *
 gtk_action_group_get_action (GtkActionGroup *group, const gchar *action_name)
 {
-	if (group == NULL || !GTK_IS_ACTION_GROUP (group) || group->actions == NULL || action_name == NULL)
+	if (group == NULL || group->actions == NULL || action_name == NULL)
 		return NULL;
 	return g_hash_table_lookup (group->actions, action_name);
 }
