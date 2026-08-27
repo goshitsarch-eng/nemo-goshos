@@ -235,7 +235,8 @@ void gtk_action_set_tooltip (GtkAction *action, const gchar *tooltip) {
 const gchar *gtk_action_get_tooltip (GtkAction *action) { return action ? action->tooltip : NULL; }
 void gtk_action_set_icon_name (GtkAction *action, const gchar *icon_name) {
 	g_return_if_fail (GTK_IS_ACTION (action));
-	g_free (action->icon_name); action->icon_name = g_strdup (icon_name);
+	g_free (action->icon_name);
+	action->icon_name = g_strdup (verne_map_icon_name (icon_name));
 	g_object_notify (G_OBJECT (action), "icon-name");
 }
 const gchar *gtk_action_get_icon_name (GtkAction *action) { return action ? action->icon_name : NULL; }

@@ -784,6 +784,46 @@ convert_numeric_icon_size (GString *s)
 	}
 }
 
+/* GtkBuilder sets GtkImage:icon-name as a GObject property, which bypasses
+ * gtk_image_new_from_icon_name() and therefore verne_map_icon_name(). Map
+ * Mint / missing names onto Adwaita icons so Compact view and Preview paint. */
+static void
+rewrite_mapped_icon_names (GString *s)
+{
+	const char *pat = "<property name=\"icon-name\">";
+	gsize plen = strlen (pat);
+	gsize i = 0;
+
+	while (i < s->len) {
+		const char *found = strstr (s->str + i, pat);
+		const char *val;
+		const char *end;
+		gchar *raw;
+		const char *mapped;
+		gsize pos, n;
+
+		if (found == NULL)
+			break;
+		val = found + plen;
+		end = strstr (val, "</property>");
+		if (end == NULL)
+			break;
+		raw = g_strndup (val, (gsize) (end - val));
+		g_strstrip (raw);
+		mapped = verne_map_icon_name (raw);
+		if (mapped != NULL && g_strcmp0 (mapped, raw) != 0) {
+			pos = (gsize) (val - s->str);
+			n = (gsize) (end - val);
+			g_string_erase (s, pos, (gssize) n);
+			g_string_insert (s, pos, mapped);
+			i = pos + strlen (mapped) + strlen ("</property>");
+		} else {
+			i = (gsize) (end - s->str) + strlen ("</property>");
+		}
+		g_free (raw);
+	}
+}
+
 static gchar *
 verne_transform_gtk3_ui (const gchar *xml, gssize len)
 {
@@ -825,6 +865,7 @@ verne_transform_gtk3_ui (const gchar *xml, gssize len)
 	replace_all (s, " name=\"top-padding\"", " name=\"margin-top\"");
 	replace_all (s, " name=\"bottom-padding\"", " name=\"margin-bottom\"");
 	replace_all (s, "xsi-", "");
+	rewrite_mapped_icon_names (s);
 
 	replace_all (s, " internal-child=\"vbox\"", " internal-child=\"content_area\"");
 	replace_all (s, " internal-child=\"action_area\"", "");
