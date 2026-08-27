@@ -891,16 +891,17 @@ nemo_window_pane_dispose (GObject *object)
 
 	unset_focus_widget (pane);
 
-	if (pane->action_group != NULL) {
+	if (pane->action_group != NULL && G_IS_OBJECT (pane->action_group)) {
 		GtkAction *search;
 
 		g_signal_handlers_disconnect_by_data (pane->action_group, pane);
 		search = gtk_action_group_get_action (pane->action_group, NEMO_ACTION_SEARCH);
-		if (search != NULL)
+		if (search != NULL && G_IS_OBJECT (search))
 			g_signal_handlers_disconnect_by_data (search, pane);
 	}
-	if (pane->tool_bar != NULL)
+	if (pane->tool_bar != NULL && GTK_IS_WIDGET (pane->tool_bar))
 		g_signal_handlers_disconnect_by_data (pane->tool_bar, pane);
+	pane->tool_bar = NULL;
 
 	g_clear_object (&pane->action_group);
 	pane->toolbar_action_group = NULL;

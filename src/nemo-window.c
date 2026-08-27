@@ -1078,6 +1078,7 @@ nemo_window_close_pane (NemoWindow *window,
 	if (pane->tool_bar != NULL) {
 		g_settings_unbind (pane->tool_bar, "visible");
 		if (window->details->toolbar_holder != NULL &&
+		    GTK_IS_WIDGET (pane->tool_bar) &&
 		    gtk_widget_get_parent (pane->tool_bar) == window->details->toolbar_holder) {
 			g_object_ref (pane->tool_bar);
 			gtk_container_remove (GTK_CONTAINER (window->details->toolbar_holder),
@@ -1085,6 +1086,7 @@ nemo_window_close_pane (NemoWindow *window,
 			gtk_widget_destroy (pane->tool_bar);
 			g_object_unref (pane->tool_bar);
 		}
+		pane->tool_bar = NULL;
 	}
 
 	window->details->panes = g_list_remove (window->details->panes, pane);
