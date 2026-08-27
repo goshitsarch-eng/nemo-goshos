@@ -937,6 +937,7 @@ verne_menu_update_separators (GtkWidget *box)
 	for (ch = gtk_widget_get_first_child (box); ch;
 	     ch = gtk_widget_get_next_sibling (ch)) {
 		if (GTK_IS_SEPARATOR_MENU_ITEM (ch) || GTK_IS_SEPARATOR (ch)) {
+			gtk_widget_set_no_show_all (ch, TRUE);
 			gtk_widget_set_visible (ch, FALSE);
 			pending_sep = seen_item ? ch : NULL;
 			continue;
@@ -949,6 +950,7 @@ verne_menu_update_separators (GtkWidget *box)
 				continue;
 		}
 		if (pending_sep != NULL) {
+			gtk_widget_set_no_show_all (pending_sep, FALSE);
 			gtk_widget_set_visible (pending_sep, TRUE);
 			pending_sep = NULL;
 		}
@@ -974,6 +976,7 @@ verne_dest_menu_button_at (GtkWidget *box, double lx, double ly)
 	(void) lx;
 	if (box == NULL)
 		return NULL;
+	verne_menu_update_separators (box);
 	box_w = gtk_widget_get_width (box);
 	if (box_w < 1)
 		box_w = 240;
