@@ -1148,6 +1148,9 @@ nemo_connect_server_dialog_new (NemoWindow *window)
 	if (window) {
 		gtk_window_set_screen (GTK_WINDOW (dialog),
 				       gtk_window_get_screen (GTK_WINDOW (window)));
+		gtk_window_set_transient_for (GTK_WINDOW (dialog),
+					      GTK_WINDOW (window));
+		gtk_window_set_modal (GTK_WINDOW (dialog), TRUE);
 	}
 
 	return dialog;

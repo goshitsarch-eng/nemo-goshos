@@ -198,8 +198,15 @@ void
 nemo_window_slot_set_query_editor_visible (NemoWindowSlot *slot,
 					       gboolean            visible)
 {
-    gtk_widget_hide (slot->no_search_results_box);
-    nemo_window_slot_hide_filter_bar (slot);
+	if (slot == NULL)
+		return;
+
+	if (slot->no_search_results_box != NULL)
+		gtk_widget_hide (slot->no_search_results_box);
+	nemo_window_slot_hide_filter_bar (slot);
+
+	if (slot->query_editor == NULL)
+		return;
 
 	if (visible) {
 		ensure_query_editor (slot);

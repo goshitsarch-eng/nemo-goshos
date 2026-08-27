@@ -288,7 +288,7 @@ nemo_desktop_application_local_command_line (GApplication *application,
     }
 
     if (version) {
-        g_print ("nemo-desktop " VERSION "\n");
+        g_print ("Verne Desktop " VERSION "\n");
         goto out;
     }
 

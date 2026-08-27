@@ -2889,6 +2889,25 @@ verne_accel_key_pressed (GtkEventControllerKey *self, guint keyval, guint keycod
 		GtkRoot *root = gtk_widget_get_root (focus);
 		focus = root ? gtk_root_get_focus (root) : NULL;
 	}
+	/* GTK4 focuses GtkText inside GtkEntry, so QueryEditor/LocationBar
+	 * GtkBindingSet shortcuts never see Escape. Emit their cancel
+	 * signals when a visible ancestor owns that key. */
+	if (keyval == GDK_KEY_Escape && (mods & (GDK_CONTROL_MASK | GDK_ALT_MASK | GDK_SUPER_MASK)) == 0) {
+		GtkWidget *w;
+
+		for (w = focus; w != NULL; w = gtk_widget_get_parent (w)) {
+			const gchar *tn = G_OBJECT_TYPE_NAME (w);
+
+			if (!verne_widget_really_showing (w) || tn == NULL)
+				continue;
+			if (strstr (tn, "QueryEditor") != NULL ||
+			    strstr (tn, "LocationBar") != NULL) {
+				if (g_signal_lookup ("cancel", G_OBJECT_TYPE (w)) != 0)
+					g_signal_emit_by_name (w, "cancel");
+				return TRUE;
+			}
+		}
+	}
 	if (verne_editable_wants_key (focus, keyval, mods))
 		return FALSE;
 	for (; groups != NULL; groups = groups->next) {

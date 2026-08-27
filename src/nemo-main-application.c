@@ -916,7 +916,7 @@ nemo_main_application_local_command_line (GApplication *application,
 	}
 
 	if (version) {
-		g_print ("nemo " VERSION "\n");
+		g_print ("Verne " VERSION "\n");
 		goto out;
 	}
 
