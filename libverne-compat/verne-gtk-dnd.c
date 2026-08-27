@@ -2327,11 +2327,64 @@ gdk_drag_context_get_selected_action (GdkDragContext *context)
 	return 0;
 }
 
+static GdkModifierType
+verne_pointer_modifiers (void)
+{
+	GdkModifierType state = 0;
+
+	if (gtk_get_current_event_state (&state) && state != 0)
+		return state;
+#ifdef GDK_WINDOWING_X11
+	{
+		GdkDisplay *gdpy = gdk_display_get_default ();
+		if (gdpy && GDK_IS_X11_DISPLAY (gdpy)) {
+			Display *dpy = gdk_x11_display_get_xdisplay (gdpy);
+			Window root_ret, child;
+			int rx = 0, ry = 0, wx = 0, wy = 0;
+			unsigned int mask = 0;
+			if (XQueryPointer (dpy, DefaultRootWindow (dpy), &root_ret, &child,
+					   &rx, &ry, &wx, &wy, &mask)) {
+				if (mask & ShiftMask)
+					state |= GDK_SHIFT_MASK;
+				if (mask & ControlMask)
+					state |= GDK_CONTROL_MASK;
+				if (mask & Mod1Mask)
+					state |= GDK_MOD1_MASK;
+				if (mask & Mod4Mask)
+					state |= GDK_SUPER_MASK;
+			}
+		}
+	}
+#endif
+	return state;
+}
+
+/* GTK3 Gdk maps pointer modifiers onto the suggested drop action:
+ * Alt = Ask, Ctrl+Shift = Link, Ctrl = Copy, Shift = Move. */
+static GdkDragAction
+verne_suggested_from_modifiers (GdkDragAction actions)
+{
+	GdkModifierType state = verne_pointer_modifiers ();
+
+	if ((state & GDK_MOD1_MASK) && (actions & GDK_ACTION_ASK))
+		return GDK_ACTION_ASK;
+	if ((state & GDK_CONTROL_MASK) && (state & GDK_SHIFT_MASK) && (actions & GDK_ACTION_LINK))
+		return GDK_ACTION_LINK;
+	if ((state & GDK_CONTROL_MASK) && (actions & GDK_ACTION_COPY))
+		return GDK_ACTION_COPY;
+	if ((state & GDK_SHIFT_MASK) && (actions & GDK_ACTION_MOVE))
+		return GDK_ACTION_MOVE;
+	return 0;
+}
+
 GdkDragAction
 gdk_drag_context_get_suggested_action (GdkDragContext *context)
 {
 	if (context && VERNE_IS_LOCAL_DRAG (context)) {
 		GdkDragAction a = ((VerneLocalDrag *) context)->actions;
+		GdkDragAction forced = verne_suggested_from_modifiers (a);
+		if (forced)
+			return forced;
 		if (a & GDK_ACTION_MOVE)
 			return GDK_ACTION_MOVE;
 		if (a & GDK_ACTION_COPY)
