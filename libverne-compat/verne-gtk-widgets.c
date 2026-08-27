@@ -1376,46 +1376,95 @@ verne_overlay_activate_leaf (GtkWidget *btn)
 }
 
 static GtkWidget *
-verne_overlay_hit_box (GtkWidget *widget, double *x, double *y)
+verne_overlay_clip_widget (GtkWidget *widget)
 {
-	GtkAdjustment *va;
+	GtkWidget *w;
+	GtkWidget *clip;
+
+	for (w = widget; GTK_IS_WIDGET (w); w = gtk_widget_get_parent (w)) {
+		clip = g_object_get_data (G_OBJECT (w), "verne-overlay-clip");
+		if (GTK_IS_FIXED (clip))
+			return clip;
+		if (GTK_IS_FIXED (w))
+			return w;
+	}
+	return NULL;
+}
+
+static GtkWidget *
+verne_overlay_item_box_from (GtkWidget *widget)
+{
+	GtkWidget *clip = verne_overlay_clip_widget (widget);
+	GtkWidget *box;
+
+	if (GTK_IS_FIXED (clip)) {
+		box = gtk_widget_get_first_child (clip);
+		if (GTK_IS_WIDGET (box))
+			return box;
+	}
+	if (GTK_IS_SCROLLED_WINDOW (widget))
+		return gtk_scrolled_window_get_child (GTK_SCROLLED_WINDOW (widget));
+	return widget;
+}
+
+/* GtkFixed positions the tall item box with a translate transform
+ * (gtk_fixed_move). Overflowing children keep allocation at 0,0, so
+ * GtkGestureClick on the box reports viewport Y, not content Y. */
+static void
+verne_overlay_map_click_to_content (GtkWidget *host, double *x, double *y)
+{
 	GtkWidget *box;
 	GtkWidget *clip;
+	GtkAdjustment *va;
+	double fx = 0, fy = 0;
+
+	if (host == NULL || y == NULL)
+		return;
+
+	box = verne_overlay_item_box_from (host);
+	clip = verne_overlay_clip_widget (host);
+	va = verne_overlay_vadj_from_widget (host);
+	if (GTK_IS_FIXED (clip) && GTK_IS_WIDGET (box) &&
+	    gtk_widget_get_parent (box) == clip)
+		gtk_fixed_get_child_position (GTK_FIXED (clip), box, &fx, &fy);
+
+	if (fy < -0.5) {
+		*y -= fy;
+		if (x != NULL)
+			*x -= fx;
+		return;
+	}
+	if (va != NULL)
+		*y += gtk_adjustment_get_value (va);
+}
+
+static GtkWidget *
+verne_overlay_hit_box (GtkWidget *widget, double *x, double *y)
+{
+	GtkWidget *box;
+	GtkWidget *parent;
 	int sw = 0;
 
 	if (widget == NULL)
 		return NULL;
+
+	parent = gtk_widget_get_parent (widget);
 	if (GTK_IS_SCROLLED_WINDOW (widget) ||
 	    GTK_IS_FIXED (widget) ||
 	    (GTK_IS_BOX (widget) &&
-	     gtk_widget_has_css_class (widget, "verne-overlay-scroll"))) {
+	     gtk_widget_has_css_class (widget, "verne-overlay-scroll")))
 		sw = gtk_widget_get_width (widget);
-		if (sw > 48 && x != NULL && *x >= sw - 20)
-			return NULL;
-		va = verne_overlay_vadj_from_widget (widget);
-		if (va != NULL && y != NULL)
-			*y += gtk_adjustment_get_value (va);
-		if (GTK_IS_SCROLLED_WINDOW (widget))
-			return gtk_scrolled_window_get_child (GTK_SCROLLED_WINDOW (widget));
-		if (GTK_IS_FIXED (widget))
-			return gtk_widget_get_first_child (widget);
-		clip = g_object_get_data (G_OBJECT (widget), "verne-overlay-clip");
-		box = GTK_IS_FIXED (clip) ? gtk_widget_get_first_child (clip) : NULL;
-		return box != NULL ? box : widget;
-	}
-	{
-		GtkWidget *parent = gtk_widget_get_parent (widget);
+	else if (GTK_IS_SCROLLED_WINDOW (parent) ||
+		 GTK_IS_FIXED (parent) ||
+		 (GTK_IS_BOX (parent) &&
+		  gtk_widget_has_css_class (parent, "verne-overlay-scroll")))
+		sw = gtk_widget_get_width (parent);
+	if (sw > 48 && x != NULL && *x >= sw - 20)
+		return NULL;
 
-		if (GTK_IS_SCROLLED_WINDOW (parent)) {
-			sw = gtk_widget_get_width (parent);
-			if (sw > 48 && x != NULL && *x >= sw - 20)
-				return NULL;
-			va = gtk_scrolled_window_get_vadjustment (GTK_SCROLLED_WINDOW (parent));
-			if (va != NULL && y != NULL)
-				*y += gtk_adjustment_get_value (va);
-		}
-	}
-	return widget;
+	verne_overlay_map_click_to_content (widget, x, y);
+	box = verne_overlay_item_box_from (widget);
+	return box != NULL ? box : widget;
 }
 
 static void
@@ -1435,10 +1484,12 @@ verne_dest_overlay_pressed (GtkGestureClick *gesture, gint n_press, gdouble x, g
 		int sw = 0;
 
 		if (GTK_IS_SCROLLED_WINDOW (host) ||
+		    GTK_IS_FIXED (host) ||
 		    (GTK_IS_BOX (host) &&
 		     gtk_widget_has_css_class (host, "verne-overlay-scroll")))
 			sw = gtk_widget_get_width (host);
 		else if (GTK_IS_SCROLLED_WINDOW (parent) ||
+			 GTK_IS_FIXED (parent) ||
 			 (GTK_IS_BOX (parent) &&
 			  gtk_widget_has_css_class (parent, "verne-overlay-scroll")))
 			sw = gtk_widget_get_width (parent);
@@ -1450,9 +1501,17 @@ verne_dest_overlay_pressed (GtkGestureClick *gesture, gint n_press, gdouble x, g
 	/* Tall menus live in a GtkScrolledWindow. Hit-test the inner box
 	 * with the viewport Y plus adjustment, or Preferences / last
 	 * items never activate. */
+	{
+		GtkAdjustment *va = verne_overlay_vadj_from_widget (host);
+		g_warning ("verne: overlay press host=%s y=%.0f vadj=%.0f",
+			   G_OBJECT_TYPE_NAME (host), y,
+			   va ? gtk_adjustment_get_value (va) : 0);
+	}
 	box = verne_overlay_hit_box (host, &lx, &ly);
 	if (box == NULL)
 		return;
+	g_warning ("verne: overlay press mapped ly=%.0f box=%s",
+		   ly, G_OBJECT_TYPE_NAME (box));
 	btn = verne_dest_menu_button_at (box, lx, ly);
 	if (btn == NULL || btn == box || GTK_IS_SEPARATOR_MENU_ITEM (btn))
 		return;
@@ -2941,12 +3000,12 @@ verne_toplevel_dismiss_menus (GtkGestureClick *gesture, gint n_press, gdouble x,
 			if (mw > 0 && mh > 0 &&
 			    x >= mx && x < mx + mw && y >= my && y < my + mh) {
 				GtkWidget *btn;
-				GtkAdjustment *va;
+				GtkWidget *hit_box;
 				double lx = x - mx, ly = y - my;
 
-				va = verne_overlay_vadj_from_widget (box);
-				if (va != NULL)
-					ly += gtk_adjustment_get_value (va);
+				hit_box = verne_overlay_hit_box (box, &lx, &ly);
+				if (hit_box != NULL)
+					box = hit_box;
 				btn = verne_dest_menu_button_at (box, lx, ly);
 				g_warning ("verne: dest menu hit ly=%.0f btn=%s label=%s",
 					   ly,
