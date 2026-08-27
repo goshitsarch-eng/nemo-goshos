@@ -779,6 +779,11 @@ verne_menu_restore_box_to_window (GtkMenu *menu)
 		g_object_ref (box);
 		gtk_widget_unparent (box);
 		gtk_widget_remove_css_class (box, "verne-dest-menu");
+		gtk_widget_set_size_request (box, -1, -1);
+		gtk_widget_set_margin_start (box, 0);
+		gtk_widget_set_margin_top (box, 0);
+		gtk_widget_set_margin_end (box, 0);
+		gtk_widget_set_margin_bottom (box, 0);
 		gtk_window_set_child (GTK_WINDOW (menu), box);
 		g_object_unref (box);
 		g_object_set_data (G_OBJECT (menu), "verne-dest-overlay", NULL);
@@ -873,28 +878,6 @@ verne_menu_popup_dest_overlay (GtkMenu *menu, int root_x, int root_y)
 	if (box == NULL)
 		return FALSE;
 
-#ifdef GDK_WINDOWING_X11
-	{
-		GdkSurface *s = gtk_native_get_surface (GTK_NATIVE (dest));
-		if (s && GDK_IS_X11_SURFACE (s)) {
-			Display *dpy = gdk_x11_display_get_xdisplay (gdk_surface_get_display (s));
-			Window child = 0;
-			int nx = 0, ny = 0;
-
-			if (XTranslateCoordinates (dpy, DefaultRootWindow (dpy),
-						   gdk_x11_surface_get_xid (s),
-						   root_x, root_y, &nx, &ny, &child)) {
-				lx = nx;
-				ly = ny;
-			}
-		}
-	}
-#endif
-	if (lx < 8)
-		lx = 8;
-	if (ly < 8)
-		ly = 8;
-
 	if (!GTK_IS_WIDGET (box))
 		return FALSE;
 	g_object_ref (box);
@@ -915,6 +898,54 @@ verne_menu_popup_dest_overlay (GtkMenu *menu, int root_x, int root_y)
 	gtk_widget_set_valign (box, GTK_ALIGN_START);
 	gtk_widget_set_hexpand (box, FALSE);
 	gtk_widget_set_vexpand (box, FALSE);
+	/* Previous overlay popups leave size-request + margins on the box.
+	 * Measuring with those still set inflates 272x288 into 592x568 and
+	 * pins the next menu at the old click. */
+	gtk_widget_set_size_request (box, -1, -1);
+	gtk_widget_set_margin_start (box, 0);
+	gtk_widget_set_margin_top (box, 0);
+	gtk_widget_set_margin_end (box, 0);
+	gtk_widget_set_margin_bottom (box, 0);
+#ifdef GDK_WINDOWING_X11
+	{
+		GdkDisplay *gdpy = gdk_display_get_default ();
+
+		if (gdpy && GDK_IS_X11_DISPLAY (gdpy)) {
+			Display *dpy = gdk_x11_display_get_xdisplay (gdpy);
+			Window root_ret = 0, child = 0;
+			int rx = 0, ry = 0, wx = 0, wy = 0;
+			unsigned int mask = 0;
+
+			if (XQueryPointer (dpy, DefaultRootWindow (dpy), &root_ret, &child,
+					   &rx, &ry, &wx, &wy, &mask) &&
+			    (rx > 0 || ry > 0)) {
+				root_x = rx;
+				root_y = ry;
+				lx = rx;
+				ly = ry;
+			}
+		}
+	}
+	{
+		GdkSurface *s = gtk_native_get_surface (GTK_NATIVE (dest));
+		if (s && GDK_IS_X11_SURFACE (s)) {
+			Display *dpy = gdk_x11_display_get_xdisplay (gdk_surface_get_display (s));
+			Window child = 0;
+			int nx = 0, ny = 0;
+
+			if (XTranslateCoordinates (dpy, DefaultRootWindow (dpy),
+						   gdk_x11_surface_get_xid (s),
+						   root_x, root_y, &nx, &ny, &child)) {
+				lx = nx;
+				ly = ny;
+			}
+		}
+	}
+#endif
+	if (lx < 8)
+		lx = 8;
+	if (ly < 8)
+		ly = 8;
 	{
 		int nat_w = 240, nat_h = 80;
 
