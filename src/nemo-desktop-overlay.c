@@ -36,6 +36,7 @@ typedef struct
     gint v_percent;
 
     gboolean syncing;
+    GtkWidget *hosted_wrap;
 } NemoDesktopOverlayPrivate;
 
 struct _NemoDesktopOverlay
@@ -391,20 +392,40 @@ on_grid_reset_button_clicked (GtkWidget *button,
     gtk_range_set_value (range, 100.0);
 }
 
+static void
+hide_hosted_customize (NemoDesktopOverlay *overlay)
+{
+    NemoDesktopOverlayPrivate *priv = nemo_desktop_overlay_get_instance_private (overlay);
+
+    if (GTK_IS_WIDGET (priv->hosted_wrap))
+        gtk_widget_set_visible (priv->hosted_wrap, FALSE);
+    if (GTK_IS_WIDGET (priv->window))
+        gtk_widget_set_visible (GTK_WIDGET (priv->window), FALSE);
+}
+
+static void
+on_hosted_close_clicked (GtkButton *button,
+                         gpointer   user_data)
+{
+    (void) button;
+    hide_hosted_customize (NEMO_DESKTOP_OVERLAY (user_data));
+}
+
 static gboolean
 on_close_window (GtkWidget *overlay_window,
                  GdkEvent  *event,
                  gpointer   user_data)
 {
+    NemoDesktopOverlay *overlay = NEMO_DESKTOP_OVERLAY (user_data);
+
+    (void) overlay_window;
     (void) event;
-    (void) user_data;
 
     /* GTK4 close-request also destroys the native if this returns FALSE.
      * Unref+gtk_widget_destroy here raced that default destroy and SIGSEGV'd
      * dest. Keep the overlay GObject and just hide the window so Customize
      * can be shown again. */
-    if (GTK_IS_WIDGET (overlay_window))
-        gtk_widget_set_visible (overlay_window, FALSE);
+    hide_hosted_customize (overlay);
 
     return GDK_EVENT_STOP;
 }
@@ -572,6 +593,56 @@ show_overlay (NemoDesktopOverlay *overlay,
                                                      "configure-event",
                                                      G_CALLBACK (on_window_configure_event),
                                                      overlay);
+    }
+
+    /* Dest GSK paints over sibling X windows, so a separate Customize
+     * GtkWindow is invisible. Host the dialog body on dest's GtkOverlay. */
+    {
+        GtkWidget *dest_ovl = NULL;
+
+        if (GTK_IS_WIDGET (priv->nemo_window))
+            dest_ovl = g_object_get_data (G_OBJECT (priv->nemo_window),
+                                          "verne-dest-menu-overlay");
+        if (GTK_IS_OVERLAY (dest_ovl)) {
+            GtkWidget *child = gtk_window_get_child (priv->window);
+
+            if (priv->hosted_wrap == NULL && GTK_IS_WIDGET (child)) {
+                GtkWidget *bar;
+                GtkWidget *close_btn;
+                GtkWidget *title;
+
+                g_object_ref (child);
+                if (gtk_window_get_child (priv->window) == child)
+                    gtk_window_set_child (priv->window, NULL);
+                if (gtk_widget_get_parent (child) != NULL)
+                    gtk_widget_unparent (child);
+
+                priv->hosted_wrap = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
+                gtk_widget_add_css_class (priv->hosted_wrap, "background");
+                gtk_widget_add_css_class (priv->hosted_wrap, "card");
+                bar = gtk_header_bar_new ();
+                title = gtk_label_new (_("Current Monitor Layout"));
+                gtk_header_bar_set_title_widget (GTK_HEADER_BAR (bar), title);
+                close_btn = gtk_button_new_from_icon_name ("window-close-symbolic", GTK_ICON_SIZE_BUTTON);
+                gtk_widget_set_valign (close_btn, GTK_ALIGN_CENTER);
+                g_signal_connect (close_btn, "clicked",
+                                  G_CALLBACK (on_hosted_close_clicked), overlay);
+                gtk_header_bar_pack_start (GTK_HEADER_BAR (bar), close_btn);
+                gtk_box_append (GTK_BOX (priv->hosted_wrap), bar);
+                gtk_box_append (GTK_BOX (priv->hosted_wrap), child);
+                gtk_overlay_add_overlay (GTK_OVERLAY (dest_ovl), priv->hosted_wrap);
+                gtk_widget_set_halign (priv->hosted_wrap, GTK_ALIGN_CENTER);
+                gtk_widget_set_valign (priv->hosted_wrap, GTK_ALIGN_CENTER);
+                g_object_unref (child);
+            }
+            if (GTK_IS_WIDGET (priv->hosted_wrap)) {
+                gtk_widget_set_visible (priv->hosted_wrap, TRUE);
+                gtk_widget_set_can_target (priv->hosted_wrap, TRUE);
+                gtk_widget_set_visible (GTK_WIDGET (priv->window), FALSE);
+                g_warning ("verne: dest customize overlay hosted");
+                return;
+            }
+        }
     }
 
     gtk_window_present_with_time (priv->window, gdk_event_get_time (gtk_get_current_event ()));
