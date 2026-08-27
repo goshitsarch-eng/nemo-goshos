@@ -170,10 +170,13 @@ nemo_window_push_status (NemoWindow *window,
 void
 nemo_window_go_to (NemoWindow *window, GFile *location)
 {
+	NemoWindowSlot *slot;
+
 	g_return_if_fail (NEMO_IS_WINDOW (window));
 
-	nemo_window_slot_open_location (nemo_window_get_active_slot (window),
-					    location, 0);
+	slot = nemo_window_get_active_slot (window);
+	g_return_if_fail (NEMO_IS_WINDOW_SLOT (slot));
+	nemo_window_slot_open_location (slot, location, 0);
 }
 
 void

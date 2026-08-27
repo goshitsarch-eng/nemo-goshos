@@ -656,6 +656,7 @@ static void verne_menu_open_submenu (GtkWidget *item, GtkWidget *submenu);
 static void verne_menu_popup_submenu (GtkWidget *item, GtkWidget *submenu, gboolean toggle);
 static void verne_menu_hide_others (GtkMenu *keep);
 static void verne_menu_hide_others_later (void);
+static void verne_overlay_activate_leaf (GtkWidget *btn);
 static void verne_menu_item_cancel_submenu_timeout (GtkWidget *item);
 static void verne_widget_clear_active (GtkWidget *w);
 static void verne_menu_set_submenu_item (GtkMenu *menu, GtkWidget *item);
@@ -1184,6 +1185,32 @@ verne_menu_hide_others_later (void)
 }
 
 static void
+verne_overlay_activate_leaf (GtkWidget *btn)
+{
+	static GtkWidget *busy = NULL;
+
+	if (btn == NULL || btn == busy || GTK_IS_SEPARATOR_MENU_ITEM (btn))
+		return;
+	if (GTK_IS_MENU_ITEM (btn) && gtk_menu_item_get_submenu (GTK_MENU_ITEM (btn))) {
+		g_warning ("verne: dest overlay activate submenu %s label=%s",
+			   G_OBJECT_TYPE_NAME (btn), verne_dest_item_label (btn));
+		verne_menu_open_submenu (btn, gtk_menu_item_get_submenu (GTK_MENU_ITEM (btn)));
+		return;
+	}
+	/* Overlay press and the window dismiss-click both see the same
+	 * File-menu row. Activating Connect/About twice SIGSEGV'd the file
+	 * process (tree sidebar UAF while the first dialog mapped). */
+	busy = btn;
+	g_object_ref (btn);
+	g_warning ("verne: dest overlay activate %s label=%s",
+		   G_OBJECT_TYPE_NAME (btn), verne_dest_item_label (btn));
+	g_signal_emit_by_name (btn, "clicked");
+	verne_menu_hide_others_later ();
+	g_object_unref (btn);
+	busy = NULL;
+}
+
+static void
 verne_dest_overlay_pressed (GtkGestureClick *gesture, gint n_press, gdouble x, gdouble y, gpointer data)
 {
 	GtkWidget *box = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (gesture));
@@ -1210,16 +1237,7 @@ verne_dest_overlay_pressed (GtkGestureClick *gesture, gint n_press, gdouble x, g
 	if (btn == NULL || btn == box || GTK_IS_SEPARATOR_MENU_ITEM (btn))
 		return;
 	gtk_gesture_set_state (GTK_GESTURE (gesture), GTK_EVENT_SEQUENCE_CLAIMED);
-	if (GTK_IS_MENU_ITEM (btn) && gtk_menu_item_get_submenu (GTK_MENU_ITEM (btn))) {
-		g_warning ("verne: dest overlay activate submenu %s label=%s",
-			   G_OBJECT_TYPE_NAME (btn), verne_dest_item_label (btn));
-		verne_menu_open_submenu (btn, gtk_menu_item_get_submenu (GTK_MENU_ITEM (btn)));
-		return;
-	}
-	g_signal_emit_by_name (btn, "clicked");
-	g_warning ("verne: dest overlay activate %s label=%s",
-		   G_OBJECT_TYPE_NAME (btn), verne_dest_item_label (btn));
-	verne_menu_hide_others_later ();
+	verne_overlay_activate_leaf (btn);
 	(void) menu;
 }
 
@@ -2642,25 +2660,14 @@ verne_toplevel_dismiss_menus (GtkGestureClick *gesture, gint n_press, gdouble x,
 				if (button == 1 && btn != NULL && btn != box &&
 				    !GTK_IS_SEPARATOR_MENU_ITEM (btn) &&
 				    (GTK_IS_BUTTON (btn) || GTK_IS_CHECK_BUTTON (btn))) {
-					const gchar *lab = verne_dest_item_label (btn);
-					gboolean has_sub = GTK_IS_MENU_ITEM (btn) &&
-							   gtk_menu_item_get_submenu (GTK_MENU_ITEM (btn)) != NULL;
-
 					gtk_gesture_set_state (GTK_GESTURE (gesture),
 							       GTK_EVENT_SEQUENCE_CLAIMED);
-					g_warning ("verne: dest overlay rect-activate %s label=%s sub=%s hooked=%s",
-						   G_OBJECT_TYPE_NAME (btn), lab,
-						   has_sub ? "yes" : "no",
-						   g_object_get_data (G_OBJECT (btn), "verne-sub-hooked") ? "yes" : "no");
+					g_warning ("verne: dest overlay rect-activate %s label=%s",
+						   G_OBJECT_TYPE_NAME (btn),
+						   verne_dest_item_label (btn));
 					if (w)
 						g_object_unref (w);
-					if (has_sub) {
-						verne_menu_open_submenu (btn,
-									 gtk_menu_item_get_submenu (GTK_MENU_ITEM (btn)));
-						return;
-					}
-					g_signal_emit_by_name (btn, "clicked");
-					verne_menu_hide_others_later ();
+					verne_overlay_activate_leaf (btn);
 					return;
 				}
 				if (w)
@@ -2688,20 +2695,11 @@ verne_toplevel_dismiss_menus (GtkGestureClick *gesture, gint n_press, gdouble x,
 				if (button == 1 && btn != NULL && btn != walk &&
 				    !GTK_IS_SEPARATOR_MENU_ITEM (btn) &&
 				    (GTK_IS_BUTTON (btn) || GTK_IS_CHECK_BUTTON (btn))) {
-					gboolean has_sub = GTK_IS_MENU_ITEM (btn) &&
-							   gtk_menu_item_get_submenu (GTK_MENU_ITEM (btn)) != NULL;
-
 					gtk_gesture_set_state (GTK_GESTURE (gesture),
 							       GTK_EVENT_SEQUENCE_CLAIMED);
-					g_warning ("verne: dest overlay dismiss-activate %s sub=%s",
-						   G_OBJECT_TYPE_NAME (btn), has_sub ? "yes" : "no");
-					if (has_sub) {
-						verne_menu_open_submenu (btn,
-									 gtk_menu_item_get_submenu (GTK_MENU_ITEM (btn)));
-						return;
-					}
-					g_signal_emit_by_name (btn, "clicked");
-					verne_menu_hide_others_later ();
+					g_warning ("verne: dest overlay dismiss-activate %s",
+						   G_OBJECT_TYPE_NAME (btn));
+					verne_overlay_activate_leaf (btn);
 					return;
 				}
 				verne_menu_hide_others_later ();

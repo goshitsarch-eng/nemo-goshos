@@ -108,7 +108,7 @@ on_item_activate (GtkButton *button, gpointer data)
 {
 	GtkAction *action = data;
 	(void) button;
-	if (action)
+	if (GTK_IS_ACTION (action))
 		gtk_action_activate (action);
 	if (GTK_IS_CHECK_MENU_ITEM (button) && GTK_IS_TOGGLE_ACTION (action))
 		gtk_check_menu_item_set_active (GTK_CHECK_MENU_ITEM (button),

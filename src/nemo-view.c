@@ -3116,6 +3116,9 @@ nemo_view_display_selection_info (NemoView *view)
 	NemoFile *file;
 
 	g_return_if_fail (NEMO_IS_VIEW (view));
+	g_return_if_fail (view->details != NULL);
+	if (view->details->slot != NULL && !NEMO_IS_WINDOW_SLOT (view->details->slot))
+		return;
 
 	selection = nemo_view_get_selection (view);
 

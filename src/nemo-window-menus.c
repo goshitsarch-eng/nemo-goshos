@@ -105,12 +105,17 @@ static void
 action_connect_to_server_callback (GtkAction *action,
 				   gpointer user_data)
 {
-	NemoWindow *window = NEMO_WINDOW (user_data);
+	NemoWindow *window;
 	GtkWidget *dialog;
 
-	dialog = nemo_connect_server_dialog_new (window);
+	(void) action;
+	if (!NEMO_IS_WINDOW (user_data))
+		return;
+	window = NEMO_WINDOW (user_data);
 
-	gtk_widget_show (dialog);
+	dialog = nemo_connect_server_dialog_new (window);
+	if (dialog != NULL)
+		gtk_widget_show (dialog);
 }
 
 static void

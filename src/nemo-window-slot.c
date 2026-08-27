@@ -880,7 +880,7 @@ nemo_window_slot_set_status (NemoWindowSlot *slot,
 	}
 
 	window = nemo_window_slot_get_window (slot);
-	if (slot == nemo_window_get_active_slot (window)) {
+	if (NEMO_IS_WINDOW (window) && slot == nemo_window_get_active_slot (window)) {
 		nemo_window_push_status (window, slot->status_text);
 	}
 }
