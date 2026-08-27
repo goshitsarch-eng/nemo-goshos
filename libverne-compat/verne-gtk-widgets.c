@@ -880,7 +880,8 @@ verne_menu_unparent_overlay_extra (GtkWidget *widget)
 }
 
 static GtkWidget *
-verne_menu_ensure_scroll (GtkMenu *menu, GtkWidget *box, int view_w, int view_h)
+verne_menu_ensure_scroll (GtkMenu *menu, GtkWidget *box, int view_w, int view_h,
+			  int nat_w, int nat_h)
 {
 	GtkWidget *scroll = verne_menu_get_scroll (menu);
 
@@ -905,7 +906,13 @@ verne_menu_ensure_scroll (GtkMenu *menu, GtkWidget *box, int view_w, int view_h)
 			verne_menu_unparent_overlay_extra (box);
 		gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (scroll), box);
 	}
-	gtk_widget_set_size_request (box, -1, -1);
+	/* Natural height so GTK4 allocates/paints rows inside the viewport.
+	 * view_h-only on the scrolled window used to leave a blank white menu. */
+	if (nat_w < 1)
+		nat_w = view_w > 16 ? view_w - 16 : 240;
+	if (nat_h < view_h)
+		nat_h = view_h;
+	gtk_widget_set_size_request (box, nat_w, nat_h);
 	gtk_widget_set_size_request (scroll, view_w, view_h);
 	gtk_scrolled_window_set_min_content_height (GTK_SCROLLED_WINDOW (scroll), view_h);
 	gtk_scrolled_window_set_max_content_height (GTK_SCROLLED_WINDOW (scroll), view_h);
@@ -1475,7 +1482,7 @@ verne_menu_popup_dest_overlay (GtkMenu *menu, int root_x, int root_y)
 		if (lx + view_w > dest_w - 8)
 			lx = MAX (8, dest_w - 8 - view_w);
 		if (need_scroll)
-			extra = verne_menu_ensure_scroll (menu, box, view_w, view_h);
+			extra = verne_menu_ensure_scroll (menu, box, view_w, view_h, nat_w, nat_h);
 		else {
 			GtkWidget *scroll = verne_menu_get_scroll (menu);
 
