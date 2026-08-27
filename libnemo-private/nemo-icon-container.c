@@ -3587,6 +3587,13 @@ motion_notify_event (GtkWidget *widget,
 					actions |= GDK_ACTION_MOVE;
 				}
 
+				if (details->drag_icon == NULL)
+					details->drag_icon = get_first_selected_icon (container);
+				if (details->drag_icon == NULL) {
+					details->drag_started = FALSE;
+					break;
+				}
+
 				nemo_icon_dnd_begin_drag (container,
 							      actions,
 							      details->drag_button,

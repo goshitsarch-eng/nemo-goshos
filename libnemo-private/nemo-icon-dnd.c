@@ -585,7 +585,10 @@ drag_end_callback (GtkWidget *widget,
 
 	container = NEMO_ICON_CONTAINER (widget);
 
-    free_dnd_grid (container);
+	if (container->details == NULL || container->details->dnd_info == NULL)
+		return;
+
+	free_dnd_grid (container);
 
 	dnd_info = container->details->dnd_info;
 
@@ -1414,16 +1417,19 @@ nemo_icon_container_receive_dropped_icons (NemoIconContainer *container,
 	}
 
 	if (real_action > 0) {
+		GtkAdjustment *ha = gtk_scrollable_get_hadjustment (GTK_SCROLLABLE (container));
+		GtkAdjustment *va = gtk_scrollable_get_vadjustment (GTK_SCROLLABLE (container));
+
 		eel_canvas_window_to_world (EEL_CANVAS (container),
-					    x + gtk_adjustment_get_value (gtk_scrollable_get_hadjustment (GTK_SCROLLABLE (container))),
-					    y + gtk_adjustment_get_value (gtk_scrollable_get_vadjustment (GTK_SCROLLABLE (container))),
+					    x + (ha ? gtk_adjustment_get_value (ha) : 0),
+					    y + (va ? gtk_adjustment_get_value (va) : 0),
 					    &world_x, &world_y);
 
 		drop_target = nemo_icon_container_find_drop_target (container,
 									context, x, y, &icon_hit, FALSE);
 		/* GTK4 local drops can complete a few pixels off the motion
 		 * highlight. Keep the folder that drag-motion already chose. */
-		if (!icon_hit && container->details->drop_target != NULL) {
+		if (!icon_hit && drop_icon_is_live (container, container->details->drop_target)) {
 			char *highlighted;
 
 			highlighted = nemo_icon_container_get_icon_drop_target_uri (container,
@@ -1535,16 +1541,33 @@ nemo_icon_container_get_drop_action (NemoIconContainer *container,
 	}
 }
 
+static gboolean
+drop_icon_is_live (NemoIconContainer *container, NemoIcon *icon)
+{
+	if (icon == NULL || container == NULL || container->details == NULL)
+		return FALSE;
+	if (icon->item == NULL)
+		return FALSE;
+	return g_list_find (container->details->icons, icon) != NULL;
+}
+
 static void
 set_drop_target (NemoIconContainer *container,
 		 NemoIcon *icon)
 {
 	NemoIcon *old_icon;
 
+	if (icon != NULL && !drop_icon_is_live (container, icon))
+		icon = NULL;
+
 	/* Check if current drop target changed, update icon drop
 	 * higlight if needed.
 	 */
 	old_icon = container->details->drop_target;
+	if (old_icon != NULL && !drop_icon_is_live (container, old_icon)) {
+		container->details->drop_target = NULL;
+		old_icon = NULL;
+	}
 	if (icon == old_icon) {
 		/* Canvas leave-notify can clear highlighted_for_drop while
 		 * drop_target is unchanged. Re-apply so GTK4 still paints. */
@@ -1654,6 +1677,8 @@ drag_leave_callback (GtkWidget *widget,
 	NemoIconDndInfo *dnd_info;
 
 	dnd_info = NEMO_ICON_CONTAINER (widget)->details->dnd_info;
+	if (dnd_info == NULL)
+		return;
 
 	if (dnd_info->shadow != NULL)
 		eel_canvas_item_hide (dnd_info->shadow);
@@ -1678,13 +1703,28 @@ drag_begin_callback (GtkWidget      *widget,
 
 	container = NEMO_ICON_CONTAINER (widget);
 
-	start_x = container->details->dnd_info->drag_info.start_x +
-		gtk_adjustment_get_value (gtk_scrollable_get_hadjustment (GTK_SCROLLABLE (container)));
-	start_y = container->details->dnd_info->drag_info.start_y +
-		gtk_adjustment_get_value (gtk_scrollable_get_vadjustment (GTK_SCROLLABLE (container)));
+	if (container->details->dnd_info == NULL)
+		return;
+	if (container->details->drag_icon == NULL ||
+	    container->details->drag_icon->item == NULL) {
+		g_warning ("drag-begin with no drag_icon, skipping drag surface");
+		return;
+	}
+
+	{
+		GtkAdjustment *ha = gtk_scrollable_get_hadjustment (GTK_SCROLLABLE (container));
+		GtkAdjustment *va = gtk_scrollable_get_vadjustment (GTK_SCROLLABLE (container));
+
+		start_x = container->details->dnd_info->drag_info.start_x +
+			(ha ? gtk_adjustment_get_value (ha) : 0);
+		start_y = container->details->dnd_info->drag_info.start_y +
+			(va ? gtk_adjustment_get_value (va) : 0);
+	}
 
         /* create a pixmap and mask to drag with */
         surface = nemo_icon_canvas_item_get_drag_surface (container->details->drag_icon->item);
+	if (surface == NULL)
+		return;
 
         /* compute the image's offset */
 	eel_canvas_item_get_bounds (EEL_CANVAS_ITEM (container->details->drag_icon->item),
@@ -1718,10 +1758,13 @@ nemo_icon_dnd_begin_drag (NemoIconContainer *container,
 	/* Notice that the event is in bin_window coordinates, because of
            the way the canvas handles events.
 	*/
-	dnd_info->drag_info.start_x = start_x -
-		gtk_adjustment_get_value (gtk_scrollable_get_hadjustment (GTK_SCROLLABLE (container)));
-	dnd_info->drag_info.start_y = start_y -
-		gtk_adjustment_get_value (gtk_scrollable_get_vadjustment (GTK_SCROLLABLE (container)));
+	{
+		GtkAdjustment *ha = gtk_scrollable_get_hadjustment (GTK_SCROLLABLE (container));
+		GtkAdjustment *va = gtk_scrollable_get_vadjustment (GTK_SCROLLABLE (container));
+
+		dnd_info->drag_info.start_x = start_x - (ha ? gtk_adjustment_get_value (ha) : 0);
+		dnd_info->drag_info.start_y = start_y - (va ? gtk_adjustment_get_value (va) : 0);
+	}
 
 	/* start the drag */
 	gtk_drag_begin (GTK_WIDGET (container),

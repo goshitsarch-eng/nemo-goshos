@@ -3005,13 +3005,18 @@ gtk_drag_set_icon_surface (GdkDragContext *context, cairo_surface_t *surface)
 {
 	GdkPixbuf *pixbuf;
 	double dx = 0, dy = 0;
+	int w, h;
 
 	if (!surface)
 		return;
+	if (cairo_surface_get_type (surface) != CAIRO_SURFACE_TYPE_IMAGE)
+		return;
+	w = cairo_image_surface_get_width (surface);
+	h = cairo_image_surface_get_height (surface);
+	if (w < 1 || h < 1)
+		return;
 	cairo_surface_get_device_offset (surface, &dx, &dy);
-	pixbuf = gdk_pixbuf_get_from_surface (surface, 0, 0,
-					      cairo_image_surface_get_width (surface),
-					      cairo_image_surface_get_height (surface));
+	pixbuf = gdk_pixbuf_get_from_surface (surface, 0, 0, w, h);
 	if (pixbuf) {
 		gtk_drag_set_icon_pixbuf (context, pixbuf, (gint) (-dx), (gint) (-dy));
 		g_object_unref (pixbuf);
