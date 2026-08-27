@@ -216,21 +216,25 @@ void gtk_action_set_visible (GtkAction *action, gboolean visible) {
 }
 gboolean gtk_action_get_visible (GtkAction *action) { return action ? action->visible : FALSE; }
 void gtk_action_set_label (GtkAction *action, const gchar *label) {
+	g_return_if_fail (GTK_IS_ACTION (action));
 	g_free (action->label); action->label = g_strdup (label);
 	g_object_notify (G_OBJECT (action), "label");
 }
 const gchar *gtk_action_get_label (GtkAction *action) { return action ? action->label : NULL; }
 void gtk_action_set_short_label (GtkAction *action, const gchar *label) {
+	g_return_if_fail (GTK_IS_ACTION (action));
 	g_free (action->short_label); action->short_label = g_strdup (label);
 	g_object_notify (G_OBJECT (action), "short_label");
 }
 const gchar *gtk_action_get_short_label (GtkAction *action) { return action && action->short_label ? action->short_label : gtk_action_get_label (action); }
 void gtk_action_set_tooltip (GtkAction *action, const gchar *tooltip) {
+	g_return_if_fail (GTK_IS_ACTION (action));
 	g_free (action->tooltip); action->tooltip = g_strdup (tooltip);
 	g_object_notify (G_OBJECT (action), "tooltip");
 }
 const gchar *gtk_action_get_tooltip (GtkAction *action) { return action ? action->tooltip : NULL; }
 void gtk_action_set_icon_name (GtkAction *action, const gchar *icon_name) {
+	g_return_if_fail (GTK_IS_ACTION (action));
 	g_free (action->icon_name); action->icon_name = g_strdup (icon_name);
 	g_object_notify (G_OBJECT (action), "icon-name");
 }
@@ -245,6 +249,7 @@ void gtk_action_set_gicon (GtkAction *action, GIcon *icon) {
 }
 GIcon *gtk_action_get_gicon (GtkAction *action) { return action ? action->gicon : NULL; }
 void gtk_action_set_stock_id (GtkAction *action, const gchar *stock_id) {
+	g_return_if_fail (GTK_IS_ACTION (action));
 	g_free (action->stock_id); action->stock_id = g_strdup (stock_id);
 }
 const gchar *gtk_action_get_stock_id (GtkAction *action) { return action ? action->stock_id : NULL; }
