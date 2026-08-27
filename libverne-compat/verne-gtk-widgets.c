@@ -237,31 +237,74 @@ static void verne_misc_class_init (GtkMiscClass *c) { (void) c; }
 static void verne_misc_init (GtkMisc *m) { m->xalign = 0.5; m->yalign = 0.5; }
 void gtk_misc_set_alignment (GtkMisc *misc, gfloat xalign, gfloat yalign)
 {
-	GtkWidget *w = GTK_WIDGET (misc);
+	GtkWidget *w;
+
+	if (misc == NULL)
+		return;
+	w = GTK_WIDGET (misc);
+	if (!GTK_IS_WIDGET (w))
+		return;
 	if (GTK_IS_LABEL (w)) {
 		gtk_label_set_xalign (GTK_LABEL (w), xalign);
 		gtk_label_set_yalign (GTK_LABEL (w), yalign);
 		return;
 	}
-	misc->xalign = xalign;
-	misc->yalign = yalign;
+	if (G_TYPE_CHECK_INSTANCE_TYPE (w, GTK_TYPE_MISC)) {
+		misc->xalign = xalign;
+		misc->yalign = yalign;
+	}
 	gtk_widget_set_halign (w, xalign < 0.33 ? GTK_ALIGN_START : (xalign > 0.66 ? GTK_ALIGN_END : GTK_ALIGN_CENTER));
 	gtk_widget_set_valign (w, yalign < 0.33 ? GTK_ALIGN_START : (yalign > 0.66 ? GTK_ALIGN_END : GTK_ALIGN_CENTER));
 }
 void gtk_misc_get_alignment (GtkMisc *misc, gfloat *xalign, gfloat *yalign) {
-	if (xalign) *xalign = misc->xalign;
-	if (yalign) *yalign = misc->yalign;
+	GtkWidget *w;
+	gfloat xa = 0.5, ya = 0.5;
+
+	if (misc == NULL)
+		return;
+	w = GTK_WIDGET (misc);
+	if (GTK_IS_WIDGET (w) && G_TYPE_CHECK_INSTANCE_TYPE (w, GTK_TYPE_MISC)) {
+		xa = misc->xalign;
+		ya = misc->yalign;
+	} else if (GTK_IS_WIDGET (w)) {
+		GtkAlign ha = gtk_widget_get_halign (w);
+		GtkAlign va = gtk_widget_get_valign (w);
+		xa = (ha == GTK_ALIGN_START) ? 0.0 : ((ha == GTK_ALIGN_END) ? 1.0 : 0.5);
+		ya = (va == GTK_ALIGN_START) ? 0.0 : ((va == GTK_ALIGN_END) ? 1.0 : 0.5);
+	}
+	if (xalign) *xalign = xa;
+	if (yalign) *yalign = ya;
 }
 void gtk_misc_set_padding (GtkMisc *misc, gint xpad, gint ypad) {
-	misc->xpad = xpad; misc->ypad = ypad;
-	gtk_widget_set_margin_start (GTK_WIDGET (misc), xpad);
-	gtk_widget_set_margin_end (GTK_WIDGET (misc), xpad);
-	gtk_widget_set_margin_top (GTK_WIDGET (misc), ypad);
-	gtk_widget_set_margin_bottom (GTK_WIDGET (misc), ypad);
+	GtkWidget *w;
+
+	if (misc == NULL)
+		return;
+	w = GTK_WIDGET (misc);
+	if (!GTK_IS_WIDGET (w))
+		return;
+	if (G_TYPE_CHECK_INSTANCE_TYPE (w, GTK_TYPE_MISC)) {
+		misc->xpad = xpad;
+		misc->ypad = ypad;
+	}
+	gtk_widget_set_margin_start (w, xpad);
+	gtk_widget_set_margin_end (w, xpad);
+	gtk_widget_set_margin_top (w, ypad);
+	gtk_widget_set_margin_bottom (w, ypad);
 }
 void gtk_misc_get_padding (GtkMisc *misc, gint *xpad, gint *ypad) {
-	if (xpad) *xpad = misc->xpad;
-	if (ypad) *ypad = misc->ypad;
+	GtkWidget *w;
+
+	if (misc == NULL)
+		return;
+	w = GTK_WIDGET (misc);
+	if (GTK_IS_WIDGET (w) && G_TYPE_CHECK_INSTANCE_TYPE (w, GTK_TYPE_MISC)) {
+		if (xpad) *xpad = misc->xpad;
+		if (ypad) *ypad = misc->ypad;
+		return;
+	}
+	if (xpad) *xpad = GTK_IS_WIDGET (w) ? gtk_widget_get_margin_start (w) : 0;
+	if (ypad) *ypad = GTK_IS_WIDGET (w) ? gtk_widget_get_margin_top (w) : 0;
 }
 
 /* ---------- GtkLayout (scrollable canvas parent) ---------- */
