@@ -313,6 +313,8 @@ void gtk_paned_pack2 (GtkPaned *paned, GtkWidget *child, gboolean resize, gboole
 
 void gtk_widget_destroy (GtkWidget *widget);
 void gtk_widget_show_all (GtkWidget *widget);
+void gtk_widget_set_no_show_all (GtkWidget *widget, gboolean no_show_all);
+gboolean gtk_widget_get_no_show_all (GtkWidget *widget);
 void verne_gtk_widget_show (GtkWidget *widget);
 void verne_gtk_widget_realize (GtkWidget *widget);
 #undef gtk_widget_show
@@ -1612,8 +1614,6 @@ typedef guint GtkJunctionSides;
 
 #define gtk_entry_set_text(e, t) gtk_editable_set_text (GTK_EDITABLE (e), t)
 #define gtk_entry_get_text(e) gtk_editable_get_text (GTK_EDITABLE (e))
-#define gtk_widget_set_no_show_all(w, b) ((void)0)
-#define gtk_widget_get_no_show_all(w) FALSE
 #define gtk_widget_set_margin_left(w, m) gtk_widget_set_margin_start (w, m)
 #define gtk_widget_set_margin_right(w, m) gtk_widget_set_margin_end (w, m)
 #define gtk_widget_push_composite_child() ((void)0)

@@ -360,12 +360,34 @@ gtk_widget_destroy (GtkWidget *widget)
 	g_object_unref (widget);
 }
 
+#define VERNE_NO_SHOW_ALL_KEY "verne-no-show-all"
+
+void
+gtk_widget_set_no_show_all (GtkWidget *widget, gboolean no_show_all)
+{
+	if (widget == NULL)
+		return;
+	g_object_set_data (G_OBJECT (widget), VERNE_NO_SHOW_ALL_KEY,
+			   no_show_all ? GINT_TO_POINTER (TRUE) : NULL);
+}
+
+gboolean
+gtk_widget_get_no_show_all (GtkWidget *widget)
+{
+	if (widget == NULL)
+		return FALSE;
+	return g_object_get_data (G_OBJECT (widget), VERNE_NO_SHOW_ALL_KEY) != NULL;
+}
+
 void
 gtk_widget_show_all (GtkWidget *widget)
 {
 	GtkWidget *child;
 
 	if (widget == NULL)
+		return;
+	/* GTK3: no_show_all skips this widget and its descendants. */
+	if (gtk_widget_get_no_show_all (widget))
 		return;
 	/* GTK3 gtk_widget_show_all() on a GtkMenu shows items, not the popup. */
 	if (GTK_IS_POPOVER (widget) || GTK_IS_MENU (widget)) {
