@@ -2052,20 +2052,37 @@ drop_deliver_bytes (GtkWidget *widget, GdkDrop *drop, const char *mime,
 {
 	GtkSelectionData sel = { 0 };
 	gsize n = 0;
+	guchar *copy = NULL;
+	char *mime_copy;
 
-	sel.target = (GdkAtom) (mime ? mime : "text/uri-list");
+	/* gtk_drag_finish from the receive handler frees drop qdata
+	 * (including the mime string). Keep a local copy for sel.target
+	 * and the log. GTK3 selection payloads are NUL-terminated; GBytes
+	 * from gdk_drop_read are not, and uri-list parsers treat them as C
+	 * strings. */
+	mime_copy = g_strdup (mime && mime[0] ? mime : "text/uri-list");
+	sel.target = (GdkAtom) mime_copy;
 	sel.type = sel.target;
 	sel.format = 8;
-	if (bytes)
-		sel.data = (guchar *) g_bytes_get_data (bytes, &n);
+	if (bytes) {
+		const guint8 *data = g_bytes_get_data (bytes, &n);
+
+		copy = g_malloc (n + 1);
+		if (n > 0)
+			memcpy (copy, data, n);
+		copy[n] = '\0';
+		sel.data = copy;
+	}
 	sel.length = (gint) n;
 	if (widget && GTK_IS_WIDGET (widget)) {
 		g_signal_emit_by_name (widget, "drag-data-received",
 				       drop, x, y, &sel, info, time);
 	}
 	g_warning ("drag-data-received mime=%s len=%d info=%u dest=%s xy=%d,%d",
-		   mime ? mime : "(null)", sel.length, info,
+		   mime_copy, sel.length, info,
 		   widget ? G_OBJECT_TYPE_NAME (widget) : "(null)", x, y);
+	g_free (copy);
+	g_free (mime_copy);
 }
 
 static void
