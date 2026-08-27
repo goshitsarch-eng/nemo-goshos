@@ -1210,30 +1210,70 @@ verne_overlay_activate_leaf (GtkWidget *btn)
 	busy = NULL;
 }
 
+static GtkWidget *
+verne_overlay_hit_box (GtkWidget *widget, double *x, double *y)
+{
+	GtkAdjustment *va;
+	int sw;
+
+	if (widget == NULL)
+		return NULL;
+	if (GTK_IS_SCROLLED_WINDOW (widget)) {
+		sw = gtk_widget_get_width (widget);
+		if (sw > 48 && x != NULL && *x >= sw - 20)
+			return NULL;
+		va = gtk_scrolled_window_get_vadjustment (GTK_SCROLLED_WINDOW (widget));
+		if (va != NULL && y != NULL)
+			*y += gtk_adjustment_get_value (va);
+		return gtk_scrolled_window_get_child (GTK_SCROLLED_WINDOW (widget));
+	}
+	{
+		GtkWidget *parent = gtk_widget_get_parent (widget);
+
+		if (GTK_IS_SCROLLED_WINDOW (parent)) {
+			sw = gtk_widget_get_width (parent);
+			if (sw > 48 && x != NULL && *x >= sw - 20)
+				return NULL;
+			va = gtk_scrolled_window_get_vadjustment (GTK_SCROLLED_WINDOW (parent));
+			if (va != NULL && y != NULL)
+				*y += gtk_adjustment_get_value (va);
+		}
+	}
+	return widget;
+}
+
 static void
 verne_dest_overlay_pressed (GtkGestureClick *gesture, gint n_press, gdouble x, gdouble y, gpointer data)
 {
-	GtkWidget *box = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (gesture));
+	GtkWidget *host = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (gesture));
+	GtkWidget *box;
 	GtkWidget *btn;
 	GtkMenu *menu = GTK_IS_MENU (data) ? GTK_MENU (data) : NULL;
+	double lx = x, ly = y;
 
 	(void) n_press;
-	if (box == NULL)
+	if (host == NULL)
 		return;
 	{
-		GtkWidget *parent = gtk_widget_get_parent (box);
+		GtkWidget *parent = gtk_widget_get_parent (host);
 		int sw = 0;
 
-		if (GTK_IS_SCROLLED_WINDOW (parent))
+		if (GTK_IS_SCROLLED_WINDOW (host))
+			sw = gtk_widget_get_width (host);
+		else if (GTK_IS_SCROLLED_WINDOW (parent))
 			sw = gtk_widget_get_width (parent);
 		if (sw > 48 && x >= sw - 20) {
 			g_warning ("verne: overlay press in scrollbar gutter x=%.0f sw=%d", x, sw);
 			return;
 		}
 	}
-	/* Overlay children are often unallocated; gtk_widget_pick hits the
-	 * wrong row. Stacked measure heights match the painted labels. */
-	btn = verne_dest_menu_button_at (box, x, y);
+	/* Tall menus live in a GtkScrolledWindow. Hit-test the inner box
+	 * with the viewport Y plus adjustment, or Preferences / last
+	 * items never activate. */
+	box = verne_overlay_hit_box (host, &lx, &ly);
+	if (box == NULL)
+		return;
+	btn = verne_dest_menu_button_at (box, lx, ly);
 	if (btn == NULL || btn == box || GTK_IS_SEPARATOR_MENU_ITEM (btn))
 		return;
 	gtk_gesture_set_state (GTK_GESTURE (gesture), GTK_EVENT_SEQUENCE_CLAIMED);
@@ -1266,6 +1306,8 @@ verne_dest_overlay_scroll (GtkEventControllerScroll *controller,
 	if (va == NULL)
 		return FALSE;
 	gtk_adjustment_set_value (va, gtk_adjustment_get_value (va) + dy * 32.0);
+	g_warning ("verne: overlay menu scroll dy=%.1f value=%.0f",
+		   dy, gtk_adjustment_get_value (va));
 	return TRUE;
 }
 
