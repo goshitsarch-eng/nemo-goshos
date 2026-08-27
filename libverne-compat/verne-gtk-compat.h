@@ -382,6 +382,14 @@ verne_map_icon_name (const char *name)
 		return "edit-find-replace-symbolic";
 	if (g_strcmp0 (name, "tab-new-symbolic") == 0)
 		return "list-add-symbolic";
+	if (g_strcmp0 (name, "nemo-sidebar-places-symbolic") == 0)
+		return "user-bookmarks-symbolic";
+	if (g_strcmp0 (name, "nemo-sidebar-tree-symbolic") == 0)
+		return "view-list-ordered-symbolic";
+	if (g_strcmp0 (name, "nemo-sidebar-hide-symbolic") == 0)
+		return "view-conceal-symbolic";
+	if (g_strcmp0 (name, "nemo-sidebar-show-symbolic") == 0)
+		return "sidebar-show-symbolic";
 	if (g_strcmp0 (name, "drive-harddisk-symbolic") == 0) {
 		GdkDisplay *display = gdk_display_get_default ();
 		GtkIconTheme *theme = display ? gtk_icon_theme_get_for_display (display) : NULL;
