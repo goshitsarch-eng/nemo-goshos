@@ -17,6 +17,9 @@ struct _GtkUIManager {
 	guint next_merge;
 	GtkAccelGroup *accel;
 	GHashTable *widgets; /* path -> widget */
+	guint update_idle;
+	guint dirty : 1;
+	guint rebuilding : 1;
 };
 
 G_DEFINE_TYPE (GtkUIManager, gtk_ui_manager, G_TYPE_OBJECT)
@@ -320,10 +323,17 @@ build_menu_add_node (GtkUIManager *self, UiNode *c, GtkWidget *shell, gboolean m
 	register_widget (self, path, child);
 }
 
+static void queue_update (GtkUIManager *self);
+
 static void
 rebuild (GtkUIManager *self)
 {
 	GList *l;
+
+	if (self->rebuilding)
+		return;
+	self->rebuilding = TRUE;
+	self->dirty = FALSE;
 
 	if (self->widgets == NULL)
 		self->widgets = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
@@ -346,7 +356,36 @@ rebuild (GtkUIManager *self)
 		g_free (path);
 		n->widget = w;
 	}
-	g_signal_emit_by_name (self, "actions-changed");
+
+	self->rebuilding = FALSE;
+	/* GTK3 emits "actions-changed" when action groups change, not on
+	 * every widget rebuild. Emitting here re-entered File-menu setup
+	 * (nemo_window_connect_file_menu) and dest rebuilt /MenuBar/File
+	 * every frame. */
+	if (self->dirty)
+		queue_update (self);
+}
+
+static gboolean
+do_updates_idle (gpointer data)
+{
+	GtkUIManager *self = data;
+
+	self->update_idle = 0;
+	if (self->dirty)
+		rebuild (self);
+	return G_SOURCE_REMOVE;
+}
+
+static void
+queue_update (GtkUIManager *self)
+{
+	self->dirty = TRUE;
+	if (self->rebuilding)
+		return;
+	if (self->update_idle == 0)
+		self->update_idle = g_idle_add_full (G_PRIORITY_HIGH_IDLE,
+						     do_updates_idle, self, NULL);
 }
 
 static void
@@ -355,6 +394,10 @@ gtk_ui_manager_finalize (GObject *object)
 	GtkUIManager *self = GTK_UI_MANAGER (object);
 	GList *groups = self->action_groups;
 
+	if (self->update_idle != 0) {
+		g_source_remove (self->update_idle);
+		self->update_idle = 0;
+	}
 	self->action_groups = NULL;
 	g_list_free_full (groups, g_object_unref);
 	if (self->root)
@@ -400,6 +443,7 @@ gtk_ui_manager_insert_action_group (GtkUIManager *self, GtkActionGroup *group, g
 		return;
 	self->action_groups = g_list_insert (self->action_groups, g_object_ref (group), pos < 0 ? -1 : pos);
 	verne_action_group_bind_accels (group, self->accel);
+	g_signal_emit_by_name (self, "actions-changed");
 }
 
 void
@@ -416,6 +460,7 @@ gtk_ui_manager_remove_action_group (GtkUIManager *self, GtkActionGroup *group)
 		verne_action_group_unbind_accels (group, self->accel);
 	self->action_groups = g_list_delete_link (self->action_groups, link);
 	g_object_unref (group);
+	g_signal_emit_by_name (self, "actions-changed");
 }
 
 GList *
@@ -524,7 +569,7 @@ parse_ui (GtkUIManager *self, const gchar *buffer, gssize length, GError **error
 	}
 	g_markup_parse_context_free (pc);
 	g_list_free (ctx.stack);
-	rebuild (self);
+	queue_update (self);
 	return id;
 }
 
@@ -574,7 +619,7 @@ gtk_ui_manager_add_ui (GtkUIManager *self, guint merge_id, const gchar *path, co
 		parent->children = g_list_prepend (parent->children, node);
 	else
 		parent->children = g_list_append (parent->children, node);
-	rebuild (self);
+	queue_update (self);
 }
 
 static void
@@ -597,7 +642,7 @@ void
 gtk_ui_manager_remove_ui (GtkUIManager *self, guint merge_id)
 {
 	remove_merge (self->root, merge_id);
-	rebuild (self);
+	queue_update (self);
 }
 
 guint
@@ -610,6 +655,7 @@ GtkWidget *
 gtk_ui_manager_get_widget (GtkUIManager *self, const gchar *path)
 {
 	UiNode *n;
+	gtk_ui_manager_ensure_update (self);
 	if (self->widgets) {
 		GtkWidget *w = g_hash_table_lookup (self->widgets, path);
 		if (w)
@@ -622,7 +668,9 @@ gtk_ui_manager_get_widget (GtkUIManager *self, const gchar *path)
 GtkAction *
 gtk_ui_manager_get_action (GtkUIManager *self, const gchar *path)
 {
-	UiNode *n = ui_node_find_path (self->root, path);
+	UiNode *n;
+	gtk_ui_manager_ensure_update (self);
+	n = ui_node_find_path (self->root, path);
 	if (n == NULL)
 		return NULL;
 	return lookup_action (self, n->action ? n->action : n->name);
@@ -637,7 +685,14 @@ gtk_ui_manager_get_accel_group (GtkUIManager *self)
 void
 gtk_ui_manager_ensure_update (GtkUIManager *self)
 {
-	rebuild (self);
+	if (self == NULL || self->rebuilding)
+		return;
+	if (self->update_idle != 0) {
+		g_source_remove (self->update_idle);
+		self->update_idle = 0;
+	}
+	if (self->dirty)
+		rebuild (self);
 }
 
 gchar *

@@ -511,6 +511,7 @@ desktop_ensure_icons_from_model (NemoView *view)
 	GFileInfo *info;
 	GHashTable *have;
 	char *path;
+	gboolean new_on_disk = FALSE;
 
 	model = nemo_view_get_model (view);
 	if (model == NULL) {
@@ -576,10 +577,17 @@ desktop_ensure_icons_from_model (NemoView *view)
 				   g_list_length (disk));
 			nemo_directory_notify_files_added (disk);
 			g_list_free_full (disk, g_object_unref);
+			new_on_disk = TRUE;
 		}
 	}
 	g_object_unref (dir);
 	g_free (path);
+
+	/* The 1s poll must still notice copies the monitor missed, but
+	 * re-adding every desktop file and queue_draw'ing dest every
+	 * second retriggered menu rebuilds and dest snapshots. */
+	if (!new_on_disk)
+		return;
 
 	files = nemo_directory_get_file_list (model);
 	for (l = files; l != NULL; l = l->next) {

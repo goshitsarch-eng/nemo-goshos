@@ -429,7 +429,9 @@ desktop_ensure_icons_from_model (NemoView *view)
 	GFile *dir, *child;
 	GFileEnumerator *en;
 	GFileInfo *info;
+	GHashTable *have;
 	char *path;
+	gboolean new_on_disk = FALSE;
 
 	model = nemo_view_get_model (view);
 	if (model == NULL) {
@@ -439,22 +441,43 @@ desktop_ensure_icons_from_model (NemoView *view)
 	path = nemo_get_desktop_directory ();
 	dir = g_file_new_for_path (path);
 	disk = NULL;
+	have = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
+	files = nemo_directory_get_file_list (model);
+	for (l = files; l != NULL; l = l->next) {
+		char *uri = nemo_file_get_uri (l->data);
+
+		if (uri != NULL)
+			g_hash_table_add (have, uri);
+	}
+	nemo_file_list_free (files);
 	en = g_file_enumerate_children (dir, G_FILE_ATTRIBUTE_STANDARD_NAME,
 					G_FILE_QUERY_INFO_NOFOLLOW_SYMLINKS, NULL, NULL);
 	if (en != NULL) {
 		while ((info = g_file_enumerator_next_file (en, NULL, NULL)) != NULL) {
+			char *uri;
+
 			child = g_file_get_child (dir, g_file_info_get_name (info));
-			disk = g_list_prepend (disk, child);
+			uri = g_file_get_uri (child);
+			if (uri != NULL && !g_hash_table_contains (have, uri))
+				disk = g_list_prepend (disk, child);
+			else
+				g_object_unref (child);
+			g_free (uri);
 			g_object_unref (info);
 		}
 		g_object_unref (en);
 	}
+	g_hash_table_destroy (have);
 	if (disk != NULL) {
 		nemo_directory_notify_files_added (disk);
 		g_list_free_full (disk, g_object_unref);
+		new_on_disk = TRUE;
 	}
 	g_object_unref (dir);
 	g_free (path);
+
+	if (!new_on_disk)
+		return;
 
 	files = nemo_directory_get_file_list (model);
 	for (l = files; l != NULL; l = l->next) {
