@@ -604,6 +604,9 @@ static void verne_menu_popup_now (GtkMenu *menu, int root_x, int root_y, gboolea
 static void verne_menu_set_override_redirect (GtkWidget *w);
 static void verne_menu_embed_on_desktop (GtkWidget *w);
 static void verne_menu_unembed (GtkWidget *w);
+static GtkWindow *verne_menu_dest_attach_window (GtkWidget *menu);
+static gboolean verne_menu_popup_dest_popover (GtkMenu *menu, int root_x, int root_y);
+static void verne_menu_popdown_dest_popover (GtkMenu *menu);
 
 static void
 verne_menu_ensure_css (void)
@@ -631,6 +634,19 @@ verne_menu_ensure_css (void)
 		"  background-color: transparent;\n"
 		"}\n"
 		"window.popup.menu button:hover, window.popup.menu checkbutton:hover {\n"
+		"  background-color: #e6e6e6;\n"
+		"}\n"
+		"popover.menu, popover.menu > contents, popover.menu box {\n"
+		"  background-color: #ffffff;\n"
+		"  background-image: none;\n"
+		"  color: #1e1e1e;\n"
+		"}\n"
+		"popover.menu button, popover.menu checkbutton {\n"
+		"  padding: 6px 12px;\n"
+		"  color: #1e1e1e;\n"
+		"  background-color: transparent;\n"
+		"}\n"
+		"popover.menu button:hover, popover.menu checkbutton:hover {\n"
 		"  background-color: #e6e6e6;\n"
 		"}\n"
 		".menubar {\n"
@@ -665,6 +681,161 @@ verne_x11_move (GtkWindow *win, int x, int y)
 #else
 	(void) win; (void) x; (void) y;
 #endif
+}
+
+static GtkWindow *
+verne_menu_dest_attach_window (GtkWidget *menu)
+{
+	GtkWidget *attach;
+	GtkRoot *root;
+
+	if (!GTK_IS_MENU (menu))
+		return NULL;
+	attach = GTK_MENU (menu)->attach;
+	if (attach == NULL || !GTK_IS_WIDGET (attach))
+		return NULL;
+	root = gtk_widget_get_root (attach);
+	if (!GTK_IS_WINDOW (root) || GTK_IS_MENU (root))
+		return NULL;
+	if (gtk_window_get_type_hint (GTK_WINDOW (root)) == GDK_WINDOW_TYPE_HINT_DESKTOP ||
+	    g_object_get_data (G_OBJECT (root), "is_desktop_window") != NULL)
+		return GTK_WINDOW (root);
+	return NULL;
+}
+
+static void
+verne_menu_restore_box_to_window (GtkMenu *menu)
+{
+	GtkWidget *popover;
+	GtkWidget *box;
+
+	if (!GTK_IS_MENU (menu) || menu->box == NULL)
+		return;
+	popover = g_object_get_data (G_OBJECT (menu), "verne-dest-popover");
+	box = menu->box;
+	if (GTK_IS_POPOVER (popover) && gtk_popover_get_child (GTK_POPOVER (popover)) == box) {
+		g_object_ref (box);
+		gtk_popover_set_child (GTK_POPOVER (popover), NULL);
+		if (gtk_window_get_child (GTK_WINDOW (menu)) != box)
+			gtk_window_set_child (GTK_WINDOW (menu), box);
+		g_object_unref (box);
+	} else if (gtk_window_get_child (GTK_WINDOW (menu)) != box &&
+		   gtk_widget_get_parent (box) == NULL) {
+		gtk_window_set_child (GTK_WINDOW (menu), box);
+	}
+}
+
+static void
+verne_menu_popover_closed (GtkPopover *popover, gpointer data)
+{
+	GtkMenu *menu = data;
+
+	(void) popover;
+	if (!GTK_IS_MENU (menu))
+		return;
+	if (g_object_get_data (G_OBJECT (menu), "verne-popover-closing"))
+		return;
+	g_object_set_data (G_OBJECT (menu), "verne-popover-closing", GINT_TO_POINTER (1));
+	verne_menu_restore_box_to_window (menu);
+	if (!g_object_get_data (G_OBJECT (menu), "verne-dismissed"))
+		gtk_menu_popdown (menu);
+	g_object_set_data (G_OBJECT (menu), "verne-popover-closing", NULL);
+}
+
+static void
+verne_menu_popdown_dest_popover (GtkMenu *menu)
+{
+	GtkWidget *popover;
+
+	if (!GTK_IS_MENU (menu))
+		return;
+	popover = g_object_get_data (G_OBJECT (menu), "verne-dest-popover");
+	verne_menu_restore_box_to_window (menu);
+	if (GTK_IS_POPOVER (popover)) {
+		g_signal_handlers_block_by_func (popover, verne_menu_popover_closed, menu);
+		gtk_popover_popdown (GTK_POPOVER (popover));
+		g_signal_handlers_unblock_by_func (popover, verne_menu_popover_closed, menu);
+	}
+}
+
+static gboolean
+verne_menu_popup_dest_popover (GtkMenu *menu, int root_x, int root_y)
+{
+	GtkWindow *dest;
+	GtkWidget *parent;
+	GtkWidget *popover;
+	GtkWidget *box;
+	GdkRectangle rect;
+	int lx = root_x, ly = root_y;
+
+	dest = verne_menu_dest_attach_window (GTK_WIDGET (menu));
+	if (dest == NULL)
+		return FALSE;
+	parent = GTK_WIDGET (dest);
+
+	popover = g_object_get_data (G_OBJECT (menu), "verne-dest-popover");
+	if (!GTK_IS_POPOVER (popover)) {
+		popover = gtk_popover_new ();
+		gtk_popover_set_has_arrow (GTK_POPOVER (popover), FALSE);
+		gtk_popover_set_autohide (GTK_POPOVER (popover), TRUE);
+		gtk_popover_set_position (GTK_POPOVER (popover), GTK_POS_BOTTOM);
+		gtk_widget_add_css_class (popover, "menu");
+		g_signal_connect (popover, "closed", G_CALLBACK (verne_menu_popover_closed), menu);
+		g_object_set_data_full (G_OBJECT (menu), "verne-dest-popover",
+					g_object_ref_sink (popover), g_object_unref);
+	}
+	if (gtk_widget_get_parent (popover) != parent) {
+		if (gtk_widget_get_parent (popover) != NULL)
+			gtk_widget_unparent (popover);
+		gtk_widget_set_parent (popover, parent);
+	}
+
+	box = menu->box;
+	if (box && gtk_widget_get_parent (box) != popover) {
+		g_object_ref (box);
+		if (gtk_window_get_child (GTK_WINDOW (menu)) == box)
+			gtk_window_set_child (GTK_WINDOW (menu), NULL);
+		else if (gtk_widget_get_parent (box) != NULL)
+			gtk_widget_unparent (box);
+		gtk_popover_set_child (GTK_POPOVER (popover), box);
+		g_object_unref (box);
+	}
+
+#ifdef GDK_WINDOWING_X11
+	{
+		GdkSurface *s = gtk_native_get_surface (GTK_NATIVE (dest));
+		if (s && GDK_IS_X11_SURFACE (s)) {
+			Display *dpy = gdk_x11_display_get_xdisplay (gdk_surface_get_display (s));
+			Window child = 0;
+			int nx = 0, ny = 0;
+			graphene_point_t pt;
+
+			if (XTranslateCoordinates (dpy, DefaultRootWindow (dpy),
+						   gdk_x11_surface_get_xid (s),
+						   root_x, root_y, &nx, &ny, &child)) {
+				if (gtk_widget_compute_point (GTK_WIDGET (dest), parent,
+							      &GRAPHENE_POINT_INIT ((float) nx, (float) ny),
+							      &pt)) {
+					lx = (int) pt.x;
+					ly = (int) pt.y;
+				} else {
+					lx = nx;
+					ly = ny;
+				}
+			}
+		}
+	}
+#endif
+	rect.x = lx;
+	rect.y = ly;
+	rect.width = 1;
+	rect.height = 1;
+	gtk_popover_set_pointing_to (GTK_POPOVER (popover), &rect);
+	gtk_widget_set_visible (GTK_WIDGET (menu), FALSE);
+	gtk_popover_popup (GTK_POPOVER (popover));
+	g_warning ("verne: dest menu popover at %d,%d parent=%s",
+		   lx, ly, G_OBJECT_TYPE_NAME (parent));
+	return TRUE;
 }
 
 #ifdef GDK_WINDOWING_X11
@@ -770,26 +941,6 @@ verne_x11_find_dest_canvas (Display *dpy, Window skip)
 			g_object_unref (w);
 	}
 	return best;
-}
-
-static GtkWindow *
-verne_menu_dest_attach_window (GtkWidget *menu)
-{
-	GtkWidget *attach;
-	GtkRoot *root;
-
-	if (!GTK_IS_MENU (menu))
-		return NULL;
-	attach = GTK_MENU (menu)->attach;
-	if (attach == NULL || !GTK_IS_WIDGET (attach))
-		return NULL;
-	root = gtk_widget_get_root (attach);
-	if (!GTK_IS_WINDOW (root) || GTK_IS_MENU (root))
-		return NULL;
-	if (gtk_window_get_type_hint (GTK_WINDOW (root)) == GDK_WINDOW_TYPE_HINT_DESKTOP ||
-	    g_object_get_data (G_OBJECT (root), "is_desktop_window") != NULL)
-		return GTK_WINDOW (root);
-	return NULL;
 }
 #endif
 
@@ -1408,6 +1559,11 @@ verne_menu_popup_idle (gpointer data)
 	g_object_set_data (G_OBJECT (w), "verne-dismissed", NULL);
 	verne_menu_attach_dismiss_on_toplevels ();
 	verne_menu_hide_others (p->menu);
+	if (verne_menu_popup_dest_popover (p->menu, p->x, p->y)) {
+		g_object_unref (p->menu);
+		g_free (p);
+		return G_SOURCE_REMOVE;
+	}
 	gtk_widget_set_opacity (w, 1.0);
 	gtk_widget_set_visible (w, TRUE);
 	gtk_window_present (GTK_WINDOW (p->menu));
@@ -1487,6 +1643,7 @@ void gtk_menu_popdown (GtkMenu *menu) {
 	g_object_set_data (G_OBJECT (menu), "verne-dismissed", GINT_TO_POINTER (1));
 	g_object_set_data (G_OBJECT (menu), "verne-keep-above", NULL);
 	verne_menu_bump_serial (menu);
+	verne_menu_popdown_dest_popover (menu);
 	verne_menu_unembed (GTK_WIDGET (menu));
 	gtk_widget_set_visible (GTK_WIDGET (menu), FALSE);
 	gtk_widget_set_opacity (GTK_WIDGET (menu), 0.0);
