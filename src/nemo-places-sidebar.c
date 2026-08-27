@@ -3676,12 +3676,10 @@ bookmarks_button_release_event_cb (GtkWidget *widget,
 	places_translate_xy (tree_view, &event->x, &event->y);
 
 	if (event->button == GDK_BUTTON_PRIMARY) {
-
-		if (event->window != NULL &&
-		    event->window != gtk_tree_view_get_bin_window (tree_view) &&
-		    event->window != gtk_widget_get_window (GTK_WIDGET (tree_view))) {
-			return FALSE;
-		}
+		/* GTK4 synthesizes events on the widget surface; skip the GTK3
+		 * bin-window identity check so Places clicks still activate.
+		 * row-activated is the primary GTK4 path; this remains a fallback
+		 * when the TreeView gesture does not emit it. */
 
 		res = gtk_tree_view_get_path_at_pos (tree_view, (int) event->x, (int) event->y,
 						     &path, NULL, NULL, NULL);
@@ -4016,7 +4014,12 @@ row_activated_cb (GtkTreeView       *tree_view,
             sidebar->network_expanded = !sidebar->network_expanded;
         }
         restore_expand_state (sidebar);
+        return;
     }
+
+    /* GTK4 TreeView hit-testing owns single-click activation. The GTK3
+     * button-release path often never runs (claimed gestures / event window). */
+    open_selected_bookmark (sidebar, model, &iter, 0);
 }
 
 static void
@@ -4281,6 +4284,7 @@ nemo_places_sidebar_init (NemoPlacesSidebar *sidebar)
 	tree_view = GTK_TREE_VIEW (nemo_places_tree_view_new ());
 
 	gtk_tree_view_set_headers_visible (tree_view, FALSE);
+	gtk_tree_view_set_activate_on_single_click (tree_view, TRUE);
 
     primary_column = GTK_TREE_VIEW_COLUMN (gtk_tree_view_column_new ());
     gtk_tree_view_column_set_max_width (GTK_TREE_VIEW_COLUMN (primary_column), NEMO_ICON_SIZE_SMALLER);

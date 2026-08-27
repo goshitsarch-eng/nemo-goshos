@@ -1535,6 +1535,7 @@ create_tree (FMTreeView *view)
 	g_object_unref (view->details->child_model);
 
 	gtk_tree_view_set_headers_visible (view->details->tree_widget, FALSE);
+	gtk_tree_view_set_activate_on_single_click (view->details->tree_widget, TRUE);
 
 	view->details->drag_dest = 
 		nemo_tree_view_drag_dest_new (view->details->tree_widget, FALSE);

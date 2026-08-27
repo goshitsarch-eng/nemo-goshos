@@ -2827,18 +2827,19 @@ size_allocate (GtkWidget *widget,
 {
 	NemoIconContainer *container;
 	gboolean need_layout_redone;
-	GtkAllocation wid_allocation;
 
 	container = NEMO_ICON_CONTAINER (widget);
 
 	need_layout_redone = !container->details->has_been_allocated;
-	gtk_widget_get_allocation (widget, &wid_allocation);
 
-	if (allocation->width != wid_allocation.width) {
+	/* Compare against the last size we laid out, not gtk_widget_get_allocation.
+	 * GTK4 records the widget size before this vfunc runs, so get_allocation
+	 * already equals *allocation and would never trigger a relayout. */
+	if (allocation->width != container->details->last_allocated_width) {
 		need_layout_redone = TRUE;
 	}
 
-	if (allocation->height != wid_allocation.height) {
+	if (allocation->height != container->details->last_allocated_height) {
 		need_layout_redone = TRUE;
 	}
 
@@ -2860,7 +2861,8 @@ size_allocate (GtkWidget *widget,
 	}
 	container->details->size_allocation_count++;
 	if (container->details->size_allocation_count > 2 &&
-	    allocation->width >= wid_allocation.width) {
+	    container->details->last_allocated_width > 1 &&
+	    allocation->width >= container->details->last_allocated_width) {
 		need_layout_redone = FALSE;
 	}
 
@@ -2875,6 +2877,8 @@ size_allocate (GtkWidget *widget,
 	verne_widget_chain_size_allocate (nemo_icon_container_parent_class, widget, allocation);
 
 	container->details->has_been_allocated = TRUE;
+	container->details->last_allocated_width = allocation->width;
+	container->details->last_allocated_height = allocation->height;
 
 	if (need_layout_redone) {
 		nemo_icon_container_redo_layout (container);
@@ -4964,6 +4968,8 @@ nemo_icon_container_init (NemoIconContainer *container)
 	details->font_size_table[NEMO_ZOOM_LEVEL_LARGEST] = 0 * PANGO_SCALE;
 
     details->fixed_text_height = -1;
+    details->last_allocated_width = -1;
+    details->last_allocated_height = -1;
 
     details->view_constants = g_new0 (NemoViewLayoutConstants, 1);
 
