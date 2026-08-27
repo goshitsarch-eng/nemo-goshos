@@ -7087,6 +7087,8 @@ nemo_icon_container_start_renaming_selected_item (NemoIconContainer *container,
 	}
 
 	gtk_widget_show (details->rename_widget);
+	gtk_widget_queue_allocate (GTK_WIDGET (container));
+	gtk_widget_queue_draw (details->rename_widget);
 	gtk_widget_grab_focus (details->rename_widget);
 
 	eel_editable_label_select_region (EEL_EDITABLE_LABEL (details->rename_widget),
