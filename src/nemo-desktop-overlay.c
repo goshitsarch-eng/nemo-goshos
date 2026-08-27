@@ -404,6 +404,32 @@ hide_hosted_customize (NemoDesktopOverlay *overlay)
 }
 
 static void
+size_hosted_customize (GtkWidget *dest_ovl,
+                       GtkWidget *wrap)
+{
+    int nat_w = 650, nat_h = 520;
+
+    if (!GTK_IS_OVERLAY (dest_ovl) || !GTK_IS_WIDGET (wrap))
+        return;
+
+    gtk_widget_set_halign (wrap, GTK_ALIGN_CENTER);
+    gtk_widget_set_valign (wrap, GTK_ALIGN_CENTER);
+    gtk_widget_set_hexpand (wrap, FALSE);
+    gtk_widget_set_vexpand (wrap, FALSE);
+    gtk_widget_measure (wrap, GTK_ORIENTATION_HORIZONTAL, -1, NULL, &nat_w, NULL, NULL);
+    gtk_widget_measure (wrap, GTK_ORIENTATION_VERTICAL, nat_w > 0 ? nat_w : 650,
+                        NULL, &nat_h, NULL, NULL);
+    if (nat_w < 650)
+        nat_w = 650;
+    if (nat_h < 480)
+        nat_h = 480;
+    gtk_widget_set_size_request (wrap, nat_w, nat_h);
+    gtk_overlay_set_clip_overlay (GTK_OVERLAY (dest_ovl), wrap, FALSE);
+    gtk_widget_queue_allocate (dest_ovl);
+    g_warning ("verne: dest customize overlay hosted size %dx%d", nat_w, nat_h);
+}
+
+static void
 on_hosted_close_clicked (GtkButton *button,
                          gpointer   user_data)
 {
@@ -638,16 +664,18 @@ show_overlay (NemoDesktopOverlay *overlay,
                 gtk_header_bar_pack_start (GTK_HEADER_BAR (bar), close_btn);
                 gtk_box_append (GTK_BOX (priv->hosted_wrap), bar);
                 gtk_box_append (GTK_BOX (priv->hosted_wrap), child);
+                gtk_widget_set_hexpand (child, TRUE);
+                gtk_widget_set_vexpand (child, TRUE);
                 gtk_overlay_add_overlay (GTK_OVERLAY (dest_ovl), priv->hosted_wrap);
-                gtk_widget_set_halign (priv->hosted_wrap, GTK_ALIGN_CENTER);
-                gtk_widget_set_valign (priv->hosted_wrap, GTK_ALIGN_CENTER);
                 g_object_unref (child);
             }
             if (GTK_IS_WIDGET (priv->hosted_wrap)) {
                 gtk_widget_set_visible (priv->hosted_wrap, TRUE);
                 gtk_widget_set_can_target (priv->hosted_wrap, TRUE);
                 gtk_widget_set_visible (GTK_WIDGET (priv->window), FALSE);
-                g_warning ("verne: dest customize overlay hosted");
+                size_hosted_customize (dest_ovl, priv->hosted_wrap);
+                if (GTK_IS_WIDGET (priv->nemo_window))
+                    gtk_widget_queue_draw (GTK_WIDGET (priv->nemo_window));
                 return;
             }
         }
