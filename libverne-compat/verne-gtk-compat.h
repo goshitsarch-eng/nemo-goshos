@@ -1780,7 +1780,7 @@ gboolean verne_gtk_builder_add_from_resource (GtkBuilder *builder, const gchar *
 void verne_paint_desktop_wallpaper (GtkWidget *widget, GtkSnapshot *snapshot, int width, int height);
 void verne_paint_desktop_wallpaper_cairo (GtkWidget *widget, cairo_t *cr, int width, int height);
 gboolean verne_desktop_canvas_snapshot (GtkWidget *widget, GtkSnapshot *snapshot, int width, int height,
-					void (*draw) (GtkWidget *, cairo_t *),
+					VerneDrawEvent draw,
 					void (*emit_draw) (GtkWidget *, cairo_t *));
 void verne_gtk_widget_queue_draw (GtkWidget *widget);
 #undef gtk_widget_queue_draw

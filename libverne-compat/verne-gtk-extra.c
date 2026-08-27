@@ -442,7 +442,7 @@ verne_paint_desktop_wallpaper_cairo (GtkWidget *widget, cairo_t *cr, int width, 
 
 gboolean
 verne_desktop_canvas_snapshot (GtkWidget *widget, GtkSnapshot *snapshot, int width, int height,
-			       void (*draw) (GtkWidget *, cairo_t *),
+			       VerneDrawEvent draw,
 			       void (*emit_draw) (GtkWidget *, cairo_t *))
 {
 	GdkTexture *tex;
