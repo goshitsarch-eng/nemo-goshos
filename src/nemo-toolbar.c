@@ -119,8 +119,10 @@ toolbar_update_appearance (NemoToolbar *self)
 				self->priv->show_main_bar);
 
     if (show_location_entry) {
+        gtk_widget_show (GTK_WIDGET (self->priv->location_bar));
         gtk_stack_set_visible_child_name (GTK_STACK (self->priv->stack), "location_bar");
     } else {
+        gtk_widget_show (GTK_WIDGET (self->priv->path_bar));
         gtk_stack_set_visible_child_name (GTK_STACK (self->priv->stack), "path_bar");
     }
 
@@ -318,10 +320,14 @@ nemo_toolbar_constructed (GObject *obj)
 
     self->priv->path_bar = g_object_new (NEMO_TYPE_PATH_BAR, NULL);
     gtk_stack_add_named(GTK_STACK (self->priv->stack), GTK_WIDGET (self->priv->path_bar), "path_bar");
+    /* GtkStack show_all only visits the visible child. Show both pages so
+     * Ctrl+L can switch back to breadcrumbs after the location entry. */
+    gtk_widget_show (GTK_WIDGET (self->priv->path_bar));
 
     /* Entry-Like Location Bar */
     self->priv->location_bar = nemo_location_bar_new ();
     gtk_stack_add_named(GTK_STACK (self->priv->stack), GTK_WIDGET (self->priv->location_bar), "location_bar");
+    gtk_widget_show (GTK_WIDGET (self->priv->location_bar));
     gtk_widget_show_all (hbox);
 
     tool_box = gtk_tool_item_new ();
