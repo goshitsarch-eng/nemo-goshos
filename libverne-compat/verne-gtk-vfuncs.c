@@ -157,11 +157,17 @@ verne_pointer_event_widget (GtkWidget *widget, double x, double y)
 	pick = gtk_widget_pick (root, rx, ry, GTK_PICK_DEFAULT);
 	if (pick == NULL)
 		return widget;
+	/* Prefer a descendant that installed GTK3 event controllers. If pick
+	 * is an ancestor overlay/window (AdwToastOverlay, dest chrome), keep
+	 * this widget so dest/file button-press still runs. */
 	for (w = pick; w != NULL; w = gtk_widget_get_parent (w)) {
-		if (g_object_get_qdata (G_OBJECT (w), verne_controllers_quark))
-			return w;
+		if (g_object_get_qdata (G_OBJECT (w), verne_controllers_quark) == NULL)
+			continue;
+		if (w == widget || gtk_widget_is_ancestor (widget, w))
+			return widget;
+		return w;
 	}
-	return pick;
+	return widget;
 }
 
 static void

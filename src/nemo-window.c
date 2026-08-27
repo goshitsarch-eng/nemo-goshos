@@ -741,6 +741,15 @@ nemo_window_constructed (GObject *self)
         gtk_box_append (GTK_BOX (bottom), sep);
         gtk_box_append (GTK_BOX (bottom), eb);
         adw_toolbar_view_add_bottom_bar (ADW_TOOLBAR_VIEW (toolbar_view), bottom);
+        if (window->details->disable_chrome) {
+            gtk_widget_set_visible (header, FALSE);
+            gtk_widget_set_visible (bottom, FALSE);
+            gtk_widget_set_visible (chrome, TRUE);
+            gtk_widget_set_visible (menu, FALSE);
+            gtk_widget_set_visible (toolbar_holder, FALSE);
+            adw_toolbar_view_set_reveal_top_bars (ADW_TOOLBAR_VIEW (toolbar_view), FALSE);
+            adw_toolbar_view_set_reveal_bottom_bars (ADW_TOOLBAR_VIEW (toolbar_view), FALSE);
+        }
         adw_toast_overlay_set_child (ADW_TOAST_OVERLAY (toasts), toolbar_view);
         adw_application_window_set_content (ADW_APPLICATION_WINDOW (window), toasts);
     }
