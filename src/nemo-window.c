@@ -750,13 +750,14 @@ nemo_window_constructed (GObject *self)
             adw_toolbar_view_set_reveal_top_bars (ADW_TOOLBAR_VIEW (toolbar_view), FALSE);
             adw_toolbar_view_set_reveal_bottom_bars (ADW_TOOLBAR_VIEW (toolbar_view), FALSE);
         }
-        adw_toast_overlay_set_child (ADW_TOAST_OVERLAY (toasts), toolbar_view);
         if (window->details->disable_chrome) {
             GtkWidget *dest_overlay = gtk_overlay_new ();
 
             gtk_overlay_set_child (GTK_OVERLAY (dest_overlay), toolbar_view);
             adw_toast_overlay_set_child (ADW_TOAST_OVERLAY (toasts), dest_overlay);
             g_object_set_data (G_OBJECT (window), "verne-dest-menu-overlay", dest_overlay);
+        } else {
+            adw_toast_overlay_set_child (ADW_TOAST_OVERLAY (toasts), toolbar_view);
         }
         adw_application_window_set_content (ADW_APPLICATION_WINDOW (window), toasts);
     }
