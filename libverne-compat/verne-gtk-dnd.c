@@ -285,6 +285,7 @@ G_DEFINE_TYPE (VerneLocalDrag, verne_local_drag, G_TYPE_OBJECT)
 
 static void verne_xdnd_teardown (VerneLocalDrag *local);
 static gboolean verne_idle_destroy_window (gpointer data);
+static void verne_local_cleanup (VerneLocalDrag *local);
 
 static void
 verne_local_drag_finalize (GObject *object)
@@ -865,6 +866,23 @@ verne_xdnd_teardown (VerneLocalDrag *local)
 	local->xdnd_target = None;
 }
 
+static void
+verne_local_source_gone (gpointer data, GObject *dead)
+{
+	VerneLocalDrag *local = data;
+
+	(void) dead;
+	local->source = NULL;
+	if (local->poll_id) {
+		g_source_remove (local->poll_id);
+		local->poll_id = 0;
+	}
+	if (!local->drop_emitted) {
+		local->drop_emitted = TRUE;
+		verne_local_cleanup (local);
+	}
+}
+
 static gboolean
 verne_idle_destroy_window (gpointer data)
 {
@@ -915,8 +933,10 @@ verne_local_cleanup (VerneLocalDrag *local)
 		gtk_widget_set_visible (icon, FALSE);
 		g_timeout_add_seconds (2, verne_idle_destroy_window, g_object_ref (icon));
 	}
-	if (source)
+	if (source) {
+		g_object_weak_unref (G_OBJECT (source), verne_local_source_gone, local);
 		g_object_set_data (G_OBJECT (source), "verne-active-drag", NULL);
+	}
 	verne_xdnd_teardown (local);
 	if (local->native_drag) {
 		g_signal_handlers_disconnect_by_data (local->native_drag, local);
@@ -1662,15 +1682,14 @@ verne_local_handover_native (VerneLocalDrag *local)
 static gboolean
 verne_local_poll (gpointer data)
 {
-	GtkWidget *source = data;
-	VerneLocalDrag *local;
+	VerneLocalDrag *local = data;
+	GtkWidget *source;
 
-	if (!GTK_IS_WIDGET (source))
+	if (local == NULL || !VERNE_IS_LOCAL_DRAG (local) || local->drop_emitted)
 		return G_SOURCE_REMOVE;
-	local = g_object_get_data (G_OBJECT (source), "verne-active-drag");
-	if (local == NULL || !VERNE_IS_LOCAL_DRAG (local) || local->drop_emitted) {
-		if (local && VERNE_IS_LOCAL_DRAG (local))
-			local->poll_id = 0;
+	source = local->source;
+	if (source == NULL || !GTK_IS_WIDGET (source)) {
+		local->poll_id = 0;
 		return G_SOURCE_REMOVE;
 	}
 	if (local->handed_over) {
@@ -2472,7 +2491,8 @@ gtk_drag_begin_with_coordinates (GtkWidget *widget, GtkTargetList *targets, GdkD
 		local->selected = GDK_ACTION_COPY;
 	g_object_set_qdata (G_OBJECT (local), source_widget_quark (), widget);
 	g_object_set_data (G_OBJECT (widget), "verne-active-drag", local);
-	local->poll_id = g_timeout_add (16, verne_local_poll, widget);
+	g_object_weak_ref (G_OBJECT (widget), verne_local_source_gone, local);
+	local->poll_id = g_timeout_add (16, verne_local_poll, local);
 	g_signal_emit_by_name (widget, "drag-begin", local);
 	verne_dnd_local_motion (widget);
 	g_warning ("local drag started from %s", G_OBJECT_TYPE_NAME (widget));

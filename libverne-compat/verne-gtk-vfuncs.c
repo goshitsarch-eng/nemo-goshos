@@ -333,14 +333,10 @@ on_pressed (GtkGestureClick *click, gint n_press, gdouble x, gdouble y, gpointer
 		return;
 	}
 	emit_button_press (widget, click, 1, x, y);
-	/* GTK3 list/icon views grab focus on click. Without this, the
-	 * location GtkEntry keeps focus and file-manager accelerators
-	 * (Ctrl+Z undo) never reach the view. */
-	if (gtk_widget_get_focusable (widget))
-		gtk_widget_grab_focus (widget);
 	/* Do not claim on press. Claiming takes a GTK4 pointer grab which
 	 * suppresses GtkEventControllerMotion, so icon/list DnD never starts.
 	 * GtkGestureDrag (grouped below) delivers button-down motion instead.
+	 * Grab focus on release so list-view drag-start motion is not cancelled.
 	 */
 }
 
@@ -375,6 +371,11 @@ on_released (GtkGestureClick *click, gint n_press, gdouble x, gdouble y, gpointe
 	if (!emit_widget_event (widget, "button-release-event", &ev) && v && v->button_release)
 		v->button_release (widget, &ev.button);
 	verne_clear_current_event ();
+	/* After a click (not a drag), take focus off the location/search
+	 * GtkText so Ctrl+Z is file-manager Undo. */
+	if (gtk_widget_get_focusable (widget) &&
+	    g_object_get_data (G_OBJECT (widget), "verne-active-drag") == NULL)
+		gtk_widget_grab_focus (widget);
 }
 
 static void
