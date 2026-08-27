@@ -1712,12 +1712,52 @@ verne_toplevel_dismiss_menus (GtkGestureClick *gesture, gint n_press, gdouble x,
 	gboolean dest_overlay_open;
 
 	(void) n_press; (void) data;
-	/* Never claim the sequence: this is a click-outside dismiss, not a grab. */
-	gtk_gesture_set_state (GTK_GESTURE (gesture), GTK_EVENT_SEQUENCE_DENIED);
 
 	toplevel = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (gesture));
 	if (toplevel == NULL)
 		return;
+	{
+		GtkWidget *wrap = g_object_get_data (G_OBJECT (toplevel), "verne-dest-customize-wrap");
+
+		if (GTK_IS_WIDGET (wrap) && gtk_widget_get_visible (wrap)) {
+			int ww = gtk_widget_get_width (wrap);
+			int wh = gtk_widget_get_height (wrap);
+			int dw = gtk_widget_get_width (toplevel);
+			int dh = gtk_widget_get_height (toplevel);
+			int wx, wy;
+			guint button = gtk_gesture_single_get_current_button (GTK_GESTURE_SINGLE (gesture));
+
+			if (ww < 100)
+				ww = 694;
+			if (wh < 100)
+				wh = 497;
+			if (dw < ww)
+				dw = ww;
+			if (dh < wh)
+				dh = wh;
+			wx = (dw - ww) / 2;
+			wy = (dh - wh) / 2;
+			if (x >= wx && x < wx + ww && y >= wy && y < wy + wh) {
+				gtk_gesture_set_state (GTK_GESTURE (gesture), GTK_EVENT_SEQUENCE_CLAIMED);
+				if (button == 1 && x < wx + 56 && y < wy + 48) {
+					GtkWidget *close_btn = g_object_get_data (G_OBJECT (wrap),
+										  "verne-dest-customize-close");
+
+					if (GTK_IS_BUTTON (close_btn))
+						g_signal_emit_by_name (close_btn, "clicked");
+					g_warning ("verne: dest customize close at %.0f,%.0f wrap=%d,%d %dx%d",
+						   x, y, wx, wy, ww, wh);
+				} else {
+					g_warning ("verne: dest customize click %.0f,%.0f wrap=%d,%d %dx%d",
+						   x, y, wx, wy, ww, wh);
+				}
+				return;
+			}
+		}
+	}
+	/* Never claim the sequence: this is a click-outside dismiss, not a grab. */
+	gtk_gesture_set_state (GTK_GESTURE (gesture), GTK_EVENT_SEQUENCE_DENIED);
+
 	dest_overlay_open = verne_any_dest_overlay_visible ();
 	picked = gtk_widget_pick (toplevel, x, y, GTK_PICK_DEFAULT);
 	if (dest_overlay_open && GTK_IS_WIDGET (toplevel)) {

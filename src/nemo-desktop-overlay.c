@@ -667,6 +667,10 @@ show_overlay (NemoDesktopOverlay *overlay,
                 gtk_widget_set_hexpand (child, TRUE);
                 gtk_widget_set_vexpand (child, TRUE);
                 gtk_overlay_add_overlay (GTK_OVERLAY (dest_ovl), priv->hosted_wrap);
+                g_object_set_data (G_OBJECT (priv->nemo_window),
+                                   "verne-dest-customize-wrap", priv->hosted_wrap);
+                g_object_set_data (G_OBJECT (priv->hosted_wrap),
+                                   "verne-dest-customize-close", close_btn);
                 g_object_unref (child);
             }
             if (GTK_IS_WIDGET (priv->hosted_wrap)) {
