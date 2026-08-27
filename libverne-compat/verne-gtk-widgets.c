@@ -1084,10 +1084,16 @@ verne_dest_menu_button_at (GtkWidget *box, double lx, double ly)
 	gboolean in_separator = FALSE;
 	GString *dump;
 
-	(void) lx;
 	if (box == NULL)
 		return NULL;
 	verne_menu_update_separators (box);
+	{
+		int view_w = GPOINTER_TO_INT (g_object_get_data (G_OBJECT (box), "verne-dest-menu-w"));
+		GtkWidget *parent = gtk_widget_get_parent (box);
+
+		if (GTK_IS_SCROLLED_WINDOW (parent) && view_w > 48 && lx >= view_w - 18)
+			return NULL;
+	}
 	box_w = gtk_widget_get_width (box);
 	if (box_w < 1)
 		box_w = 240;
