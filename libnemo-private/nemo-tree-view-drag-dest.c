@@ -197,6 +197,8 @@ highlight_draw (GtkWidget *widget,
 
         /* FIXMEchpe: is bin window right here??? */
         bin_window = gtk_tree_view_get_bin_window (GTK_TREE_VIEW (widget));
+	if (bin_window == NULL || !GDK_IS_SURFACE (bin_window))
+		return FALSE;
 
         width = gdk_window_get_width (bin_window);
         height = gdk_window_get_height (bin_window);
