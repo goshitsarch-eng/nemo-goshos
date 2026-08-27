@@ -1454,7 +1454,7 @@ static const GtkActionEntry main_entries[] = {
      label, accelerator        N_("Share and transfer files"), NULL,
      tooltip                   N_("Easily transfer files to your contacts and devices from the file manager."),
                                  G_CALLBACK (action_nemo_manual_callback) }, **/
-  /* name, stock id */         { "About Nemo", "xsi-help-about-symbolic",
+  /* name, stock id */         { "About Verne", "xsi-help-about-symbolic",
   /* label, accelerator */       N_("_About"), NULL,
   /* tooltip */                  N_("Display credits for the creators of Verne"),
                                  G_CALLBACK (action_about_nemo_callback) },

@@ -43,6 +43,9 @@
 
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <unistd.h>
+#include <limits.h>
+#include <sys/wait.h>
 
 #include <gdk/gdkx.h>
 #include <gdk/gdkkeysyms.h>
@@ -7234,10 +7237,33 @@ paste_into (NemoView *view,
 					data);
 }
 
+static void open_as_admin (NemoView *view, const gchar *path);
+
+typedef struct {
+	NemoView *view;
+	gchar *path;
+} VerneOpenAsRootData;
+
 static void
 cb_open_as_root_watch (GPid pid, gint status, gpointer user_data)
 {
-    g_spawn_close_pid(pid);
+	VerneOpenAsRootData *data = user_data;
+	gboolean failed = TRUE;
+
+	g_spawn_close_pid (pid);
+	if (WIFEXITED (status) && WEXITSTATUS (status) == 0)
+		failed = FALSE;
+	if (failed && data != NULL && data->view != NULL && NEMO_IS_VIEW (data->view) &&
+	    data->path != NULL) {
+		g_warning ("pkexec Open as Root exited %d, opening admin://", status);
+		open_as_admin (data->view, data->path);
+	}
+	if (data != NULL) {
+		if (data->view != NULL)
+			g_object_remove_weak_pointer (G_OBJECT (data->view), (gpointer *) &data->view);
+		g_free (data->path);
+		g_free (data);
+	}
 }
 
 static void
@@ -7249,24 +7275,66 @@ open_as_admin (NemoView *view, const gchar *path) {
     nemo_window_slot_open_location (view->details->slot, location, 0);
 }
 
+static gchar *
+verne_running_executable (void)
+{
+	char buf[PATH_MAX];
+	ssize_t n;
+
+	n = readlink ("/proc/self/exe", buf, sizeof (buf) - 1);
+	if (n > 0) {
+		buf[n] = '\0';
+		return g_strdup (buf);
+	}
+	return g_strdup ("nemo");
+}
+
 static void
 open_as_root (NemoView *view, const gchar *path)
 {
-    if (eel_check_is_wayland ()) {
-        open_as_admin (view, path);
-        return;
-    }
+	gchar *exe;
+	gchar *folder;
+	gchar *argv[5];
+	GPid pid = 0;
+	GError *error = NULL;
+	VerneOpenAsRootData *data;
 
-    gchar *argv[4];
-    argv[0] = (gchar *)"pkexec";
-    argv[1] = (gchar *)"nemo";
-    argv[2] = g_strdup (path);
-    argv[3] = NULL;
-    GPid pid;
-    g_spawn_async(NULL, argv, NULL, G_SPAWN_SEARCH_PATH | G_SPAWN_DO_NOT_REAP_CHILD,
-                  NULL, NULL, &pid, NULL);
-    g_child_watch_add(pid, (GChildWatchFunc)cb_open_as_root_watch, NULL);
-    g_free (argv[2]);
+	if (path == NULL || path[0] == '\0')
+		return;
+
+	if (eel_check_is_wayland ()) {
+		open_as_admin (view, path);
+		return;
+	}
+
+	exe = verne_running_executable ();
+	folder = g_strdup (path);
+	argv[0] = (gchar *) "pkexec";
+	argv[1] = exe;
+	argv[2] = (gchar *) "--no-desktop";
+	argv[3] = folder;
+	argv[4] = NULL;
+
+	data = g_new0 (VerneOpenAsRootData, 1);
+	data->view = view;
+	data->path = g_strdup (path);
+	g_object_add_weak_pointer (G_OBJECT (view), (gpointer *) &data->view);
+
+	if (!g_spawn_async (NULL, argv, NULL,
+			    G_SPAWN_SEARCH_PATH | G_SPAWN_DO_NOT_REAP_CHILD,
+			    NULL, NULL, &pid, &error)) {
+		g_warning ("pkexec Open as Root failed: %s", error->message);
+		g_clear_error (&error);
+		if (data->view != NULL)
+			g_object_remove_weak_pointer (G_OBJECT (data->view), (gpointer *) &data->view);
+		g_free (data->path);
+		g_free (data);
+		open_as_admin (view, path);
+	} else {
+		g_child_watch_add (pid, (GChildWatchFunc) cb_open_as_root_watch, data);
+	}
+	g_free (exe);
+	g_free (folder);
 }
 
 static void
