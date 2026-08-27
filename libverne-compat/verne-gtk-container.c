@@ -453,6 +453,34 @@ gtk_widget_show_all (GtkWidget *widget)
 			gtk_widget_show_all (box);
 		return;
 	}
+	/* GtkStack owns child visibility. Recursing would unhide the
+	 * "No applications found" page on GtkAppChooserWidget. */
+	if (GTK_IS_STACK (widget)) {
+		GtkWidget *visible;
+
+		gtk_widget_set_visible (widget, TRUE);
+		visible = gtk_stack_get_visible_child (GTK_STACK (widget));
+		if (visible)
+			gtk_widget_show_all (visible);
+		return;
+	}
+	/* Overlay extras (File/dest menus) stay hidden until popped up. */
+	if (GTK_IS_OVERLAY (widget)) {
+		GtkWidget *main_child = gtk_overlay_get_child (GTK_OVERLAY (widget));
+
+		gtk_widget_set_visible (widget, TRUE);
+		if (main_child)
+			gtk_widget_show_all (main_child);
+		for (child = gtk_widget_get_first_child (widget); child;
+		     child = gtk_widget_get_next_sibling (child)) {
+			if (child == main_child)
+				continue;
+			if (!gtk_widget_get_visible (child) || gtk_widget_get_no_show_all (child))
+				continue;
+			gtk_widget_show_all (child);
+		}
+		return;
+	}
 	gtk_widget_set_visible (widget, TRUE);
 	for (child = gtk_widget_get_first_child (widget); child; child = gtk_widget_get_next_sibling (child))
 		gtk_widget_show_all (child);
