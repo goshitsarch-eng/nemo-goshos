@@ -663,20 +663,37 @@ verne_x11_move (GtkWindow *win, int x, int y)
 }
 
 static void
-verne_menu_mapped (GtkWidget *w, gpointer data)
+verne_menu_set_override_redirect (GtkWidget *w)
 {
-	GdkSurface *s;
-	(void) data;
-	s = gtk_native_get_surface (GTK_NATIVE (w));
 #ifdef GDK_WINDOWING_X11
+	GdkSurface *s = gtk_native_get_surface (GTK_NATIVE (w));
 	if (s && GDK_IS_X11_SURFACE (s)) {
 		Display *dpy = gdk_x11_display_get_xdisplay (gdk_surface_get_display (s));
 		Window xid = gdk_x11_surface_get_xid (s);
+		XSetWindowAttributes attrs;
 
-		gdk_x11_surface_set_skip_taskbar_hint (s, TRUE);
-		gdk_x11_surface_set_skip_pager_hint (s, TRUE);
+		attrs.override_redirect = True;
+		XChangeWindowAttributes (dpy, xid, CWOverrideRedirect, &attrs);
 		XRaiseWindow (dpy, xid);
 		XFlush (dpy);
+	}
+#else
+	(void) w;
+#endif
+}
+
+static void
+verne_menu_mapped (GtkWidget *w, gpointer data)
+{
+	(void) data;
+	verne_menu_set_override_redirect (w);
+#ifdef GDK_WINDOWING_X11
+	{
+		GdkSurface *s = gtk_native_get_surface (GTK_NATIVE (w));
+		if (s && GDK_IS_X11_SURFACE (s)) {
+			gdk_x11_surface_set_skip_taskbar_hint (s, TRUE);
+			gdk_x11_surface_set_skip_pager_hint (s, TRUE);
+		}
 	}
 #endif
 	if (g_object_get_data (G_OBJECT (w), "verne-popup-pos") == NULL)
@@ -684,6 +701,7 @@ verne_menu_mapped (GtkWidget *w, gpointer data)
 	verne_x11_move (GTK_WINDOW (w),
 			GPOINTER_TO_INT (g_object_get_data (G_OBJECT (w), "verne-popup-x")),
 			GPOINTER_TO_INT (g_object_get_data (G_OBJECT (w), "verne-popup-y")));
+	verne_menu_set_override_redirect (w);
 }
 
 static gboolean
@@ -837,6 +855,7 @@ gtk_menu_init (GtkMenu *menu)
 	menu->box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
 	gtk_widget_add_css_class (menu->box, "menu");
 	gtk_window_set_child (GTK_WINDOW (menu), menu->box);
+	g_signal_connect (menu, "realize", G_CALLBACK (verne_menu_set_override_redirect), NULL);
 	g_signal_connect (menu, "close-request", G_CALLBACK (verne_menu_close_request), NULL);
 	g_signal_connect (menu, "map", G_CALLBACK (verne_menu_mapped), NULL);
 	g_signal_connect (menu, "notify::is-active", G_CALLBACK (verne_menu_is_active), NULL);
@@ -1110,16 +1129,7 @@ verne_menu_popup_idle (gpointer data)
 	gtk_widget_grab_focus (w);
 	if (p->has_pos)
 		verne_x11_move (GTK_WINDOW (p->menu), p->x, p->y);
-#ifdef GDK_WINDOWING_X11
-	{
-		GdkSurface *s = gtk_native_get_surface (GTK_NATIVE (w));
-		if (s && GDK_IS_X11_SURFACE (s)) {
-			Display *dpy = gdk_x11_display_get_xdisplay (gdk_surface_get_display (s));
-			XRaiseWindow (dpy, gdk_x11_surface_get_xid (s));
-			XFlush (dpy);
-		}
-	}
-#endif
+	verne_menu_set_override_redirect (w);
 	g_timeout_add (350, verne_menu_watch_focus, g_object_ref (w));
 	g_object_unref (p->menu);
 	g_free (p);
