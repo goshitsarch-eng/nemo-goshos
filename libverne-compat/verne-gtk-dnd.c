@@ -532,6 +532,27 @@ unpack_drop_xy (gpointer context, int *x, int *y)
 		*y = xy->y;
 }
 
+static void
+verne_drop_status_safe (GdkDrop *drop, GdkDragAction preferred)
+{
+	GdkDragAction actions;
+
+	if (drop == NULL)
+		return;
+	actions = gdk_drop_get_actions (drop);
+	if (actions == 0)
+		actions = GDK_ACTION_COPY | GDK_ACTION_MOVE | GDK_ACTION_LINK | GDK_ACTION_ASK;
+	if (preferred == 0 || (preferred & actions) == 0) {
+		if (actions & GDK_ACTION_COPY)
+			preferred = GDK_ACTION_COPY;
+		else if (actions & GDK_ACTION_MOVE)
+			preferred = GDK_ACTION_MOVE;
+		else
+			preferred = actions;
+	}
+	gdk_drop_status (drop, actions, preferred);
+}
+
 static GdkDragAction
 on_async_motion (GtkDropTargetAsync *self, GdkDrop *drop, double x, double y, gpointer data)
 {
@@ -548,7 +569,7 @@ on_async_motion (GtkDropTargetAsync *self, GdkDrop *drop, double x, double y, gp
 	if (selected == 0 && handled)
 		selected = GDK_ACTION_COPY;
 	if (selected)
-		gdk_drop_status (drop, gdk_drop_get_actions (drop), selected);
+		verne_drop_status_safe (drop, selected);
 	{
 		GdkDrag *src_drag = gdk_drop_get_drag (drop);
 		if (src_drag) {
@@ -1871,6 +1892,8 @@ gtk_drag_dest_find_target (GtkWidget *widget, GdkDragContext *context, GtkTarget
 			break;
 		}
 	}
+	if (result == NULL)
+		result = gdk_atom_intern ("text/uri-list", FALSE);
 	if (free_formats && formats)
 		gdk_content_formats_unref (formats);
 	return result;
@@ -2128,7 +2151,7 @@ gdk_drag_status (GdkDragContext *context, GdkDragAction action, guint32 time)
 	if (VERNE_IS_LOCAL_DRAG (context))
 		((VerneLocalDrag *) context)->selected = action;
 	else if (GDK_IS_DROP (context))
-		gdk_drop_status (GDK_DROP (context), gdk_drop_get_actions (GDK_DROP (context)), action);
+		verne_drop_status_safe (GDK_DROP (context), action);
 }
 
 GdkDragAction
