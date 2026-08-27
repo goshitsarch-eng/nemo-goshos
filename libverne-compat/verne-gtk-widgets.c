@@ -1365,12 +1365,30 @@ verne_menu_hide_others_later (void)
 	verne_hide_others_idle_id = g_idle_add (verne_menu_hide_others_idle, NULL);
 }
 
+static GtkWidget *verne_overlay_busy_btn;
+
+static gboolean
+verne_overlay_activate_leaf_idle (gpointer data)
+{
+	GtkWidget *btn = data;
+
+	verne_overlay_busy_btn = NULL;
+	if (GTK_IS_WIDGET (btn) &&
+	    g_object_get_data (G_OBJECT (btn), "verne-destroyed") == NULL &&
+	    !GTK_IS_SEPARATOR_MENU_ITEM (btn)) {
+		g_warning ("verne: dest overlay idle-activate %s label=%s",
+			   G_OBJECT_TYPE_NAME (btn), verne_dest_item_label (btn));
+		g_signal_emit_by_name (btn, "clicked");
+	}
+	verne_menu_hide_others_later ();
+	g_object_unref (btn);
+	return G_SOURCE_REMOVE;
+}
+
 static void
 verne_overlay_activate_leaf (GtkWidget *btn)
 {
-	static GtkWidget *busy = NULL;
-
-	if (btn == NULL || btn == busy || GTK_IS_SEPARATOR_MENU_ITEM (btn))
+	if (btn == NULL || btn == verne_overlay_busy_btn || GTK_IS_SEPARATOR_MENU_ITEM (btn))
 		return;
 	if (GTK_IS_MENU_ITEM (btn) && gtk_menu_item_get_submenu (GTK_MENU_ITEM (btn))) {
 		g_warning ("verne: dest overlay activate submenu %s label=%s",
@@ -1381,14 +1399,14 @@ verne_overlay_activate_leaf (GtkWidget *btn)
 	/* Overlay press and the window dismiss-click both see the same
 	 * File-menu row. Activating Connect/About twice SIGSEGV'd the file
 	 * process (tree sidebar UAF while the first dialog mapped). */
-	busy = btn;
+	verne_overlay_busy_btn = btn;
 	g_object_ref (btn);
 	g_warning ("verne: dest overlay activate %s label=%s",
 		   G_OBJECT_TYPE_NAME (btn), verne_dest_item_label (btn));
-	g_signal_emit_by_name (btn, "clicked");
-	verne_menu_hide_others_later ();
-	g_object_unref (btn);
-	busy = NULL;
+	/* Dest's capture click is still on the stack here. Creating a
+	 * document (or starting F2 rename) mutates the dest canvas and
+	 * SIGSEGV'd dest. Run the action after that gesture finishes. */
+	g_idle_add (verne_overlay_activate_leaf_idle, btn);
 }
 
 static GtkWidget *

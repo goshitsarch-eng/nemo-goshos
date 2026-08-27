@@ -390,6 +390,14 @@ verne_map_icon_name (const char *name)
 		return "view-conceal-symbolic";
 	if (g_strcmp0 (name, "nemo-sidebar-show-symbolic") == 0)
 		return "sidebar-show-symbolic";
+	if (g_strcmp0 (name, "favorite-symbolic") == 0)
+		return "starred-symbolic";
+	if (g_strcmp0 (name, "unfavorite-symbolic") == 0)
+		return "non-starred-symbolic";
+	if (g_strcmp0 (name, "ok") == 0)
+		return "emblem-ok-symbolic";
+	if (g_strcmp0 (name, "stop") == 0)
+		return "process-stop-symbolic";
 	if (g_strcmp0 (name, "drive-harddisk-symbolic") == 0) {
 		GdkDisplay *display = gdk_display_get_default ();
 		GtkIconTheme *theme = display ? gtk_icon_theme_get_for_display (display) : NULL;
@@ -424,6 +432,16 @@ verne_gtk_image_set_from_icon_name (GtkImage *image, const char *name, int size)
 	(gtk_image_set_from_icon_name) (image, verne_map_icon_name (name));
 }
 #define gtk_image_set_from_icon_name(image, name, ...) verne_gtk_image_set_from_icon_name (image, name, 0)
+
+static inline void
+verne_gtk_entry_set_icon_from_icon_name (GtkEntry *entry,
+					 GtkEntryIconPosition pos,
+					 const char *name)
+{
+	(gtk_entry_set_icon_from_icon_name) (entry, pos, name ? verne_map_icon_name (name) : NULL);
+}
+#define gtk_entry_set_icon_from_icon_name(entry, pos, name) \
+	verne_gtk_entry_set_icon_from_icon_name ((entry), (pos), (name))
 
 static inline GtkWidget *
 verne_gtk_image_new_from_gicon (GIcon *icon, int size)

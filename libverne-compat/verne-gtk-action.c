@@ -244,7 +244,9 @@ void gtk_action_set_gicon (GtkAction *action, GIcon *icon) {
 	if (action == NULL)
 		return;
 	g_clear_object (&action->gicon);
-	if (icon)
+	/* GTK3 GdkPixbuf implemented GIcon; GTK4's does not. Nemo still
+	 * passes G_ICON (pixbuf) for template / Open With menu icons. */
+	if (icon != NULL && G_IS_ICON (icon))
 		action->gicon = g_object_ref (icon);
 	g_object_notify (G_OBJECT (action), "gicon");
 }
