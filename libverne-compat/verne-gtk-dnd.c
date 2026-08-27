@@ -292,10 +292,7 @@ verne_local_drag_finalize (GObject *object)
 {
 	VerneLocalDrag *self = (VerneLocalDrag *) object;
 
-	if (self->poll_id) {
-		g_source_remove (self->poll_id);
-		self->poll_id = 0;
-	}
+	g_clear_handle_id (&self->poll_id, g_source_remove);
 	if (self->icon_window) {
 		gtk_widget_set_visible (self->icon_window, FALSE);
 		g_timeout_add_seconds (2, verne_idle_destroy_window, g_object_ref (self->icon_window));
@@ -638,6 +635,50 @@ verne_widget_depth (GtkWidget *widget)
 	return depth;
 }
 
+static char *
+verne_widget_path (GtkWidget *widget)
+{
+	GString *s;
+	GtkWidget *w;
+
+	s = g_string_new (NULL);
+	for (w = widget; w; w = gtk_widget_get_parent (w)) {
+		if (s->len)
+			g_string_prepend_c (s, '/');
+		g_string_prepend (s, G_OBJECT_TYPE_NAME (w));
+	}
+	return g_string_free (s, FALSE);
+}
+
+static gboolean
+verne_target_is_file_transfer (GdkAtom target)
+{
+	const char *name = (const char *) target;
+
+	return name != NULL &&
+	       (g_strcmp0 (name, "text/uri-list") == 0 ||
+		g_strcmp0 (name, "x-special/gnome-icon-list") == 0 ||
+		g_strcmp0 (name, "x-special/gnome-copied-files") == 0);
+}
+
+static gboolean
+verne_target_list_find (GtkTargetList *list, GdkAtom target, guint *info)
+{
+	guint i;
+
+	if (!list || !list->entries)
+		return FALSE;
+	for (i = 0; i < list->entries->len; i++) {
+		GtkTargetEntry *e = &g_array_index (list->entries, GtkTargetEntry, i);
+		if (g_strcmp0 (e->target, (const char *) target) == 0) {
+			if (info)
+				*info = e->info;
+			return TRUE;
+		}
+	}
+	return FALSE;
+}
+
 static gboolean
 verne_point_in_widget (GtkWidget *root, GtkWidget *widget, double px, double py,
 		       double *out_x, double *out_y)
@@ -733,6 +774,9 @@ verne_local_find_dest (VerneLocalDrag *local, double *x, double *y)
 
 		picked = gtk_widget_pick (root, px, py,
 					  GTK_PICK_INSENSITIVE | GTK_PICK_NON_TARGETABLE);
+		/* Prefer a dest on the pick ancestor chain. A sibling GtkTreeView
+		 * (list/compact vs places) can also contain the point via a
+		 * transform, and used to steal sidebar drops. */
 		for (w = picked; w; w = gtk_widget_get_parent (w)) {
 			if (g_object_get_qdata (G_OBJECT (w), dest_quark ()) == NULL)
 				continue;
@@ -745,20 +789,22 @@ verne_local_find_dest (VerneLocalDrag *local, double *x, double *y)
 			break;
 		}
 
-		for (d = verne_drop_dests; d; d = d->next) {
-			GtkWidget *dest = d->data;
-			int depth;
+		if (best == NULL) {
+			for (d = verne_drop_dests; d; d = d->next) {
+				GtkWidget *dest = d->data;
+				int depth;
 
-			if (!GTK_IS_WIDGET (dest) || gtk_widget_get_native (dest) != native)
-				continue;
-			if (!verne_point_in_widget (root, dest, px, py, &ox, &oy))
-				continue;
-			depth = verne_widget_depth (dest);
-			if (depth >= best_depth) {
-				best = dest;
-				bx = ox;
-				by = oy;
-				best_depth = depth;
+				if (!GTK_IS_WIDGET (dest) || gtk_widget_get_native (dest) != native)
+					continue;
+				if (!verne_point_in_widget (root, dest, px, py, &ox, &oy))
+					continue;
+				depth = verne_widget_depth (dest);
+				if (depth >= best_depth) {
+					best = dest;
+					bx = ox;
+					by = oy;
+					best_depth = depth;
+				}
 			}
 		}
 
@@ -817,9 +863,12 @@ verne_local_update_dest (VerneLocalDrag *local)
 	dest = verne_local_find_dest (local, &x, &y);
 	if (local->current_dest && local->current_dest != dest)
 		g_signal_emit_by_name (local->current_dest, "drag-leave", local, GDK_CURRENT_TIME);
-	if (dest != local->current_dest)
-		g_warning ("local dest now %s at %.0f,%.0f",
-			   dest ? G_OBJECT_TYPE_NAME (dest) : "none", x, y);
+	if (dest != local->current_dest) {
+		char *path = dest ? verne_widget_path (dest) : g_strdup ("none");
+
+		g_warning ("local dest now %s at %.0f,%.0f", path, x, y);
+		g_free (path);
+	}
 	local->current_dest = dest;
 	local->dest_x = x;
 	local->dest_y = y;
@@ -873,10 +922,7 @@ verne_local_source_gone (gpointer data, GObject *dead)
 
 	(void) dead;
 	local->source = NULL;
-	if (local->poll_id) {
-		g_source_remove (local->poll_id);
-		local->poll_id = 0;
-	}
+	g_clear_handle_id (&local->poll_id, g_source_remove);
 	if (!local->drop_emitted) {
 		local->drop_emitted = TRUE;
 		verne_local_cleanup (local);
@@ -921,10 +967,7 @@ verne_local_cleanup (VerneLocalDrag *local)
 	if (local == NULL)
 		return;
 	source = local->source;
-	if (local->poll_id) {
-		g_source_remove (local->poll_id);
-		local->poll_id = 0;
-	}
+	g_clear_handle_id (&local->poll_id, g_source_remove);
 	if (local->icon_window) {
 		GtkWidget *icon = local->icon_window;
 
@@ -962,8 +1005,11 @@ verne_local_emit_drop (VerneLocalDrag *local)
 	source = local->source;
 	dest = local->current_dest;
 	if (dest) {
+		char *path = verne_widget_path (dest);
+
 		g_warning ("completing local drop on %s at %.0f,%.0f",
-			   G_OBJECT_TYPE_NAME (dest), local->dest_x, local->dest_y);
+			   path, local->dest_x, local->dest_y);
+		g_free (path);
 		pack_drop_xy (local, local->dest_x, local->dest_y);
 		g_signal_emit_by_name (dest, "drag-drop", local,
 				       (int) local->dest_x, (int) local->dest_y, GDK_CURRENT_TIME, &handled);
@@ -1685,8 +1731,11 @@ verne_local_poll (gpointer data)
 	VerneLocalDrag *local = data;
 	GtkWidget *source;
 
-	if (local == NULL || !VERNE_IS_LOCAL_DRAG (local) || local->drop_emitted)
+	if (local == NULL || !VERNE_IS_LOCAL_DRAG (local) || local->drop_emitted) {
+		if (local)
+			local->poll_id = 0;
 		return G_SOURCE_REMOVE;
+	}
 	source = local->source;
 	if (source == NULL || !GTK_IS_WIDGET (source)) {
 		local->poll_id = 0;
@@ -1913,7 +1962,18 @@ gtk_drag_dest_find_target (GtkWidget *widget, GdkDragContext *context, GtkTarget
 	}
 	for (i = 0; i < list->entries->len; i++) {
 		GtkTargetEntry *e = &g_array_index (list->entries, GtkTargetEntry, i);
-		if (formats == NULL || gdk_content_formats_contain_mime_type (formats, e->target)) {
+		gboolean match;
+
+		if (g_strcmp0 (e->target, "GTK_TREE_MODEL_ROW") == 0 &&
+		    formats != NULL &&
+		    !gdk_content_formats_contain_mime_type (formats, e->target))
+			continue;
+		if (formats == NULL)
+			match = verne_target_is_file_transfer ((GdkAtom) e->target) ||
+				g_strcmp0 (e->target, "GTK_TREE_MODEL_ROW") != 0;
+		else
+			match = gdk_content_formats_contain_mime_type (formats, e->target);
+		if (match) {
 			result = (GdkAtom) e->target;
 			break;
 		}
@@ -2097,7 +2157,14 @@ gtk_drag_get_data (GtkWidget *widget, GdkDragContext *context, GdkAtom target, g
 		sel.type = sel.target;
 		sel.format = 8;
 		src_info = info_for_target (local->targets, sel.target);
-		dst_info = info_for_target (gtk_drag_dest_get_target_list (widget), sel.target);
+		dst_info = 0;
+		if (!verne_target_list_find (gtk_drag_dest_get_target_list (widget),
+					     sel.target, &dst_info) &&
+		    verne_target_is_file_transfer (sel.target)) {
+			if (!verne_target_list_find (gtk_drag_dest_get_target_list (widget),
+						     (GdkAtom) "text/uri-list", &dst_info))
+				dst_info = 0;
+		}
 		g_signal_emit_by_name (local->source, "drag-data-get", local, &sel, src_info, time);
 		g_warning ("local drag-data-get target=%s len=%d src_info=%u dst_info=%u xy=%d,%d dest=%s",
 			   sel.target ? (const char *) sel.target : "(null)", sel.length, src_info, dst_info,

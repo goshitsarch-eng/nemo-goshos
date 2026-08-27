@@ -242,6 +242,7 @@ static const GtkTargetEntry nemo_shortcuts_source_targets[] = {
 /* Target types for dropping into the shortcuts list */
 static const GtkTargetEntry nemo_shortcuts_drop_targets [] = {
 	{ (char *)"GTK_TREE_MODEL_ROW", GTK_TARGET_SAME_WIDGET, GTK_TREE_MODEL_ROW },
+	{ (char *)"x-special/gnome-icon-list", 0, TEXT_URI_LIST },
 	{ (char *)"text/uri-list", 0, TEXT_URI_LIST }
 };
 
@@ -2077,9 +2078,15 @@ drag_data_received_callback (GtkWidget *widget,
 	tree_view = GTK_TREE_VIEW (widget);
 
 	if (!sidebar->drag_data_received) {
-		if (gtk_selection_data_get_target (selection_data) != GDK_NONE &&
-		    info == TEXT_URI_LIST) {
+		GdkAtom received_target = gtk_selection_data_get_target (selection_data);
+		const char *target_name = received_target ? (const char *) received_target : "";
+
+		if (received_target != GDK_NONE &&
+		    (info == TEXT_URI_LIST ||
+		     g_strcmp0 (target_name, "text/uri-list") == 0 ||
+		     g_strcmp0 (target_name, "x-special/gnome-icon-list") == 0)) {
 			sidebar->drag_list = build_selection_list ((const gchar *) gtk_selection_data_get_data (selection_data));
+			info = TEXT_URI_LIST;
 		} else {
 			sidebar->drag_list = NULL;
 		}
@@ -2136,7 +2143,12 @@ drag_data_received_callback (GtkWidget *widget,
 			success = TRUE;
 			break;
 		default:
-			g_assert_not_reached ();
+			if (gtk_selection_data_get_length (selection_data) > 0) {
+				bookmarks_drop_uris (sidebar, selection_data, position, section_type);
+				success = TRUE;
+			} else {
+				success = FALSE;
+			}
 			break;
 		}
 	} else {
@@ -2160,7 +2172,11 @@ drag_data_received_callback (GtkWidget *widget,
 					    -1);
 
 			switch (info) {
+			case GTK_TREE_MODEL_ROW:
+				success = FALSE;
+				break;
 			case TEXT_URI_LIST:
+			default:
 				selection_list = build_selection_list ((const gchar *) gtk_selection_data_get_data (selection_data));
 				uris = uri_list_from_selection (selection_list);
 
@@ -2182,12 +2198,6 @@ drag_data_received_callback (GtkWidget *widget,
 				nemo_drag_destroy_selection_list (selection_list);
 				g_list_free (uris);
 				success = TRUE;
-				break;
-			case GTK_TREE_MODEL_ROW:
-				success = FALSE;
-				break;
-			default:
-				g_assert_not_reached ();
 				break;
 			}
 
