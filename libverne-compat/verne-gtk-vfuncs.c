@@ -592,15 +592,26 @@ on_focus_leave (GtkEventControllerFocus *self, gpointer data)
 static gboolean
 on_close_request (GtkWindow *window, gpointer data)
 {
-	VerneVfuncs *v = lookup_vfuncs_type (G_OBJECT_TYPE (window));
+	VerneVfuncs *v;
 	GdkEventAny ev;
 	gboolean handled = FALSE;
 
+	(void) data;
+	if (window == NULL || !GTK_IS_WINDOW (window) ||
+	    g_object_get_data (G_OBJECT (window), "verne-destroyed"))
+		return TRUE;
+
+	v = lookup_vfuncs_type (G_OBJECT_TYPE (window));
 	memset (&ev, 0, sizeof (ev));
 	ev.type = GDK_DELETE;
 	handled = emit_widget_event (GTK_WIDGET (window), "delete-event", &ev);
 	if (!handled && v && v->delete_event)
 		handled = v->delete_event (GTK_WIDGET (window), &ev);
+	/* GTK3 delete-event handlers often gtk_widget_destroy() then return
+	 * FALSE. GTK4 would destroy the window a second time (SIGSEGV). */
+	if (!GTK_IS_WINDOW (window) ||
+	    g_object_get_data (G_OBJECT (window), "verne-destroyed"))
+		return TRUE;
 	return handled;
 }
 

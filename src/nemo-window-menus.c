@@ -305,6 +305,16 @@ action_preferences_callback (GtkAction *action,
 }
 
 static void
+verne_about_weak_notify (gpointer data, GObject *where)
+{
+	GtkWindow *parent = data;
+
+	(void) where;
+	if (GTK_IS_WINDOW (parent))
+		g_object_set_data (G_OBJECT (parent), "verne-about-window", NULL);
+}
+
+static void
 action_about_nemo_callback (GtkAction *action,
 				gpointer user_data)
 {
@@ -344,8 +354,8 @@ action_about_nemo_callback (GtkAction *action,
 	adw_about_window_set_developer_name (ADW_ABOUT_WINDOW (about), "Linux Mint / Cinnamon");
 	gtk_window_set_transient_for (GTK_WINDOW (about), parent);
 	gtk_window_set_hide_on_close (GTK_WINDOW (about), TRUE);
-	g_object_set_data_full (G_OBJECT (parent), "verne-about-window",
-				g_object_ref_sink (about), g_object_unref);
+	g_object_set_data (G_OBJECT (parent), "verne-about-window", about);
+	g_object_weak_ref (G_OBJECT (about), verne_about_weak_notify, parent);
 	gtk_window_present (GTK_WINDOW (about));
 
 	g_free (license_trans);
@@ -419,30 +429,40 @@ action_show_shortcuts_window (GtkAction *action,
     NemoWindow *window;
     static GtkWidget *shortcuts_window;
 
-    window = NEMO_WINDOW (user_data);
+	window = NEMO_WINDOW (user_data);
 
-    if (shortcuts_window == NULL)
-    {
-        GtkBuilder *builder;
+	if (shortcuts_window == NULL)
+	{
+		GtkBuilder *builder;
+		GError *error = NULL;
 
-        builder = gtk_builder_new_from_resource ("/org/nemo/nemo-shortcuts.ui");
-        shortcuts_window = GTK_WIDGET (gtk_builder_get_object (builder, "keyboard_shortcuts"));
+		builder = gtk_builder_new ();
+		if (!gtk_builder_add_from_resource (builder, "/org/nemo/nemo-shortcuts.ui", &error)) {
+			g_warning ("Verne: failed to load keyboard shortcuts UI: %s",
+				   error ? error->message : "unknown");
+			g_clear_error (&error);
+			g_object_unref (builder);
+			return;
+		}
+		shortcuts_window = GTK_WIDGET (gtk_builder_get_object (builder, "keyboard_shortcuts"));
+		if (!GTK_IS_WINDOW (shortcuts_window)) {
+			g_warning ("Verne: keyboard_shortcuts object missing from UI");
+			g_object_unref (builder);
+			shortcuts_window = NULL;
+			return;
+		}
 
-        gtk_window_set_position (GTK_WINDOW (shortcuts_window), GTK_WIN_POS_CENTER);
+		g_signal_connect (shortcuts_window, "destroy",
+				  G_CALLBACK (gtk_widget_destroyed), &shortcuts_window);
 
-        g_signal_connect (shortcuts_window, "destroy",
-                          G_CALLBACK (gtk_widget_destroyed), &shortcuts_window);
+		g_object_unref (builder);
+	}
 
-        g_object_unref (builder);
-    }
+	if (GTK_WINDOW (window) != gtk_window_get_transient_for (GTK_WINDOW (shortcuts_window)))
+		gtk_window_set_transient_for (GTK_WINDOW (shortcuts_window), GTK_WINDOW (window));
 
-    if (GTK_WINDOW (window) != gtk_window_get_transient_for (GTK_WINDOW (shortcuts_window)))
-    {
-        gtk_window_set_transient_for (GTK_WINDOW (shortcuts_window), GTK_WINDOW (window));
-    }
-
-    gtk_widget_show_all (shortcuts_window);
-    gtk_window_present (GTK_WINDOW (shortcuts_window));
+	gtk_widget_show_all (shortcuts_window);
+	gtk_window_present (GTK_WINDOW (shortcuts_window));
 }
 
 static void

@@ -894,7 +894,10 @@ nemo_window_destroy (GtkWidget *object)
 
 	DEBUG ("Destroying window");
 
-	if (window->details != NULL && window->details->present_idle_id != 0) {
+	if (window->details == NULL)
+		return;
+
+	if (window->details->present_idle_id != 0) {
 		g_source_remove (window->details->present_idle_id);
 		window->details->present_idle_id = 0;
 	}
@@ -2009,8 +2012,13 @@ static gboolean
 nemo_window_delete_event (GtkWidget *widget,
 			      GdkEventAny *event)
 {
+	(void) event;
+	if (!NEMO_IS_WINDOW (widget))
+		return TRUE;
 	nemo_window_close (NEMO_WINDOW (widget));
-	return FALSE;
+	/* Already destroyed (or destroying). GTK4 close-request must not
+	 * destroy the window a second time. */
+	return TRUE;
 }
 
 static gboolean

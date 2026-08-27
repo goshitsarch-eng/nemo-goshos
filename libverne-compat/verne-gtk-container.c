@@ -380,6 +380,9 @@ gtk_widget_destroy (GtkWidget *widget)
 
 	if (widget == NULL)
 		return;
+	if (g_object_get_data (G_OBJECT (widget), "verne-destroyed") != NULL &&
+	    GTK_IS_WINDOW (widget))
+		return;
 
 	/* Hold a ref across unparent so dispose matches GTK3 gtk_widget_destroy.
 	 * Windows must run the GTK3 destroy vfunc too (e.g. NemoPropertiesWindow
@@ -389,14 +392,16 @@ gtk_widget_destroy (GtkWidget *widget)
 
 	verne_widget_invoke_destroy (widget);
 
+	if (!GTK_IS_WIDGET (widget)) {
+		g_object_unref (widget);
+		return;
+	}
+
 	parent = gtk_widget_get_parent (widget);
 	if (parent != NULL)
 		gtk_container_remove (parent, widget);
 	else if (GTK_IS_WINDOW (widget)) {
-		/* Hide first so a WM-destroyed native is not torn down twice. */
 		gtk_widget_set_visible (widget, FALSE);
-		if (gtk_widget_get_mapped (widget))
-			gtk_widget_unrealize (widget);
 		gtk_window_destroy (GTK_WINDOW (widget));
 	}
 
