@@ -728,7 +728,7 @@ static gboolean
 verne_menu_close_request (GtkWindow *window, gpointer data)
 {
 	(void) data;
-	gtk_widget_set_visible (GTK_WIDGET (window), FALSE);
+	gtk_menu_popdown (GTK_MENU (window));
 	return TRUE;
 }
 
@@ -1576,6 +1576,21 @@ static void gtk_menu_dispose (GObject *object)
 static void gtk_menu_class_init (GtkMenuClass *c)
 {
 	G_OBJECT_CLASS (c)->dispose = gtk_menu_dispose;
+	/* GTK3 GtkMenuShell::deactivate / selection-done. Needed so tree
+	 * popups free popup_file and nemo_drag_drop_action_ask can quit
+	 * its nested main loop when the Ask menu is dismissed. */
+	if (g_signal_lookup ("deactivate", GTK_TYPE_MENU) == 0)
+		g_signal_new ("deactivate",
+			      G_TYPE_FROM_CLASS (c),
+			      G_SIGNAL_RUN_FIRST,
+			      0, NULL, NULL, NULL,
+			      G_TYPE_NONE, 0);
+	if (g_signal_lookup ("selection-done", GTK_TYPE_MENU) == 0)
+		g_signal_new ("selection-done",
+			      G_TYPE_FROM_CLASS (c),
+			      G_SIGNAL_RUN_FIRST,
+			      0, NULL, NULL, NULL,
+			      G_TYPE_NONE, 0);
 }
 static void
 gtk_menu_init (GtkMenu *menu)
@@ -2151,6 +2166,10 @@ void gtk_menu_popdown (GtkMenu *menu) {
 	} else {
 		menu->attach = NULL;
 	}
+	if (g_signal_lookup ("deactivate", G_OBJECT_TYPE (menu)) != 0)
+		g_signal_emit_by_name (menu, "deactivate");
+	if (g_signal_lookup ("selection-done", G_OBJECT_TYPE (menu)) != 0)
+		g_signal_emit_by_name (menu, "selection-done");
 	g_idle_add (verne_menu_unmap_idle, g_object_ref (menu));
 	g_timeout_add (50, verne_menu_unmap_idle, g_object_ref (menu));
 	g_object_set_data (G_OBJECT (menu), "verne-popping", NULL);

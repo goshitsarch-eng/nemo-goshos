@@ -491,15 +491,20 @@ selection_changed_callback (GtkTreeSelection *selection,
 	if (event) {
 		is_keyboard = (event->type == GDK_KEY_PRESS || event->type == GDK_KEY_RELEASE);
 		gdk_event_free (event);
+	} else {
+		/* GTK4 GtkTreeView selection changes often have no GdkEvent on
+		 * the compat stack. Treat that as a pointer activation so the
+		 * tree sidebar still navigates. */
+		is_keyboard = FALSE;
+	}
 
-		if (is_keyboard) {
-			/* on keyboard event: delay the change */
-			/* TODO: make dependent on keyboard repeat rate as per Markus Bertheau ? */
-			view->details->selection_changed_timer = g_timeout_add (300, (GSourceFunc) selection_changed_timer_callback, view);
-		} else {
-			/* on mouse event: show the change immediately */
-			selection_changed_timer_callback (view);
-		}
+	if (is_keyboard) {
+		/* on keyboard event: delay the change */
+		/* TODO: make dependent on keyboard repeat rate as per Markus Bertheau ? */
+		view->details->selection_changed_timer = g_timeout_add (300, (GSourceFunc) selection_changed_timer_callback, view);
+	} else {
+		/* on mouse event: show the change immediately */
+		selection_changed_timer_callback (view);
 	}
 }
 
