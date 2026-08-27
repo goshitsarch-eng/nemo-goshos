@@ -518,5 +518,23 @@ nemo_location_bar_get_entry (NemoLocationBar *location_bar)
 gboolean
 nemo_location_bar_has_focus (NemoLocationBar *location_bar)
 {
-    return gtk_widget_has_focus (GTK_WIDGET (location_bar->details->entry));
+    GtkWidget *entry;
+    GtkWidget *focus;
+    GtkRoot *root;
+
+    entry = GTK_WIDGET (location_bar->details->entry);
+    if (gtk_widget_has_focus (entry) || gtk_widget_is_focus (entry))
+        return TRUE;
+
+    /* GTK4 focuses GtkText inside GtkEntry, so the entry itself reports
+     * no focus and Ctrl+L would only re-focus instead of toggling back
+     * to the breadcrumb path bar. */
+    root = gtk_widget_get_root (entry);
+    focus = root ? gtk_root_get_focus (root) : NULL;
+    while (focus != NULL) {
+        if (focus == entry)
+            return TRUE;
+        focus = gtk_widget_get_parent (focus);
+    }
+    return FALSE;
 }
