@@ -663,7 +663,44 @@ verne_x11_move (GtkWindow *win, int x, int y)
 }
 
 static void
-verne_menu_set_override_redirect (GtkWidget *w)
+verne_x11_lower_desktop_windows (void)
+{
+#ifdef GDK_WINDOWING_X11
+	GListModel *model = gtk_window_get_toplevels ();
+	guint i, n = g_list_model_get_n_items (model);
+
+	for (i = 0; i < n; i++) {
+		gpointer w = g_list_model_get_item (model, i);
+		GdkSurface *s;
+
+		if (w && GTK_IS_WINDOW (w) && !GTK_IS_MENU (w) &&
+		    gtk_window_get_type_hint (GTK_WINDOW (w)) == GDK_WINDOW_TYPE_HINT_DESKTOP) {
+			s = gtk_native_get_surface (GTK_NATIVE (w));
+			if (s && GDK_IS_X11_SURFACE (s)) {
+				Display *dpy = gdk_x11_display_get_xdisplay (gdk_surface_get_display (s));
+				XLowerWindow (dpy, gdk_x11_surface_get_xid (s));
+			}
+		}
+		if (w)
+			g_object_unref (w);
+	}
+#endif
+}
+
+static gboolean
+verne_menu_keep_above (gpointer data)
+{
+	GtkWidget *w = data;
+
+	if (!GTK_IS_MENU (w) || !gtk_widget_get_visible (w) ||
+	    g_object_get_data (G_OBJECT (w), "verne-dismissed")) {
+		g_object_unref (w);
+		return G_SOURCE_REMOVE;
+	}
+	verne_x11_lower_desktop_windows ();
+	verne_menu_set_override_redirect (w);
+	return G_SOURCE_CONTINUE;
+}
 {
 #ifdef GDK_WINDOWING_X11
 	GdkSurface *s = gtk_native_get_surface (GTK_NATIVE (w));
@@ -1130,6 +1167,11 @@ verne_menu_popup_idle (gpointer data)
 	if (p->has_pos)
 		verne_x11_move (GTK_WINDOW (p->menu), p->x, p->y);
 	verne_menu_set_override_redirect (w);
+	verne_x11_lower_desktop_windows ();
+	if (g_object_get_data (G_OBJECT (w), "verne-keep-above") == NULL) {
+		g_object_set_data (G_OBJECT (w), "verne-keep-above", GINT_TO_POINTER (1));
+		g_timeout_add (50, verne_menu_keep_above, g_object_ref (w));
+	}
 	g_timeout_add (350, verne_menu_watch_focus, g_object_ref (w));
 	g_object_unref (p->menu);
 	g_free (p);
