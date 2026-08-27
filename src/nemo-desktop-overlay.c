@@ -603,8 +603,16 @@ show_overlay (NemoDesktopOverlay *overlay,
         if (GTK_IS_WIDGET (priv->nemo_window))
             dest_ovl = g_object_get_data (G_OBJECT (priv->nemo_window),
                                           "verne-dest-menu-overlay");
+        g_warning ("verne: customize dest_ovl=%s window=%s",
+                   dest_ovl ? G_OBJECT_TYPE_NAME (dest_ovl) : "NULL",
+                   priv->window ? G_OBJECT_TYPE_NAME (priv->window) : "NULL");
         if (GTK_IS_OVERLAY (dest_ovl)) {
             GtkWidget *child = gtk_window_get_child (priv->window);
+
+            if (!GTK_IS_WIDGET (child) && GTK_IS_WIDGET (priv->window))
+                child = gtk_widget_get_first_child (GTK_WIDGET (priv->window));
+            g_warning ("verne: customize child=%s",
+                       child ? G_OBJECT_TYPE_NAME (child) : "NULL");
 
             if (priv->hosted_wrap == NULL && GTK_IS_WIDGET (child)) {
                 GtkWidget *bar;

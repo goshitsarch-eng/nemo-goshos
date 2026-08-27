@@ -910,12 +910,31 @@ verne_menu_popup_dest_overlay (GtkMenu *menu, int root_x, int root_y)
 		return FALSE;
 	}
 	gtk_widget_add_css_class (box, "verne-dest-menu");
+	gtk_widget_add_css_class (box, "background");
 	gtk_widget_set_halign (box, GTK_ALIGN_START);
 	gtk_widget_set_valign (box, GTK_ALIGN_START);
+	gtk_widget_set_hexpand (box, FALSE);
+	gtk_widget_set_vexpand (box, FALSE);
+	{
+		int nat_w = 240, nat_h = 80;
+
+		gtk_widget_measure (box, GTK_ORIENTATION_HORIZONTAL, -1, NULL, &nat_w, NULL, NULL);
+		gtk_widget_measure (box, GTK_ORIENTATION_VERTICAL, nat_w > 0 ? nat_w : 240,
+				    NULL, &nat_h, NULL, NULL);
+		if (nat_w < 240)
+			nat_w = 240;
+		if (nat_h < 80)
+			nat_h = 80;
+		gtk_widget_set_size_request (box, nat_w, nat_h);
+		g_warning ("verne: dest menu overlay at %d,%d size %dx%d", lx, ly, nat_w, nat_h);
+	}
+	gtk_overlay_set_clip_overlay (GTK_OVERLAY (overlay), box, FALSE);
 	gtk_widget_set_margin_start (box, lx);
 	gtk_widget_set_margin_top (box, ly);
 	gtk_widget_set_visible (box, TRUE);
 	gtk_widget_set_can_target (box, TRUE);
+	gtk_widget_queue_allocate (overlay);
+	gtk_widget_queue_draw (GTK_WIDGET (dest));
 	gtk_widget_set_visible (GTK_WIDGET (menu), FALSE);
 	if (g_object_get_data (G_OBJECT (box), "verne-dest-click") == NULL) {
 		GtkGesture *click = gtk_gesture_click_new ();
@@ -930,7 +949,6 @@ verne_menu_popup_dest_overlay (GtkMenu *menu, int root_x, int root_y)
 	}
 	g_object_set_data (G_OBJECT (menu), "verne-dest-overlay", overlay);
 	g_object_unref (box);
-	g_warning ("verne: dest menu overlay at %d,%d", lx, ly);
 	return TRUE;
 }
 
