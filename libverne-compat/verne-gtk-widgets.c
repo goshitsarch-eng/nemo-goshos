@@ -957,6 +957,10 @@ verne_menu_popup_dest_overlay (GtkMenu *menu, int root_x, int root_y)
 		if (nat_h < 80)
 			nat_h = 80;
 		gtk_widget_set_size_request (box, nat_w, nat_h);
+		g_object_set_data (G_OBJECT (box), "verne-dest-menu-x", GINT_TO_POINTER (lx));
+		g_object_set_data (G_OBJECT (box), "verne-dest-menu-y", GINT_TO_POINTER (ly));
+		g_object_set_data (G_OBJECT (box), "verne-dest-menu-w", GINT_TO_POINTER (nat_w));
+		g_object_set_data (G_OBJECT (box), "verne-dest-menu-h", GINT_TO_POINTER (nat_h));
 		g_warning ("verne: dest menu overlay at %d,%d size %dx%d", lx, ly, nat_w, nat_h);
 	}
 	gtk_overlay_set_clip_overlay (GTK_OVERLAY (overlay), box, FALSE);
@@ -1716,6 +1720,52 @@ verne_toplevel_dismiss_menus (GtkGestureClick *gesture, gint n_press, gdouble x,
 		return;
 	dest_overlay_open = verne_any_dest_overlay_visible ();
 	picked = gtk_widget_pick (toplevel, x, y, GTK_PICK_DEFAULT);
+	if (dest_overlay_open && GTK_IS_WIDGET (toplevel)) {
+		GListModel *model = gtk_window_get_toplevels ();
+		guint i, n = g_list_model_get_n_items (model);
+		guint button = gtk_gesture_single_get_current_button (GTK_GESTURE_SINGLE (gesture));
+
+		for (i = 0; i < n; i++) {
+			gpointer w = g_list_model_get_item (model, i);
+			GtkWidget *box;
+			int mx, my, mw, mh;
+
+			if (!verne_menu_is_dest_overlay (w)) {
+				if (w)
+					g_object_unref (w);
+				continue;
+			}
+			box = GTK_MENU (w)->box;
+			mx = GPOINTER_TO_INT (g_object_get_data (G_OBJECT (box), "verne-dest-menu-x"));
+			my = GPOINTER_TO_INT (g_object_get_data (G_OBJECT (box), "verne-dest-menu-y"));
+			mw = GPOINTER_TO_INT (g_object_get_data (G_OBJECT (box), "verne-dest-menu-w"));
+			mh = GPOINTER_TO_INT (g_object_get_data (G_OBJECT (box), "verne-dest-menu-h"));
+			g_warning ("verne: dest dismiss pick=%s click=%.0f,%.0f menu=%d,%d %dx%d",
+				   picked ? G_OBJECT_TYPE_NAME (picked) : "NULL",
+				   x, y, mx, my, mw, mh);
+			if (mw > 0 && mh > 0 &&
+			    x >= mx && x < mx + mw && y >= my && y < my + mh) {
+				GtkWidget *item = gtk_widget_pick (box, x - mx, y - my, GTK_PICK_DEFAULT);
+				GtkWidget *btn = item;
+
+				while (btn != NULL && btn != box &&
+				       !GTK_IS_BUTTON (btn) && !GTK_IS_CHECK_BUTTON (btn))
+					btn = gtk_widget_get_parent (btn);
+				if (button == 1 && btn != NULL && btn != box &&
+				    (GTK_IS_BUTTON (btn) || GTK_IS_CHECK_BUTTON (btn))) {
+					g_signal_emit_by_name (btn, "clicked");
+					g_warning ("verne: dest overlay rect-activate %s",
+						   G_OBJECT_TYPE_NAME (btn));
+				}
+				if (w)
+					g_object_unref (w);
+				verne_menu_hide_others (NULL);
+				return;
+			}
+			if (w)
+				g_object_unref (w);
+		}
+	}
 	if (picked != NULL && GTK_IS_WIDGET (picked)) {
 		GtkWidget *walk;
 		for (walk = picked; walk != NULL; walk = gtk_widget_get_parent (walk)) {
