@@ -2647,7 +2647,8 @@ verne_toplevel_dismiss_menus (GtkGestureClick *gesture, gint n_press, gdouble x,
 				}
 				if (w)
 					g_object_unref (w);
-				verne_menu_hide_others_later ();
+				/* Scrollbar / padding inside the menu rect must not dismiss. */
+				gtk_gesture_set_state (GTK_GESTURE (gesture), GTK_EVENT_SEQUENCE_DENIED);
 				return;
 			}
 			if (w)
