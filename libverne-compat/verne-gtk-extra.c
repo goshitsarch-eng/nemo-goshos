@@ -440,6 +440,75 @@ verne_paint_desktop_wallpaper_cairo (GtkWidget *widget, cairo_t *cr, int width, 
 	cairo_restore (cr);
 }
 
+gboolean
+verne_desktop_canvas_snapshot (GtkWidget *widget, GtkSnapshot *snapshot, int width, int height,
+			       void (*draw) (GtkWidget *, cairo_t *),
+			       void (*emit_draw) (GtkWidget *, cairo_t *))
+{
+	GdkTexture *tex;
+	cairo_surface_t *surface;
+	cairo_t *cr;
+	GBytes *bytes;
+	guint8 *copy;
+	unsigned char *data;
+	int stride;
+	gsize n;
+	gboolean dirty;
+
+	if (widget == NULL || snapshot == NULL || width <= 0 || height <= 0)
+		return FALSE;
+	if (verne_desktop_wallpaper_for_widget (widget) == NULL)
+		return FALSE;
+
+	tex = g_object_get_data (G_OBJECT (widget), "verne-dest-tex");
+	dirty = g_object_get_data (G_OBJECT (widget), "verne-dest-dirty") != NULL;
+	if (tex != NULL && !dirty &&
+	    GPOINTER_TO_INT (g_object_get_data (G_OBJECT (widget), "verne-dest-tex-w")) == width &&
+	    GPOINTER_TO_INT (g_object_get_data (G_OBJECT (widget), "verne-dest-tex-h")) == height) {
+		gtk_snapshot_append_texture (snapshot, tex, &GRAPHENE_RECT_INIT (0, 0, width, height));
+		return TRUE;
+	}
+
+	surface = cairo_image_surface_create (CAIRO_FORMAT_ARGB32, width, height);
+	if (cairo_surface_status (surface) != CAIRO_STATUS_SUCCESS) {
+		cairo_surface_destroy (surface);
+		return FALSE;
+	}
+	cr = cairo_create (surface);
+	verne_paint_desktop_wallpaper_cairo (widget, cr, width, height);
+	if (draw)
+		draw (widget, cr);
+	if (emit_draw)
+		emit_draw (widget, cr);
+	cairo_destroy (cr);
+	cairo_surface_flush (surface);
+	data = cairo_image_surface_get_data (surface);
+	stride = cairo_image_surface_get_stride (surface);
+	n = (gsize) stride * (gsize) height;
+	copy = g_malloc (n);
+	memcpy (copy, data, n);
+	cairo_surface_destroy (surface);
+	bytes = g_bytes_new_take (copy, n);
+	tex = gdk_memory_texture_new (width, height, GDK_MEMORY_B8G8R8A8_PREMULTIPLIED,
+				      bytes, (gsize) stride);
+	g_bytes_unref (bytes);
+	g_object_set_data_full (G_OBJECT (widget), "verne-dest-tex", tex, g_object_unref);
+	g_object_set_data (G_OBJECT (widget), "verne-dest-tex-w", GINT_TO_POINTER (width));
+	g_object_set_data (G_OBJECT (widget), "verne-dest-tex-h", GINT_TO_POINTER (height));
+	g_object_set_data (G_OBJECT (widget), "verne-dest-dirty", NULL);
+	gtk_snapshot_append_texture (snapshot, tex, &GRAPHENE_RECT_INIT (0, 0, width, height));
+	return TRUE;
+}
+
+#undef gtk_widget_queue_draw
+void
+verne_gtk_widget_queue_draw (GtkWidget *widget)
+{
+	if (widget != NULL && verne_desktop_wallpaper_for_widget (widget) != NULL)
+		g_object_set_data (G_OBJECT (widget), "verne-dest-dirty", GINT_TO_POINTER (1));
+	gtk_widget_queue_draw (widget);
+}
+
 GdkWindowTypeHint
 gtk_window_get_type_hint (GtkWindow *window)
 {

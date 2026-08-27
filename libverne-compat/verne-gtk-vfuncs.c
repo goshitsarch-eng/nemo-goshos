@@ -929,12 +929,14 @@ wrapped_snapshot (GtkWidget *widget, GtkSnapshot *snapshot)
 		verne_paint_desktop_wallpaper (widget, snapshot, w, h);
 
 	if (w > 0 && h > 0 && (draw || verne_widget_has_draw_handlers (widget))) {
-		cr = gtk_snapshot_append_cairo (snapshot, &GRAPHENE_RECT_INIT (0, 0, w, h));
-		verne_paint_desktop_wallpaper_cairo (widget, cr, w, h);
-		if (draw)
-			draw (widget, cr);
-		verne_emit_draw_signal (widget, cr);
-		cairo_destroy (cr);
+		if (!verne_desktop_canvas_snapshot (widget, snapshot, w, h, draw, verne_emit_draw_signal)) {
+			cr = gtk_snapshot_append_cairo (snapshot, &GRAPHENE_RECT_INIT (0, 0, w, h));
+			verne_paint_desktop_wallpaper_cairo (widget, cr, w, h);
+			if (draw)
+				draw (widget, cr);
+			verne_emit_draw_signal (widget, cr);
+			cairo_destroy (cr);
+		}
 	}
 
 	if (orig_snapshot)
