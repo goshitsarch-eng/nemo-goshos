@@ -1626,12 +1626,39 @@ verne_menu_leaf_clicked (GtkWidget *item, gpointer data)
 {
 	GtkMenu *menu = data;
 
+	if (!GTK_IS_MENU (menu) || !GTK_IS_WIDGET (item))
+		return;
+	if (g_object_get_data (G_OBJECT (menu), "verne-dismissed"))
+		return;
+
 	/* GTK3 emits GtkMenuItem::activate before the shell deactivates.
 	 * Ask-drop and other menus wait on activate to record the choice;
-	 * popping down first would quit those loops with chosen==0. */
+	 * popping down first would quit those loops with chosen==0.
+	 * Block this clicked handler so GtkButton::activate cannot re-enter. */
+	g_object_ref (menu);
+	g_signal_handlers_block_by_func (item, G_CALLBACK (verne_menu_leaf_clicked), menu);
 	if (g_signal_lookup ("activate", G_OBJECT_TYPE (item)) != 0)
 		g_signal_emit_by_name (item, "activate");
+	g_signal_handlers_unblock_by_func (item, G_CALLBACK (verne_menu_leaf_clicked), menu);
 	gtk_menu_popdown (menu);
+	g_object_unref (menu);
+}
+
+static void
+verne_menu_disconnect_leaf_hooks (GtkMenu *menu)
+{
+	GtkWidget *ch;
+	GtkWidget *box;
+
+	if (menu == NULL)
+		return;
+	box = gtk_menu_get_box (menu);
+	for (ch = box ? gtk_widget_get_first_child (box) : NULL; ch; ch = gtk_widget_get_next_sibling (ch)) {
+		if (!g_object_get_data (G_OBJECT (ch), "verne-leaf-hooked"))
+			continue;
+		g_signal_handlers_disconnect_by_func (ch, G_CALLBACK (verne_menu_leaf_clicked), menu);
+		g_object_set_data (G_OBJECT (ch), "verne-leaf-hooked", NULL);
+	}
 }
 
 static void
@@ -2180,6 +2207,7 @@ void gtk_menu_popdown (GtkMenu *menu) {
 	g_object_set_data (G_OBJECT (menu), "verne-menu-hold", NULL);
 	g_object_set_data (G_OBJECT (menu), "verne-dismissed", GINT_TO_POINTER (1));
 	g_object_set_data (G_OBJECT (menu), "verne-keep-above", NULL);
+	verne_menu_disconnect_leaf_hooks (menu);
 	verne_menu_bump_serial (menu);
 	verne_menu_popdown_dest_popover (menu);
 	verne_menu_unembed (GTK_WIDGET (menu));
