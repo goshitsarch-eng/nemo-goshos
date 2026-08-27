@@ -1417,7 +1417,7 @@ nemo_window_connect_file_menu (NemoWindow *window)
     menuitem = gtk_ui_manager_get_widget (nemo_window_get_ui_manager (window),
                                           NEMO_VIEW_MENUBAR_FILE_PATH);
     if (GTK_IS_MENU_BUTTON (menuitem))
-        submenu = gtk_menu_button_get_popover (GTK_MENU_BUTTON (menuitem));
+        submenu = GTK_WIDGET (gtk_menu_button_get_popover (GTK_MENU_BUTTON (menuitem)));
     else if (GTK_IS_MENU_ITEM (menuitem))
         submenu = gtk_menu_item_get_submenu (GTK_MENU_ITEM (menuitem));
     if (submenu == NULL)

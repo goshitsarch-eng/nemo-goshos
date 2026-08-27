@@ -1771,11 +1771,9 @@ fm_tree_view_dispose (GObject *object)
 
 	g_clear_handle_id (&view->details->actions_changed_idle_id, g_source_remove);
 
-	/* GTK4 GtkTreeView dispose calls set_model(NULL) which unrefs the
-	 * sort model and finalizes FMTreeModel while iterating rows, then
-	 * tree_node_destroy unrefs already-freed NemoFile pointers (SIGSEGV
-	 * on Ctrl+W / last-tab close). Detach first and keep the child model
-	 * alive until the view is done with the tree. */
+	/* Detach before dropping our borrowed child_model pointer. GtkTreeView
+	 * set_model(NULL) unrefs GtkTreeModelSort (the owner). Extra-ref keeps
+	 * FMTreeModel alive until GValues are unset, then we unref icons/files. */
 	if (view->details->tree_widget != NULL &&
 	    GTK_IS_TREE_VIEW (view->details->tree_widget)) {
 		if (view->details->child_model != NULL)

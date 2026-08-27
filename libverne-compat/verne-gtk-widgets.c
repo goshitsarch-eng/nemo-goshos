@@ -870,6 +870,34 @@ verne_dest_item_label (GtkWidget *w)
 	return lab ? lab : "";
 }
 
+/* GTK3 GtkMenu hides leading, trailing, and consecutive separators so
+ * empty placeholders (volume actions, etc.) do not leave extra lines. */
+static void
+verne_menu_update_separators (GtkWidget *box)
+{
+	GtkWidget *ch;
+	GtkWidget *pending_sep = NULL;
+	gboolean seen_item = FALSE;
+
+	if (box == NULL)
+		return;
+	for (ch = gtk_widget_get_first_child (box); ch;
+	     ch = gtk_widget_get_next_sibling (ch)) {
+		if (GTK_IS_SEPARATOR_MENU_ITEM (ch) || GTK_IS_SEPARATOR (ch)) {
+			gtk_widget_set_visible (ch, FALSE);
+			pending_sep = seen_item ? ch : NULL;
+			continue;
+		}
+		if (!gtk_widget_get_visible (ch))
+			continue;
+		if (pending_sep != NULL) {
+			gtk_widget_set_visible (pending_sep, TRUE);
+			pending_sep = NULL;
+		}
+		seen_item = TRUE;
+	}
+}
+
 /* Dest overlay menus often have unallocated or overlay-sized children
  * (pick hits the box; compute_bounds may return the whole menu). Map
  * clicks by stacking gtk_widget_measure heights and skip separators. */
@@ -993,6 +1021,7 @@ verne_menu_popup_dest_overlay (GtkMenu *menu, int root_x, int root_y)
 
 	if (!GTK_IS_WIDGET (box))
 		return FALSE;
+	verne_menu_update_separators (box);
 	g_object_ref (box);
 	if (gtk_window_get_child (GTK_WINDOW (menu)) == box)
 		gtk_window_set_child (GTK_WINDOW (menu), NULL);
@@ -2309,6 +2338,7 @@ verne_menu_popup_idle (gpointer data)
 	verne_ensure_menu_attach (p->menu, NULL);
 	verne_menu_refresh_accels (p->menu);
 	box = gtk_menu_get_box (p->menu);
+	verne_menu_update_separators (box);
 	verne_menu_hook_leaf_items (p->menu);
 	if (box) {
 		gtk_widget_measure (box, GTK_ORIENTATION_HORIZONTAL, -1, NULL, &nat_w, NULL, NULL);
