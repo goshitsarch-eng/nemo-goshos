@@ -681,6 +681,24 @@ gtk_container_child_set (GtkWidget *container, GtkWidget *child, const gchar *fi
 			GtkNotebookPage *page = gtk_notebook_get_page (GTK_NOTEBOOK (container), child);
 			if (page)
 				g_object_set (page, "tab-expand", expand, NULL);
+		} else if (GTK_IS_STACK (container)) {
+			GtkStackPage *page = gtk_stack_get_page (GTK_STACK (container), child);
+			if (g_strcmp0 (name, "name") == 0) {
+				const gchar *value = va_arg (args, const gchar *);
+				if (page && value)
+					gtk_stack_page_set_name (page, value);
+			} else if (g_strcmp0 (name, "title") == 0) {
+				const gchar *value = va_arg (args, const gchar *);
+				if (page && value)
+					gtk_stack_page_set_title (page, value);
+			} else if (g_strcmp0 (name, "icon-name") == 0 ||
+				   g_strcmp0 (name, "icon_name") == 0) {
+				const gchar *value = va_arg (args, const gchar *);
+				if (page && value)
+					gtk_stack_page_set_icon_name (page, verne_map_icon_name (value));
+			} else {
+				(void) va_arg (args, gpointer);
+			}
 		} else {
 			/* skip one value */
 			(void) va_arg (args, gpointer);
