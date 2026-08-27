@@ -1158,10 +1158,26 @@ verne_menu_box_is_dest_overlay (GtkWidget *box)
 }
 
 static gboolean
+verne_menu_overlay_chrome_showing (GtkMenu *menu)
+{
+	GtkWidget *scroll;
+	GtkWidget *parent;
+
+	if (!GTK_IS_MENU (menu))
+		return FALSE;
+	scroll = verne_menu_get_scroll (menu);
+	if (!GTK_IS_WIDGET (scroll) || !gtk_widget_get_visible (scroll))
+		return FALSE;
+	parent = gtk_widget_get_parent (scroll);
+	return GTK_IS_OVERLAY (parent);
+}
+
+static gboolean
 verne_menu_is_dest_overlay (gpointer menu)
 {
 	return GTK_IS_MENU (menu) &&
-	       verne_menu_box_is_dest_overlay (GTK_MENU (menu)->box);
+	       (verne_menu_box_is_dest_overlay (GTK_MENU (menu)->box) ||
+		verne_menu_overlay_chrome_showing (GTK_MENU (menu)));
 }
 
 static gboolean
@@ -1572,10 +1588,25 @@ verne_dest_overlay_wheel_button (GtkGestureClick *gesture, gint n_press,
 	gtk_gesture_set_state (GTK_GESTURE (gesture), GTK_EVENT_SEQUENCE_CLAIMED);
 }
 
+static gboolean
+verne_overlay_escape (GtkEventControllerKey *controller, guint keyval, guint keycode,
+		      GdkModifierType state, gpointer data)
+{
+	(void) controller;
+	(void) keycode;
+	(void) state;
+	(void) data;
+	if (keyval != GDK_KEY_Escape)
+		return FALSE;
+	verne_menu_hide_others (NULL);
+	return TRUE;
+}
+
 static void
 verne_overlay_attach_scroll_controllers (GtkWidget *widget)
 {
 	GtkEventController *scroll;
+	GtkEventController *keys;
 	GtkGesture *wheel;
 
 	if (widget == NULL || g_object_get_data (G_OBJECT (widget), "verne-dest-scroll"))
@@ -1592,6 +1623,11 @@ verne_overlay_attach_scroll_controllers (GtkWidget *widget)
 	g_signal_connect (wheel, "pressed",
 			  G_CALLBACK (verne_dest_overlay_wheel_button), NULL);
 	gtk_widget_add_controller (widget, GTK_EVENT_CONTROLLER (wheel));
+	gtk_widget_set_focusable (widget, TRUE);
+	keys = gtk_event_controller_key_new ();
+	gtk_event_controller_set_propagation_phase (keys, GTK_PHASE_CAPTURE);
+	g_signal_connect (keys, "key-pressed", G_CALLBACK (verne_overlay_escape), NULL);
+	gtk_widget_add_controller (widget, keys);
 	g_object_set_data (G_OBJECT (widget), "verne-dest-scroll", GINT_TO_POINTER (1));
 }
 
@@ -1756,6 +1792,8 @@ verne_menu_popup_dest_overlay (GtkMenu *menu, int root_x, int root_y)
 		gtk_widget_set_can_target (extra, TRUE);
 		gtk_widget_set_visible (box, TRUE);
 		gtk_widget_set_can_target (box, TRUE);
+		gtk_widget_set_focusable (extra, TRUE);
+		gtk_widget_grab_focus (extra);
 		verne_overlay_attach_scroll_controllers (box);
 		if (extra != box) {
 			verne_overlay_attach_scroll_controllers (extra);
@@ -4129,6 +4167,10 @@ verne_accel_key_pressed (GtkEventControllerKey *self, guint keyval, guint keycod
 	if (keyval == GDK_KEY_Escape && (mods & (GDK_CONTROL_MASK | GDK_ALT_MASK | GDK_SUPER_MASK)) == 0) {
 		GtkWidget *w;
 
+		if (verne_any_menu_visible ()) {
+			verne_menu_hide_others (NULL);
+			return TRUE;
+		}
 		for (w = focus; w != NULL; w = gtk_widget_get_parent (w)) {
 			const gchar *tn = G_OBJECT_TYPE_NAME (w);
 
