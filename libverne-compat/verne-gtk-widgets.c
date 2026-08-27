@@ -658,6 +658,7 @@ static void verne_menu_hide_others (GtkMenu *keep);
 static void verne_menu_hide_others_later (void);
 static void verne_menu_item_cancel_submenu_timeout (GtkWidget *item);
 static void verne_widget_clear_active (GtkWidget *w);
+static void verne_menu_set_submenu_item (GtkMenu *menu, GtkWidget *item);
 
 static void
 verne_menu_ensure_css (void)
@@ -1956,6 +1957,7 @@ static void gtk_menu_dispose (GObject *object)
 	GtkMenu *menu = GTK_MENU (object);
 
 	verne_menu_set_attach (menu, NULL);
+	verne_menu_set_submenu_item (menu, NULL);
 	if (menu->box != NULL) {
 		GtkWidget *parent = gtk_widget_get_parent (menu->box);
 
@@ -2170,6 +2172,37 @@ verne_menu_from_item (GtkWidget *item)
 			return GTK_MENU (parent);
 	}
 	return NULL;
+}
+
+static GtkMenu *
+verne_menu_from_item (GtkWidget *item);
+
+static void
+verne_menu_submenu_item_gone (gpointer data, GObject *gone)
+{
+	GtkMenu *menu = data;
+
+	if (!GTK_IS_MENU (menu))
+		return;
+	if (g_object_get_data (G_OBJECT (menu), "verne-submenu-item") == gone)
+		g_object_set_data (G_OBJECT (menu), "verne-submenu-item", NULL);
+}
+
+static void
+verne_menu_set_submenu_item (GtkMenu *menu, GtkWidget *item)
+{
+	GtkWidget *old;
+
+	if (!GTK_IS_MENU (menu))
+		return;
+	old = g_object_get_data (G_OBJECT (menu), "verne-submenu-item");
+	if (old == item)
+		return;
+	if (old != NULL)
+		g_object_weak_unref (G_OBJECT (old), verne_menu_submenu_item_gone, menu);
+	g_object_set_data (G_OBJECT (menu), "verne-submenu-item", item);
+	if (item != NULL)
+		g_object_weak_ref (G_OBJECT (item), verne_menu_submenu_item_gone, menu);
 }
 
 static GtkMenu *
@@ -2673,6 +2706,7 @@ void gtk_menu_popdown (GtkMenu *menu) {
 	}
 	verne_menu_disconnect_leaf_hooks (menu);
 	verne_menu_bump_serial (menu);
+	verne_menu_set_submenu_item (menu, NULL);
 	verne_menu_popdown_dest_popover (menu);
 	verne_menu_unembed (GTK_WIDGET (menu));
 	gtk_widget_set_visible (GTK_WIDGET (menu), FALSE);
@@ -2973,8 +3007,8 @@ verne_menu_popup_submenu (GtkWidget *item, GtkWidget *submenu, gboolean toggle)
 		gtk_menu_attach_to_widget (GTK_MENU (submenu), GTK_WIDGET (root), NULL);
 	else
 		gtk_menu_attach_to_widget (GTK_MENU (submenu), item, NULL);
-	g_object_set_data (G_OBJECT (submenu), "verne-submenu-item", item);
 	g_object_set_data (G_OBJECT (submenu), "verne-dismissed", NULL);
+	verne_menu_set_submenu_item (GTK_MENU (submenu), item);
 	if (verne_hide_others_idle_id != 0) {
 		g_source_remove (verne_hide_others_idle_id);
 		verne_hide_others_idle_id = 0;
