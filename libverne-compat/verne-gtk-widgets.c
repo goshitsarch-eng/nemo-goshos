@@ -732,6 +732,7 @@ verne_menu_ensure_css (void)
 		"}\n"
 		"box.verne-dest-menu button, box.verne-dest-menu checkbutton {\n"
 		"  padding: 6px 12px;\n"
+		"  min-height: 32px;\n"
 		"  color: #1e1e1e;\n"
 		"  background-color: transparent;\n"
 		"}\n"
@@ -935,6 +936,41 @@ verne_menu_unparent_overlay_extra (GtkWidget *widget)
 	g_object_unref (widget);
 }
 
+static int
+verne_menu_force_item_heights (GtkWidget *box, int box_w)
+{
+	GtkWidget *ch;
+	int total = 0;
+
+	if (!GTK_IS_WIDGET (box))
+		return 0;
+	if (box_w < 1)
+		box_w = 240;
+	for (ch = gtk_widget_get_first_child (box); ch;
+	     ch = gtk_widget_get_next_sibling (ch)) {
+		int nat_h = 0;
+
+		if (!gtk_widget_get_visible (ch))
+			continue;
+		gtk_widget_measure (ch, GTK_ORIENTATION_VERTICAL, box_w,
+				    NULL, &nat_h, NULL, NULL);
+		if (GTK_IS_SEPARATOR_MENU_ITEM (ch)) {
+			if (nat_h < 1 || nat_h > 16)
+				nat_h = 9;
+		} else {
+			if (nat_h < 32)
+				nat_h = 32;
+			if (nat_h > 48)
+				nat_h = 38;
+		}
+		gtk_widget_set_valign (ch, GTK_ALIGN_START);
+		gtk_widget_set_vexpand (ch, FALSE);
+		gtk_widget_set_size_request (ch, -1, nat_h);
+		total += nat_h;
+	}
+	return total;
+}
+
 static GtkWidget *
 verne_menu_ensure_scroll (GtkMenu *menu, GtkWidget *box, int view_w, int view_h,
 			  int nat_w, int nat_h)
@@ -996,6 +1032,12 @@ verne_menu_ensure_scroll (GtkMenu *menu, GtkWidget *box, int view_w, int view_h,
 		gtk_fixed_put (GTK_FIXED (clip), box, 0, 0);
 	}
 
+	{
+		int stacked = verne_menu_force_item_heights (box, nat_w);
+
+		if (stacked > nat_h)
+			nat_h = stacked;
+	}
 	gtk_widget_set_size_request (box, nat_w, nat_h);
 	gtk_widget_set_size_request (clip, nat_w, view_h);
 	gtk_widget_set_size_request (extra, view_w, view_h);
@@ -1570,10 +1612,16 @@ verne_menu_popup_dest_overlay (GtkMenu *menu, int root_x, int root_y)
 		GdkSurface *ds;
 
 		gtk_widget_measure (box, GTK_ORIENTATION_HORIZONTAL, -1, NULL, &nat_w, NULL, NULL);
-		gtk_widget_measure (box, GTK_ORIENTATION_VERTICAL, nat_w > 0 ? nat_w : 240,
-				    NULL, &nat_h, NULL, NULL);
 		if (nat_w < 240)
 			nat_w = 240;
+		{
+			int stacked = verne_menu_force_item_heights (box, nat_w);
+
+			gtk_widget_measure (box, GTK_ORIENTATION_VERTICAL, nat_w,
+					    NULL, &nat_h, NULL, NULL);
+			if (stacked > nat_h)
+				nat_h = stacked;
+		}
 		if (nat_h < 80)
 			nat_h = 80;
 		ds = GTK_IS_NATIVE (host) ? gtk_native_get_surface (GTK_NATIVE (host)) : NULL;
