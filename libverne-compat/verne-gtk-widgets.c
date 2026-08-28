@@ -2892,8 +2892,14 @@ verne_menu_leaf_clicked (GtkWidget *item, gpointer data)
 	 * twice, then SIGSEGV'd the file window on close. Ask-drop items have
 	 * no action and still need GtkMenuItem::activate. */
 	if (g_object_get_data (G_OBJECT (item), "verne-action-clicked") == NULL &&
-	    g_signal_lookup ("activate", G_OBJECT_TYPE (item)) != 0)
+	    g_signal_lookup ("activate", G_OBJECT_TYPE (item)) != 0) {
+		/* GtkMenuItem is a GtkButton here, so "activate" is GtkButton's
+		 * keybinding signal. Tell gtk_menu_item_real_activate() that the
+		 * click it would emit has already happened. */
+		g_object_set_data (G_OBJECT (item), "verne-click-done", GINT_TO_POINTER (1));
 		g_signal_emit_by_name (item, "activate");
+		g_object_set_data (G_OBJECT (item), "verne-click-done", NULL);
+	}
 	g_signal_handlers_unblock_by_func (item, G_CALLBACK (verne_menu_leaf_clicked), menu);
 	/* Dismiss the whole cascade. gtk_menu_popdown() only closes this
 	 * menu and its children so a parent File/View menu can stay open
@@ -3899,9 +3905,25 @@ static void gtk_menu_item_dispose (GObject *o) {
 	g_clear_pointer (&item->label, g_free);
 	G_OBJECT_CLASS (gtk_menu_item_parent_class)->dispose (o);
 }
+/* GtkButton's ::activate handler emits ::clicked from a timeout, so a menu
+ * item that reports its activation ended up clicked twice - which flipped a
+ * check item's tick straight back. For a menu item ::activate is a plain
+ * notification; emit the click here, synchronously, and only when the pointer
+ * has not already delivered one. */
+static void
+gtk_menu_item_real_activate (GtkButton *button)
+{
+	if (g_object_get_data (G_OBJECT (button), "verne-click-done"))
+		return;
+	g_object_set_data (G_OBJECT (button), "verne-click-done", GINT_TO_POINTER (1));
+	g_signal_emit_by_name (button, "clicked");
+	g_object_set_data (G_OBJECT (button), "verne-click-done", NULL);
+}
+
 static void gtk_menu_item_class_init (GtkMenuItemClass *c)
 {
 	G_OBJECT_CLASS (c)->dispose = gtk_menu_item_dispose;
+	GTK_BUTTON_CLASS (c)->activate = gtk_menu_item_real_activate;
 	if (g_signal_lookup ("activate", GTK_TYPE_MENU_ITEM) == 0)
 		g_signal_new ("activate",
 			      G_TYPE_FROM_CLASS (c),

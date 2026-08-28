@@ -57,6 +57,7 @@ typedef struct {
 } VerneVfuncs;
 
 static void (*orig_gtk_widget_realize) (GtkWidget *);
+static void (*orig_gtk_widget_map) (GtkWidget *);
 static void (*orig_drawing_area_realize) (GtkWidget *);
 static gboolean event_signals_registered;
 static guint verne_draw_signal_id;
@@ -107,6 +108,7 @@ verne_drawing_area_realize (GtkWidget *widget)
 
 static GHashTable *vfunc_table;
 static GQuark verne_controllers_quark;
+static GQuark verne_has_controllers_quark;
 
 static VerneVfuncs *
 lookup_vfuncs_type (GType type)
@@ -161,7 +163,7 @@ verne_pointer_event_widget (GtkWidget *widget, double x, double y)
 	 * is an ancestor overlay/window (AdwToastOverlay, dest chrome), keep
 	 * this widget so dest/file button-press still runs. */
 	for (w = pick; w != NULL; w = gtk_widget_get_parent (w)) {
-		if (g_object_get_qdata (G_OBJECT (w), verne_controllers_quark) == NULL)
+		if (g_object_get_qdata (G_OBJECT (w), verne_has_controllers_quark) == NULL)
 			continue;
 		if (w == widget || gtk_widget_is_ancestor (widget, w))
 			return widget;
@@ -680,6 +682,169 @@ on_window_pressed (GtkGestureClick *click, gint n_press, gdouble x, gdouble y, g
 		gtk_gesture_set_state (GTK_GESTURE (click), GTK_EVENT_SEQUENCE_CLAIMED);
 }
 
+/* GTK3 code connects to the widget event signals the compat layer
+ * re-registers; without controllers those signals are never emitted, so a
+ * plain GtkButton (a GtkTreeView column header, say) silently loses its
+ * button-press-event handler. */
+static gboolean
+widget_wants_synth_events (GtkWidget *widget)
+{
+	static const char *names[] = {
+		"button-press-event", "button-release-event", "motion-notify-event",
+		"key-press-event", "key-release-event", "scroll-event",
+		"enter-notify-event", "leave-notify-event",
+	};
+	guint i;
+
+	for (i = 0; i < G_N_ELEMENTS (names); i++) {
+		guint id = g_signal_lookup (names[i], G_OBJECT_TYPE (widget));
+
+		if (id != 0 && g_signal_has_handler_pending (G_OBJECT (widget), id, 0, TRUE))
+			return TRUE;
+	}
+	return FALSE;
+}
+
+/* GTK4 has no ::size-allocate signal and its size_allocate vfunc is not
+ * chained up to GtkWidget, so the re-registered signal never fired. Patch the
+ * class vfunc of any type that turns out to have a listener. */
+static GHashTable *size_alloc_hooks;
+static guint size_alloc_signal;
+
+static void
+verne_emit_size_allocate (GtkWidget *widget, int width, int height)
+{
+	GdkRectangle alloc;
+	gboolean handled = FALSE;
+
+	if (size_alloc_signal == 0)
+		size_alloc_signal = g_signal_lookup ("size-allocate", GTK_TYPE_WIDGET);
+	if (size_alloc_signal == 0 ||
+	    !g_signal_has_handler_pending (G_OBJECT (widget), size_alloc_signal, 0, TRUE))
+		return;
+	alloc.x = 0;
+	alloc.y = 0;
+	alloc.width = width;
+	alloc.height = height;
+	g_signal_emit (widget, size_alloc_signal, 0, &alloc, &handled);
+}
+
+static void
+verne_hooked_size_allocate (GtkWidget *widget, int width, int height, int baseline)
+{
+	/* A subclass that chains up lands back here through its parent's slot,
+	 * so remember which class this call came through and resume the search
+	 * above it - otherwise the walk finds the subclass again and recurses
+	 * until the stack runs out. GTK is single threaded. */
+	static GtkWidget *active_widget;
+	static GType active_type;
+	GtkWidget *prev_widget = active_widget;
+	GType prev_type = active_type;
+	void (*orig) (GtkWidget *, int, int, int) = NULL;
+	GType type;
+
+	type = (prev_widget == widget && prev_type != 0) ? g_type_parent (prev_type)
+							 : G_OBJECT_TYPE (widget);
+	for (; type != 0; type = g_type_parent (type)) {
+		gpointer found = NULL;
+
+		if (g_hash_table_lookup_extended (size_alloc_hooks, GSIZE_TO_POINTER (type),
+						  NULL, &found)) {
+			orig = found;
+			break;
+		}
+	}
+	active_widget = widget;
+	active_type = type;
+	if (orig != NULL)
+		orig (widget, width, height, baseline);
+	active_widget = prev_widget;
+	active_type = prev_type;
+	if (prev_widget != widget)
+		verne_emit_size_allocate (widget, width, height);
+}
+
+static void wrapped_size_allocate (GtkWidget *widget, int width, int height, int baseline);
+
+/* A widget with a layout manager never reaches its own size_allocate vfunc -
+ * GTK4 hands the allocation to the manager instead - so GtkBox and friends
+ * need the hook one level down. */
+static GHashTable *layout_alloc_hooks;
+
+static void
+verne_hooked_layout_allocate (GtkLayoutManager *manager, GtkWidget *widget,
+			      int width, int height, int baseline)
+{
+	static GtkLayoutManager *active_manager;
+	static GType active_type;
+	GtkLayoutManager *prev_manager = active_manager;
+	GType prev_type = active_type;
+	void (*orig) (GtkLayoutManager *, GtkWidget *, int, int, int) = NULL;
+	GType type;
+
+	type = (prev_manager == manager && prev_type != 0) ? g_type_parent (prev_type)
+							   : G_OBJECT_TYPE (manager);
+	for (; type != 0; type = g_type_parent (type)) {
+		gpointer found = NULL;
+
+		if (g_hash_table_lookup_extended (layout_alloc_hooks, GSIZE_TO_POINTER (type),
+						  NULL, &found)) {
+			orig = found;
+			break;
+		}
+	}
+	active_manager = manager;
+	active_type = type;
+	if (orig != NULL)
+		orig (manager, widget, width, height, baseline);
+	active_manager = prev_manager;
+	active_type = prev_type;
+	if (prev_manager != manager)
+		verne_emit_size_allocate (widget, width, height);
+}
+
+static void
+ensure_layout_allocate_hook (GtkLayoutManager *manager)
+{
+	GtkLayoutManagerClass *klass = GTK_LAYOUT_MANAGER_GET_CLASS (manager);
+
+	if (klass->allocate == verne_hooked_layout_allocate)
+		return;
+	if (layout_alloc_hooks == NULL)
+		layout_alloc_hooks = g_hash_table_new (NULL, NULL);
+	g_hash_table_insert (layout_alloc_hooks, GSIZE_TO_POINTER (G_OBJECT_TYPE (manager)),
+			     klass->allocate);
+	klass->allocate = verne_hooked_layout_allocate;
+}
+
+static void
+ensure_size_allocate_hook (GtkWidget *widget)
+{
+	GtkWidgetClass *klass = GTK_WIDGET_GET_CLASS (widget);
+	GtkLayoutManager *manager;
+
+	if (size_alloc_signal == 0)
+		size_alloc_signal = g_signal_lookup ("size-allocate", GTK_TYPE_WIDGET);
+	if (size_alloc_signal == 0 ||
+	    !g_signal_has_handler_pending (G_OBJECT (widget), size_alloc_signal, 0, TRUE))
+		return;
+	manager = gtk_widget_get_layout_manager (widget);
+	if (manager != NULL) {
+		ensure_layout_allocate_hook (manager);
+		return;
+	}
+	/* Already routed through one of ours - inherited from a hooked parent
+	 * class, or a nemo class whose GTK3 vfunc we wrap. */
+	if (klass->size_allocate == verne_hooked_size_allocate ||
+	    klass->size_allocate == wrapped_size_allocate)
+		return;
+	if (size_alloc_hooks == NULL)
+		size_alloc_hooks = g_hash_table_new (NULL, NULL);
+	g_hash_table_insert (size_alloc_hooks, GSIZE_TO_POINTER (G_OBJECT_TYPE (widget)),
+			     klass->size_allocate);
+	klass->size_allocate = verne_hooked_size_allocate;
+}
+
 static void
 ensure_controllers (GtkWidget *widget)
 {
@@ -690,6 +855,8 @@ ensure_controllers (GtkWidget *widget)
 	if (g_object_get_qdata (G_OBJECT (widget), verne_controllers_quark))
 		return;
 	g_object_set_qdata (G_OBJECT (widget), verne_controllers_quark, GINT_TO_POINTER (1));
+
+	ensure_size_allocate_hook (widget);
 
 	if (GTK_IS_WINDOW (widget)) {
 		g_signal_connect (widget, "close-request", G_CALLBACK (on_close_request), NULL);
@@ -722,13 +889,15 @@ ensure_controllers (GtkWidget *widget)
 	 * list/compact views, the places sidebar, and the tree sidebar
 	 * connect to button-press-event / motion-notify-event for DnD,
 	 * rubberband, and single-click navigation. */
-	if (v == NULL && !GTK_IS_TREE_VIEW (widget))
+	if (v == NULL && !GTK_IS_TREE_VIEW (widget) && !widget_wants_synth_events (widget))
 		return;
 
 	if (GTK_IS_TREE_VIEW (widget)) {
 		gtk_widget_set_focusable (widget, TRUE);
 		gtk_widget_set_can_focus (widget, TRUE);
 	}
+
+	g_object_set_qdata (G_OBJECT (widget), verne_has_controllers_quark, GINT_TO_POINTER (1));
 
 	click = gtk_gesture_click_new ();
 	gtk_gesture_single_set_button (GTK_GESTURE_SINGLE (click), 0);
@@ -1063,6 +1232,7 @@ wrapped_size_allocate (GtkWidget *widget, int width, int height, int baseline)
 		}
 	}
 	v->in_size_allocate = FALSE;
+	verne_emit_size_allocate (widget, width, height);
 }
 
 static void
@@ -1459,6 +1629,16 @@ gtk_widget_event (GtkWidget *widget, GdkEvent *event)
 }
 
 static void
+global_widget_map (GtkWidget *widget)
+{
+	/* A GTK3 handler is usually connected between packing a widget (which
+	 * realizes it when the parent is already realized) and showing it. */
+	ensure_size_allocate_hook (widget);
+	if (orig_gtk_widget_map)
+		orig_gtk_widget_map (widget);
+}
+
+static void
 global_widget_realize (GtkWidget *widget)
 {
 	ensure_controllers (widget);
@@ -1558,6 +1738,8 @@ register_event_signals (void)
 	}
 	orig_gtk_widget_realize = wclass->realize;
 	wclass->realize = global_widget_realize;
+	orig_gtk_widget_map = wclass->map;
+	wclass->map = global_widget_map;
 	verne_draw_signal_id = g_signal_lookup ("draw", GTK_TYPE_WIDGET);
 	{
 		GtkWidgetClass *da = GTK_WIDGET_CLASS (g_type_class_ref (GTK_TYPE_DRAWING_AREA));
@@ -1682,6 +1864,7 @@ verne_compat_init (void)
 	inited = TRUE;
 	verne_install_crash_handler ();
 	verne_controllers_quark = g_quark_from_static_string ("verne-controllers");
+	verne_has_controllers_quark = g_quark_from_static_string ("verne-has-controllers");
 	if (vfunc_table == NULL)
 		vfunc_table = g_hash_table_new (g_direct_hash, g_direct_equal);
 	register_event_signals ();
