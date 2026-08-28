@@ -202,6 +202,63 @@ gtk_bin_get_child (GtkBin *bin)
 		return gtk_window_get_child (GTK_WINDOW (obj));
 	if (G_TYPE_CHECK_INSTANCE_TYPE (obj, GTK_TYPE_BIN))
 		return ((GtkBin *) obj)->child;
+	/* Everything else that was a GtkBin in GTK3 has its own get_child() in
+	 * GTK4. Returning NULL for a GtkListBoxRow crashed the Plugins and
+	 * Actions preference pages the moment a row was clicked. */
+	/* Each getter can legitimately answer NULL for a widget whose child was
+	 * parented directly; fall through to the first child in that case. */
+	if (GTK_IS_LIST_BOX_ROW (obj)) {
+		GtkWidget *c = gtk_list_box_row_get_child (GTK_LIST_BOX_ROW (obj));
+		if (c != NULL)
+			return c;
+	}
+	if (GTK_IS_FLOW_BOX_CHILD (obj)) {
+		GtkWidget *c = gtk_flow_box_child_get_child (GTK_FLOW_BOX_CHILD (obj));
+		if (c != NULL)
+			return c;
+	}
+	if (GTK_IS_FRAME (obj)) {
+		GtkWidget *c = gtk_frame_get_child (GTK_FRAME (obj));
+		if (c != NULL)
+			return c;
+	}
+	if (GTK_IS_EXPANDER (obj)) {
+		GtkWidget *c = gtk_expander_get_child (GTK_EXPANDER (obj));
+		if (c != NULL)
+			return c;
+	}
+	if (GTK_IS_VIEWPORT (obj)) {
+		GtkWidget *c = gtk_viewport_get_child (GTK_VIEWPORT (obj));
+		if (c != NULL)
+			return c;
+	}
+	if (GTK_IS_REVEALER (obj)) {
+		GtkWidget *c = gtk_revealer_get_child (GTK_REVEALER (obj));
+		if (c != NULL)
+			return c;
+	}
+	if (GTK_IS_POPOVER (obj)) {
+		GtkWidget *c = gtk_popover_get_child (GTK_POPOVER (obj));
+		if (c != NULL)
+			return c;
+	}
+	if (GTK_IS_SEARCH_BAR (obj)) {
+		GtkWidget *c = gtk_search_bar_get_child (GTK_SEARCH_BAR (obj));
+		if (c != NULL)
+			return c;
+	}
+	if (GTK_IS_ASPECT_FRAME (obj)) {
+		GtkWidget *c = gtk_aspect_frame_get_child (GTK_ASPECT_FRAME (obj));
+		if (c != NULL)
+			return c;
+	}
+	if (GTK_IS_BUTTON (obj)) {
+		GtkWidget *c = gtk_button_get_child (GTK_BUTTON (obj));
+		if (c != NULL)
+			return c;
+	}
+	if (GTK_IS_WIDGET (obj))
+		return gtk_widget_get_first_child (GTK_WIDGET (obj));
 	return NULL;
 }
 

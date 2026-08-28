@@ -83,7 +83,9 @@ on_row_activated (GtkWidget *box, GtkWidget *row, GtkWidget *widget)
 {
     GtkWidget *button = get_button_for_row (row);
 
-    gtk_button_clicked (GTK_BUTTON (button));
+    /* button is the row's GtkCheckButton; the compat gtk_button_clicked()
+     * toggles rather than emitting ::clicked for those. */
+    gtk_button_clicked (button);
 }
 
 static void

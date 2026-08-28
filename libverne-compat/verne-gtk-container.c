@@ -103,6 +103,11 @@ gtk_container_add (gpointer container_ptr, GtkWidget *child)
 		gtk_info_bar_add_child (GTK_INFO_BAR (container), child);
 	} else if (GTK_IS_FLOW_BOX (container)) {
 		gtk_flow_box_append (GTK_FLOW_BOX (container), child);
+	} else if (GTK_IS_LIST_BOX_ROW (container)) {
+		/* Without this the row's content ends up parented but not set as
+		 * the row's child, so gtk_list_box_row_get_child() answers NULL
+		 * and anything looking up a widget inside the row falls over. */
+		gtk_list_box_row_set_child (GTK_LIST_BOX_ROW (container), child);
 	} else if (GTK_IS_LIST_BOX (container)) {
 		gtk_list_box_append (GTK_LIST_BOX (container), child);
 	} else if (GTK_IS_STACK (container)) {
@@ -222,6 +227,10 @@ gtk_container_get_children (GtkWidget *container)
 {
 	GList *list = NULL;
 	GtkWidget *child;
+
+	if (!GTK_IS_WIDGET (container))
+		return NULL;
+
 	for (child = gtk_widget_get_last_child (container); child; child = gtk_widget_get_prev_sibling (child))
 		list = g_list_prepend (list, child);
 	return list;

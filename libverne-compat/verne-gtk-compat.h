@@ -1704,7 +1704,27 @@ typedef guint GtkJunctionSides;
 #define gtk_style_context_add_provider_for_screen(s, p, pri) gtk_style_context_add_provider_for_display (gdk_display_get_default (), p, pri)
 #define gtk_style_context_remove_provider_for_screen(s, p) gtk_style_context_remove_provider_for_display (gdk_display_get_default (), p)
 #define gtk_settings_get_for_screen(s) gtk_settings_get_default ()
-#define gtk_button_clicked(b) g_signal_emit_by_name (b, "clicked")
+/* GtkCheckButton is not a GtkButton in GTK4 and has no ::clicked, so
+ * "activate this row's control" has to mean toggling for those. */
+static inline void
+verne_button_clicked (gpointer button)
+{
+	if (button == NULL)
+		return;
+	if (GTK_IS_CHECK_BUTTON (button)) {
+		gtk_check_button_set_active (GTK_CHECK_BUTTON (button),
+					     !gtk_check_button_get_active (GTK_CHECK_BUTTON (button)));
+		return;
+	}
+	if (GTK_IS_TOGGLE_BUTTON (button)) {
+		gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (button),
+					      !gtk_toggle_button_get_active (GTK_TOGGLE_BUTTON (button)));
+		return;
+	}
+	if (GTK_IS_BUTTON (button))
+		g_signal_emit_by_name (button, "clicked");
+}
+#define gtk_button_clicked(b) verne_button_clicked (b)
 #define gtk_image_menu_item_new_with_mnemonic(l) gtk_menu_item_new_with_mnemonic (l)
 #define gtk_check_menu_item_new_with_label(l) gtk_check_menu_item_new_with_mnemonic (l)
 #define gtk_icon_theme_append_search_path(t, p) gtk_icon_theme_add_search_path (t, p)
