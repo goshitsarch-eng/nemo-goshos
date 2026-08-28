@@ -381,6 +381,23 @@ gtk_toggle_action_set_active (GtkToggleAction *action, gboolean is_active)
 	if (!action || action->active == is_active)
 		return;
 	action->active = is_active;
+	/* Only one member of a radio group is ever active. Callers that set a
+	 * radio action directly - the desktop view's menu update, say - used to
+	 * leave every previously chosen member ticked, and
+	 * gtk_radio_action_get_current_value() then read back the stale one. */
+	if (is_active && GTK_IS_RADIO_ACTION (action)) {
+		GSList *l;
+
+		for (l = GTK_RADIO_ACTION (action)->group; l != NULL; l = l->next) {
+			GtkToggleAction *other = l->data;
+
+			if (other == action || !other->active)
+				continue;
+			other->active = FALSE;
+			g_object_notify (G_OBJECT (other), "active");
+			g_signal_emit (other, toggle_signals[TOGGLE_TOGGLED], 0);
+		}
+	}
 	g_object_notify (G_OBJECT (action), "active");
 	g_signal_emit (action, toggle_signals[TOGGLE_TOGGLED], 0);
 }
