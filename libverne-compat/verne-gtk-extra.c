@@ -448,58 +448,24 @@ verne_desktop_canvas_snapshot (GtkWidget *widget, GtkSnapshot *snapshot, int wid
 			       VerneDrawEvent draw,
 			       void (*emit_draw) (GtkWidget *, cairo_t *))
 {
-	GdkTexture *tex;
-	cairo_surface_t *surface;
 	cairo_t *cr;
-	GBytes *bytes;
-	guint8 *copy;
-	unsigned char *data;
-	int stride;
-	gsize n;
-	gboolean dirty;
 
 	if (widget == NULL || snapshot == NULL || width <= 0 || height <= 0)
 		return FALSE;
 	if (verne_desktop_wallpaper_for_widget (widget) == NULL)
 		return FALSE;
 
-	tex = g_object_get_data (G_OBJECT (widget), "verne-dest-tex");
-	dirty = g_object_get_data (G_OBJECT (widget), "verne-dest-dirty") != NULL;
-	if (tex != NULL && !dirty &&
-	    GPOINTER_TO_INT (g_object_get_data (G_OBJECT (widget), "verne-dest-tex-w")) == width &&
-	    GPOINTER_TO_INT (g_object_get_data (G_OBJECT (widget), "verne-dest-tex-h")) == height) {
-		gtk_snapshot_append_texture (snapshot, tex, &GRAPHENE_RECT_INIT (0, 0, width, height));
-		return TRUE;
-	}
-
-	surface = cairo_image_surface_create (CAIRO_FORMAT_ARGB32, width, height);
-	if (cairo_surface_status (surface) != CAIRO_STATUS_SUCCESS) {
-		cairo_surface_destroy (surface);
-		return FALSE;
-	}
-	cr = cairo_create (surface);
-	verne_paint_desktop_wallpaper_cairo (widget, cr, width, height);
+	/* Wallpaper is a stable GdkTexture. Icon labels must be painted every
+	 * snapshot: a combined dest-tex cache kept F2/rename text stale even
+	 * after dest-dirty, because GTK4 can snapshot dest without going
+	 * through queue_draw. */
+	verne_paint_desktop_wallpaper (widget, snapshot, width, height);
+	cr = gtk_snapshot_append_cairo (snapshot, &GRAPHENE_RECT_INIT (0, 0, width, height));
 	if (draw)
 		draw (widget, cr);
 	if (emit_draw)
 		emit_draw (widget, cr);
 	cairo_destroy (cr);
-	cairo_surface_flush (surface);
-	data = cairo_image_surface_get_data (surface);
-	stride = cairo_image_surface_get_stride (surface);
-	n = (gsize) stride * (gsize) height;
-	copy = g_malloc (n);
-	memcpy (copy, data, n);
-	cairo_surface_destroy (surface);
-	bytes = g_bytes_new_take (copy, n);
-	tex = gdk_memory_texture_new (width, height, GDK_MEMORY_B8G8R8A8_PREMULTIPLIED,
-				      bytes, (gsize) stride);
-	g_bytes_unref (bytes);
-	g_object_set_data_full (G_OBJECT (widget), "verne-dest-tex", tex, g_object_unref);
-	g_object_set_data (G_OBJECT (widget), "verne-dest-tex-w", GINT_TO_POINTER (width));
-	g_object_set_data (G_OBJECT (widget), "verne-dest-tex-h", GINT_TO_POINTER (height));
-	g_object_set_data (G_OBJECT (widget), "verne-dest-dirty", NULL);
-	gtk_snapshot_append_texture (snapshot, tex, &GRAPHENE_RECT_INIT (0, 0, width, height));
 	return TRUE;
 }
 
@@ -1437,13 +1403,14 @@ gdk_screen_get_monitor_plug_name (GdkScreen *screen, int monitor)
 	return g_strdup ("default");
 }
 
-struct _GdkKeymap {
+struct _VerneKeymap {
 	GObject parent_instance;
 };
 
-typedef struct _GdkKeymapClass {
+typedef struct _VerneKeymap VerneKeymap;
+typedef struct _VerneKeymapClass {
 	GObjectClass parent_class;
-} GdkKeymapClass;
+} VerneKeymapClass;
 
 enum {
 	VERNE_KEYMAP_DIRECTION_CHANGED,
@@ -1452,10 +1419,16 @@ enum {
 
 static guint verne_keymap_signals[VERNE_KEYMAP_LAST_SIGNAL];
 
-G_DEFINE_TYPE (GdkKeymap, gdk_keymap, G_TYPE_OBJECT)
+G_DEFINE_TYPE (VerneKeymap, verne_keymap, G_TYPE_OBJECT)
+
+GType
+gdk_keymap_get_type (void)
+{
+	return verne_keymap_get_type ();
+}
 
 static void
-gdk_keymap_class_init (GdkKeymapClass *klass)
+verne_keymap_class_init (VerneKeymapClass *klass)
 {
 	verne_keymap_signals[VERNE_KEYMAP_DIRECTION_CHANGED] =
 		g_signal_new ("direction-changed",
@@ -1466,7 +1439,7 @@ gdk_keymap_class_init (GdkKeymapClass *klass)
 }
 
 static void
-gdk_keymap_init (GdkKeymap *keymap)
+verne_keymap_init (VerneKeymap *keymap)
 {
 	(void) keymap;
 }

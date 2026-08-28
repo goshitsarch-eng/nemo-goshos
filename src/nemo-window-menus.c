@@ -2278,9 +2278,20 @@ nemo_window_initialize_menus (NemoWindow *window)
 			g_action_map_add_action (G_ACTION_MAP (window), G_ACTION (act));
 			g_object_unref (act);
 			app = gtk_window_get_application (GTK_WINDOW (window));
-			if (GTK_IS_APPLICATION (app))
+			if (GTK_IS_APPLICATION (app)) {
 				gtk_application_set_accels_for_action (app, "win.show-shortcuts",
 								       (const char *[]) { "<Control>F1", NULL });
+				if (g_action_map_lookup_action (G_ACTION_MAP (app), "show-shortcuts") == NULL) {
+					GSimpleAction *app_act = g_simple_action_new ("show-shortcuts", NULL);
+
+					g_signal_connect (app_act, "activate",
+							  G_CALLBACK (window_shortcuts_gaction), window);
+					g_action_map_add_action (G_ACTION_MAP (app), G_ACTION (app_act));
+					g_object_unref (app_act);
+					gtk_application_set_accels_for_action (app, "app.show-shortcuts",
+									       (const char *[]) { "<Control>F1", NULL });
+				}
+			}
 		}
 		g_warning ("Verne: installed Ctrl+F1 shortcut handlers on %s",
 			   G_OBJECT_TYPE_NAME (window));
