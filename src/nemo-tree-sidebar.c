@@ -98,6 +98,11 @@ struct FMTreeViewDetails {
 	
 	guint selection_changed_timer;
 
+	/* GTK4 selection changes rarely carry a GdkEvent, so remember what the
+	 * user last did to the tree and how long ago. */
+	gint64 last_input_time;
+	gboolean last_input_keyboard;
+
     NemoActionManager *action_manager;
     gulong actions_changed_id;
     guint actions_changed_idle_id;
@@ -529,10 +534,17 @@ selection_changed_callback (GtkTreeSelection *selection,
 		is_keyboard = (event->type == GDK_KEY_PRESS || event->type == GDK_KEY_RELEASE);
 		gdk_event_free (event);
 	} else {
-		/* GTK4 GtkTreeView selection changes often have no GdkEvent on
-		 * the compat stack. Treat that as a pointer activation so the
-		 * tree sidebar still navigates. */
-		is_keyboard = FALSE;
+		/* GTK4 selection changes usually reach us with nothing on the
+		 * compat event stack, so fall back to what the user last did to
+		 * the tree. Only a recent click loads at once; keyboard moves
+		 * keep their debounce, and a selection the model moved on its
+		 * own - hidden files being filtered out, a volume unmounting -
+		 * is debounced too so a burst collapses into one load. */
+		gint64 since = g_get_monotonic_time () - view->details->last_input_time;
+
+		is_keyboard = view->details->last_input_time == 0 ||
+			      view->details->last_input_keyboard ||
+			      since > 500 * G_TIME_SPAN_MILLISECOND;
 	}
 
 	if (is_keyboard) {
@@ -856,6 +868,9 @@ button_pressed_callback (GtkTreeView *treeview,
 {
     g_return_val_if_fail (FM_IS_TREE_VIEW (view), GDK_EVENT_PROPAGATE);
 
+    view->details->last_input_keyboard = FALSE;
+    view->details->last_input_time = g_get_monotonic_time ();
+
     if (event->button == 3) {
         popup_menu (view, event);
         return GDK_EVENT_STOP;
@@ -902,6 +917,9 @@ key_press_callback (GtkWidget   *widget,
                     gpointer     user_data)
 {
     FMTreeView *view = FM_TREE_VIEW (user_data);
+
+    view->details->last_input_keyboard = TRUE;
+    view->details->last_input_time = g_get_monotonic_time ();
 
     if (event->keyval == GDK_KEY_slash ||
         event->keyval == GDK_KEY_KP_Divide ||
