@@ -634,7 +634,9 @@ notebook_button_press_cb (GtkWidget *widget,
 	 * clicked tab instead.
 	 */
 	if (event->button == 2) {
-		if (tab_clicked != -1) {
+		/* Both AFTER_ALL_TABS and NOT_IN_APP_WINDOWS are negative; only
+		 * a real page index may be closed. */
+		if (tab_clicked >= 0) {
 			GtkWidget *page = gtk_notebook_get_nth_page (
 				GTK_NOTEBOOK (notebook), tab_clicked);
 			notebook_tab_close_requested (

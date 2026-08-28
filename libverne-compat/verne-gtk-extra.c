@@ -1294,6 +1294,31 @@ gdk_window_get_geometry (GdkSurface *window, gint *x, gint *y, gint *width, gint
 		*height = (window && GDK_IS_SURFACE (window)) ? gdk_surface_get_height (window) : 0;
 }
 
+/* GTK4 has no per-widget GdkWindow, so "where is this widget on screen" has
+ * to be assembled from the widget's offset inside its root, the root's
+ * surface transform and the surface's position. */
+void
+verne_widget_get_screen_origin (GtkWidget *widget, gint *x, gint *y)
+{
+	GtkWidget *root;
+	double rx = 0, ry = 0, tx = 0, ty = 0;
+	int ox = 0, oy = 0;
+
+	if (x) *x = 0;
+	if (y) *y = 0;
+	if (widget == NULL || !GTK_IS_WIDGET (widget))
+		return;
+	root = GTK_WIDGET (gtk_widget_get_root (widget));
+	if (root == NULL || !GTK_IS_NATIVE (root))
+		return;
+	if (!gtk_widget_translate_coordinates (widget, root, 0, 0, &rx, &ry))
+		return;
+	gtk_native_get_surface_transform (GTK_NATIVE (root), &tx, &ty);
+	gdk_window_get_origin (gtk_native_get_surface (GTK_NATIVE (root)), &ox, &oy);
+	if (x) *x = (gint) (ox + tx + rx);
+	if (y) *y = (gint) (oy + ty + ry);
+}
+
 gint
 gdk_window_get_origin (GdkSurface *window, gint *x, gint *y)
 {

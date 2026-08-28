@@ -1383,6 +1383,7 @@ typedef enum {
 #define gdk_app_launch_context_set_screen(c, s) ((void)0)
 #define gtk_widget_get_parent_window(w) ((w) && gtk_widget_get_parent (w) ? gtk_widget_get_window (gtk_widget_get_parent (w)) : gtk_widget_get_window (w))
 gint gdk_window_get_origin (GdkSurface *window, gint *x, gint *y);
+void verne_widget_get_screen_origin (GtkWidget *widget, gint *x, gint *y);
 #define gdk_window_get_toplevel(w) (w)
 #define gdk_cairo_get_clip_rectangle(cr, r) verne_gdk_cairo_get_clip_rectangle (cr, r)
 void verne_style_context_get_background_color (GtkStyleContext *context, GtkStateFlags state, GdkRGBA *rgba);

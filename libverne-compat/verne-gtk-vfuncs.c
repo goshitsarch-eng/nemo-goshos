@@ -192,8 +192,15 @@ fill_button_event (GdkEvent *ev, GtkGestureClick *click, gint n_press, gdouble x
 	verne_layout_get_scroll_offset (widget, &sx, &sy);
 	ev->button.x = x + sx;
 	ev->button.y = y + sy;
-	ev->button.x_root = x;
-	ev->button.y_root = y;
+	{
+		int ox = 0, oy = 0;
+
+		/* GTK3 reported screen coordinates here; callers such as the
+		 * notebook's tab hit-test compare them against widget origins. */
+		verne_widget_get_screen_origin (widget, &ox, &oy);
+		ev->button.x_root = ox + x;
+		ev->button.y_root = oy + y;
+	}
 	ev->button.button = gtk_gesture_single_get_current_button (GTK_GESTURE_SINGLE (click));
 	if (ge && !verne_gdk_event_is_synth (ge)) {
 		guint native_button = gdk_button_event_get_button (ge);
@@ -236,8 +243,13 @@ emit_motion (GtkWidget *widget, gdouble x, gdouble y, guint state, guint32 time)
 	verne_layout_get_scroll_offset (widget, &sx, &sy);
 	ev.motion.x = x + sx;
 	ev.motion.y = y + sy;
-	ev.motion.x_root = x;
-	ev.motion.y_root = y;
+	{
+		int ox = 0, oy = 0;
+
+		verne_widget_get_screen_origin (widget, &ox, &oy);
+		ev.motion.x_root = ox + x;
+		ev.motion.y_root = oy + y;
+	}
 	ev.motion.state = state;
 	ev.motion.time = time ? time : GDK_CURRENT_TIME;
 	verne_set_current_event (widget, &ev);
