@@ -1745,6 +1745,26 @@ void gtk_propagate_event (GtkWidget *widget, GdkEvent *event);
 GtkWidget *gtk_image_new_from_surface (cairo_surface_t *surface);
 void gtk_image_set_from_surface (GtkImage *image, cairo_surface_t *surface);
 void gtk_render_icon_surface (GtkStyleContext *context, cairo_t *cr, cairo_surface_t *surface, gdouble x, gdouble y);
+void verne_gtk_render_layout (GtkStyleContext *context, cairo_t *cr, double x, double y, PangoLayout *layout);
+void verne_gtk_render_background (GtkStyleContext *context, cairo_t *cr, double x, double y, double width, double height);
+void verne_gtk_render_frame (GtkStyleContext *context, cairo_t *cr, double x, double y, double width, double height);
+void verne_gtk_render_focus (GtkStyleContext *context, cairo_t *cr, double x, double y, double width, double height);
+#ifdef gtk_render_layout
+#undef gtk_render_layout
+#endif
+#ifdef gtk_render_background
+#undef gtk_render_background
+#endif
+#ifdef gtk_render_frame
+#undef gtk_render_frame
+#endif
+#ifdef gtk_render_focus
+#undef gtk_render_focus
+#endif
+#define gtk_render_layout verne_gtk_render_layout
+#define gtk_render_background verne_gtk_render_background
+#define gtk_render_frame verne_gtk_render_frame
+#define gtk_render_focus verne_gtk_render_focus
 gpointer gtk_icon_theme_lookup_icon_for_scale (GtkIconTheme *theme, const gchar *name, gint size, gint scale, GtkIconLookupFlags flags);
 gpointer gtk_icon_theme_lookup_by_gicon_for_scale (GtkIconTheme *theme, GIcon *icon, gint size, gint scale, GtkIconLookupFlags flags);
 GdkPixbuf *gtk_icon_info_load_icon (gpointer info, GError **error);

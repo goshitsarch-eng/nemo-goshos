@@ -1636,6 +1636,47 @@ verne_overlay_escape (GtkEventControllerKey *controller, guint keyval, guint key
 }
 
 static void
+verne_overlay_ungrab_keyboard (void)
+{
+}
+
+static void
+verne_overlay_grab_keyboard (GtkWidget *host)
+{
+	GtkNative *native;
+	GdkSurface *surface;
+
+	if (!GTK_IS_WIDGET (host))
+		return;
+	native = gtk_widget_get_native (host);
+	surface = native ? gtk_native_get_surface (native) : NULL;
+	verne_overlay_ungrab_keyboard ();
+#ifdef GDK_WINDOWING_X11
+	if (surface && GDK_IS_X11_SURFACE (surface)) {
+		Display *dpy = gdk_x11_display_get_xdisplay (gdk_surface_get_display (surface));
+		Window xid = gdk_x11_surface_get_xid (surface);
+
+		if (dpy && xid) {
+			gdk_x11_display_error_trap_push (gdk_display_get_default ());
+			XSetInputFocus (dpy, xid, RevertToPointerRoot, CurrentTime);
+			gdk_x11_display_error_trap_pop_ignored (gdk_display_get_default ());
+		}
+	}
+#endif
+	if (GTK_IS_WINDOW (host)) {
+		GtkEventController *keys;
+
+		if (g_object_get_data (G_OBJECT (host), "verne-dest-escape") == NULL) {
+			keys = gtk_event_controller_key_new ();
+			gtk_event_controller_set_propagation_phase (keys, GTK_PHASE_CAPTURE);
+			g_signal_connect (keys, "key-pressed", G_CALLBACK (verne_overlay_escape), NULL);
+			gtk_widget_add_controller (host, keys);
+			g_object_set_data (G_OBJECT (host), "verne-dest-escape", GINT_TO_POINTER (1));
+		}
+	}
+}
+
+static void
 verne_overlay_attach_scroll_controllers (GtkWidget *widget)
 {
 	GtkEventController *scroll;
@@ -1876,6 +1917,7 @@ verne_menu_popup_dest_overlay (GtkMenu *menu, int root_x, int root_y)
 		g_object_set_data (G_OBJECT (box), "verne-dest-click", GINT_TO_POINTER (1));
 	}
 	g_object_set_data (G_OBJECT (menu), "verne-dest-overlay", overlay);
+	verne_overlay_grab_keyboard (host);
 	g_object_unref (box);
 	return TRUE;
 }
@@ -2935,6 +2977,8 @@ verne_menu_hide_others (GtkMenu *keep)
 			g_object_unref (w);
 	}
 	verne_menu_hide_overlay_leftovers (keep);
+	if (keep == NULL)
+		verne_overlay_ungrab_keyboard ();
 }
 
 static void

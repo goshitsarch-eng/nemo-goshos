@@ -477,6 +477,22 @@ action_show_shortcuts_window (GtkAction *action,
 	gtk_window_present (GTK_WINDOW (shortcuts_window));
 }
 
+static gboolean
+window_shortcuts_key (GtkEventControllerKey *controller, guint keyval, guint keycode,
+		      GdkModifierType state, gpointer user_data)
+{
+	GdkModifierType mods;
+
+	(void) controller;
+	(void) keycode;
+	mods = state & gtk_accelerator_get_default_mod_mask ();
+	if (keyval == GDK_KEY_F1 && mods == GDK_CONTROL_MASK) {
+		action_show_shortcuts_window (NULL, user_data);
+		return TRUE;
+	}
+	return FALSE;
+}
+
 static void
 menu_item_select_cb (GtkMenuItem *proxy,
 		     NemoWindow *window)
@@ -2060,6 +2076,15 @@ nemo_window_initialize_menus (NemoWindow *window)
 
 	gtk_window_add_accel_group (GTK_WINDOW (window),
 				    gtk_ui_manager_get_accel_group (ui_manager));
+
+	if (g_object_get_data (G_OBJECT (window), "verne-shortcuts-keys") == NULL) {
+		GtkEventController *keys = gtk_event_controller_key_new ();
+
+		gtk_event_controller_set_propagation_phase (keys, GTK_PHASE_CAPTURE);
+		g_signal_connect (keys, "key-pressed", G_CALLBACK (window_shortcuts_key), window);
+		gtk_widget_add_controller (GTK_WIDGET (window), keys);
+		g_object_set_data (G_OBJECT (window), "verne-shortcuts-keys", GINT_TO_POINTER (1));
+	}
 
 	g_signal_connect (ui_manager, "connect_proxy",
 			  G_CALLBACK (connect_proxy_cb), window);

@@ -9,11 +9,14 @@
 #include <string.h>
 #include <pwd.h>
 #include <unistd.h>
+#include <sys/types.h>
+#include <pango/pangocairo.h>
 #include <graphene.h>
 #ifdef GDK_WINDOWING_X11
 #include <gdk/x11/gdkx.h>
 #include <X11/Xlib.h>
 #include <X11/Xatom.h>
+#include <X11/Xutil.h>
 #endif
 
 #ifdef gtk_toggle_button_get_active
@@ -553,6 +556,99 @@ verne_x11_add_net_wm_state (Display *dpy, Window xid, Atom *atoms, int *n_atoms,
 }
 
 static void
+verne_x11_hide_dummy_natives (GtkWindow *keep)
+{
+#ifdef GDK_WINDOWING_X11
+	GdkDisplay *gdpy;
+	Display *dpy;
+	Window root, parent = None, *children = NULL, keep_xid = 0;
+	unsigned int n = 0, i;
+	pid_t pid = getpid ();
+	Atom pid_atom;
+	GHashTable *live;
+	GList *toplevels, *l;
+
+	gdpy = gdk_display_get_default ();
+	if (gdpy == NULL || !GDK_IS_X11_DISPLAY (gdpy))
+		return;
+	dpy = gdk_x11_display_get_xdisplay (gdpy);
+	live = g_hash_table_new (g_direct_hash, g_direct_equal);
+	toplevels = gtk_window_list_toplevels ();
+	for (l = toplevels; l; l = l->next) {
+		GtkWidget *w = l->data;
+		GtkNative *native;
+		GdkSurface *surf;
+		Window xid = 0;
+
+		if (!GTK_IS_WINDOW (w))
+			continue;
+		native = gtk_widget_get_native (w);
+		surf = native ? gtk_native_get_surface (native) : NULL;
+		if (surf && GDK_IS_X11_SURFACE (surf))
+			xid = gdk_x11_surface_get_xid (GDK_X11_SURFACE (surf));
+		if (xid)
+			g_hash_table_add (live, GUINT_TO_POINTER (xid));
+	}
+	g_list_free (toplevels);
+	if (GTK_IS_WINDOW (keep)) {
+		GtkNative *native = gtk_widget_get_native (GTK_WIDGET (keep));
+		GdkSurface *surf = native ? gtk_native_get_surface (native) : NULL;
+
+		if (surf && GDK_IS_X11_SURFACE (surf))
+			keep_xid = gdk_x11_surface_get_xid (GDK_X11_SURFACE (surf));
+		if (keep_xid)
+			g_hash_table_add (live, GUINT_TO_POINTER (keep_xid));
+	}
+
+	root = DefaultRootWindow (dpy);
+	pid_atom = XInternAtom (dpy, "_NET_WM_PID", True);
+	if (!XQueryTree (dpy, root, &root, &parent, &children, &n) || children == NULL) {
+		g_hash_table_unref (live);
+		return;
+	}
+	gdk_x11_display_error_trap_push (gdk_display_get_default ());
+	for (i = 0; i < n; i++) {
+		Window w = children[i];
+		XWindowAttributes attrs;
+		Atom actual = None;
+		int fmt = 0;
+		unsigned long nitems = 0, after = 0;
+		unsigned char *prop = NULL;
+		pid_t wpid = 0;
+		XSetWindowAttributes sa;
+
+		if (g_hash_table_contains (live, GUINT_TO_POINTER (w)))
+			continue;
+		if (!XGetWindowAttributes (dpy, w, &attrs))
+			continue;
+		if (attrs.map_state != IsViewable)
+			continue;
+		if (attrs.width > 2 || attrs.height > 2)
+			continue;
+		if (pid_atom != None &&
+		    XGetWindowProperty (dpy, w, pid_atom, 0, 1, False, XA_CARDINAL,
+					&actual, &fmt, &nitems, &after, &prop) == Success &&
+		    prop != NULL) {
+			if (nitems >= 1)
+				wpid = (pid_t) *(unsigned long *) prop;
+			XFree (prop);
+		}
+		if (wpid != pid)
+			continue;
+		sa.override_redirect = True;
+		XChangeWindowAttributes (dpy, w, CWOverrideRedirect, &sa);
+		XUnmapWindow (dpy, w);
+		XMoveWindow (dpy, w, -2000, -2000);
+	}
+	gdk_x11_display_error_trap_pop_ignored (gdk_display_get_default ());
+	XFree (children);
+	g_hash_table_unref (live);
+#else
+	(void) keep;
+#endif
+}
+
+static void
 verne_window_apply_x11 (GtkWindow *window)
 {
 #ifdef GDK_WINDOWING_X11
@@ -626,6 +722,7 @@ verne_window_apply_x11 (GtkWindow *window)
 		XMoveWindow (dpy, xid,
 			     GPOINTER_TO_INT (xptr),
 			     GPOINTER_TO_INT (yptr));
+	verne_x11_hide_dummy_natives (window);
 #else
 	(void) window;
 #endif
@@ -1338,6 +1435,127 @@ verne_net_workarea (GdkRectangle *rect)
 	XFree (prop);
 	return ok;
 }
+
+static void
+verne_inset_workarea_for_dock (GdkRectangle *work,
+			       const GdkRectangle *geo,
+			       const GdkRectangle *dock)
+{
+	GdkRectangle inter;
+
+	if (work == NULL || geo == NULL || dock == NULL)
+		return;
+	if (dock->width < 8 || dock->height < 8)
+		return;
+	if (!gdk_rectangle_intersect (work, dock, &inter))
+		return;
+
+	if (dock->y <= geo->y + 8 && dock->width >= geo->width / 2) {
+		gint bottom = work->y + work->height;
+		gint top = MAX (work->y, dock->y + dock->height);
+
+		if (bottom > top) {
+			work->y = top;
+			work->height = bottom - top;
+		}
+	} else if (dock->y + dock->height >= geo->y + geo->height - 8 &&
+		   dock->width >= geo->width / 2) {
+		gint new_h = MIN (work->y + work->height, dock->y) - work->y;
+
+		if (new_h > 0)
+			work->height = new_h;
+	} else if (dock->x <= geo->x + 8 && dock->height >= geo->height / 2) {
+		gint right = work->x + work->width;
+		gint left = MAX (work->x, dock->x + dock->width);
+
+		if (right > left) {
+			work->x = left;
+			work->width = right - left;
+		}
+	} else if (dock->x + dock->width >= geo->x + geo->width - 8 &&
+		   dock->height >= geo->height / 2) {
+		gint new_w = MIN (work->x + work->width, dock->x) - work->x;
+
+		if (new_w > 0)
+			work->width = new_w;
+	}
+}
+
+static void
+verne_subtract_docks (GdkRectangle *work, const GdkRectangle *geo)
+{
+	Display *dpy;
+	Window root, parent = None, *children = NULL;
+	unsigned int n = 0, i;
+	Atom client_list, type_atom, dock_atom, actual = None;
+	int fmt = 0;
+	unsigned long nitems = 0, after = 0;
+	unsigned char *prop = NULL;
+	Window *clients = NULL;
+	unsigned long nclients = 0;
+
+	dpy = verne_xdisplay ();
+	if (dpy == NULL || work == NULL || geo == NULL)
+		return;
+	root = DefaultRootWindow (dpy);
+	client_list = XInternAtom (dpy, "_NET_CLIENT_LIST", True);
+	type_atom = XInternAtom (dpy, "_NET_WM_WINDOW_TYPE", True);
+	dock_atom = XInternAtom (dpy, "_NET_WM_WINDOW_TYPE_DOCK", True);
+	if (client_list == None || type_atom == None || dock_atom == None)
+		return;
+	if (XGetWindowProperty (dpy, root, client_list, 0, 256, False, XA_WINDOW,
+				&actual, &fmt, &nitems, &after, &prop) == Success &&
+	    prop != NULL && fmt == 32 && nitems > 0) {
+		clients = (Window *) prop;
+		nclients = nitems;
+		prop = NULL;
+	} else {
+		if (prop)
+			XFree (prop);
+		if (!XQueryTree (dpy, root, &root, &parent, &children, &n) || children == NULL)
+			return;
+		clients = children;
+		nclients = n;
+		children = NULL;
+	}
+
+	gdk_x11_display_error_trap_push (gdk_display_get_default ());
+	for (i = 0; i < nclients; i++) {
+		Window w = clients[i];
+		Atom wtype = None;
+		unsigned char *tdata = NULL;
+		Window child = None, dummy = None;
+		int rx = 0, ry = 0;
+		unsigned int rw = 0, rh = 0, bw = 0, depth = 0;
+		GdkRectangle dock;
+
+		if (XGetWindowProperty (dpy, w, type_atom, 0, 1, False, XA_ATOM,
+					&actual, &fmt, &nitems, &after, &tdata) != Success ||
+		    tdata == NULL || nitems < 1) {
+			if (tdata)
+				XFree (tdata);
+			continue;
+		}
+		wtype = *(Atom *) tdata;
+		XFree (tdata);
+		if (wtype != dock_atom)
+			continue;
+		if (!XGetGeometry (dpy, w, &dummy, &rx, &ry, &rw, &rh, &bw, &depth))
+			continue;
+		if (!XTranslateCoordinates (dpy, w, DefaultRootWindow (dpy), 0, 0, &rx, &ry, &child))
+			continue;
+		dock.x = rx;
+		dock.y = ry;
+		dock.width = (gint) rw;
+		dock.height = (gint) rh;
+		verne_inset_workarea_for_dock (work, geo, &dock);
+	}
+	gdk_x11_display_error_trap_pop_ignored (gdk_display_get_default ());
+	if (clients && clients != children)
+		XFree (clients);
+	if (children)
+		XFree (children);
+}
 #endif
 
 unsigned long
@@ -1386,6 +1604,7 @@ gdk_monitor_get_workarea (GdkMonitor *monitor, GdkRectangle *workarea)
 				workarea->height = y2 - y1;
 			}
 		}
+		verne_subtract_docks (workarea, &geo);
 	}
 #endif
 }
@@ -2219,6 +2438,125 @@ void gtk_render_icon_surface (GtkStyleContext *context, cairo_t *cr, cairo_surfa
 		cairo_set_source_surface (cr, surface, x, y);
 		cairo_paint (cr);
 	}
+}
+
+static void
+verne_style_fg (GtkStyleContext *context, GdkRGBA *color)
+{
+	GtkStateFlags state = GTK_STATE_FLAG_NORMAL;
+
+	if (color == NULL)
+		return;
+	color->red = color->green = color->blue = 1.0;
+	color->alpha = 1.0;
+	if (context == NULL)
+		return;
+	state = gtk_style_context_get_state (context);
+	(gtk_style_context_get_color) (context, color);
+	if (color->alpha >= 0.05)
+		return;
+	if (state & GTK_STATE_FLAG_SELECTED) {
+		if (gtk_style_context_lookup_color (context, "theme_selected_fg_color", color) &&
+		    color->alpha >= 0.05)
+			return;
+	}
+	if (gtk_style_context_lookup_color (context, "theme_fg_color", color) &&
+	    color->alpha >= 0.05)
+		return;
+	if (gtk_style_context_lookup_color (context, "theme_text_color", color) &&
+	    color->alpha >= 0.05)
+		return;
+	color->red = color->green = color->blue = 1.0;
+	color->alpha = 1.0;
+}
+
+void
+verne_gtk_render_layout (GtkStyleContext *context, cairo_t *cr,
+			 double x, double y, PangoLayout *layout)
+{
+	GdkRGBA color;
+
+	if (cr == NULL || layout == NULL)
+		return;
+	verne_style_fg (context, &color);
+	cairo_save (cr);
+	gdk_cairo_set_source_rgba (cr, &color);
+	cairo_move_to (cr, x, y);
+	pango_cairo_show_layout (cr, layout);
+	cairo_restore (cr);
+}
+
+void
+verne_gtk_render_background (GtkStyleContext *context, cairo_t *cr,
+			     double x, double y, double width, double height)
+{
+	GtkStateFlags state;
+	GdkRGBA bg;
+
+	if (cr == NULL || width <= 0 || height <= 0)
+		return;
+	state = context ? gtk_style_context_get_state (context) : GTK_STATE_FLAG_NORMAL;
+	bg.red = bg.green = bg.blue = 0;
+	bg.alpha = 0;
+	if (state & GTK_STATE_FLAG_SELECTED) {
+		if (context == NULL ||
+		    !gtk_style_context_lookup_color (context, "theme_selected_bg_color", &bg) ||
+		    bg.alpha < 0.05) {
+			bg.red = 0.20;
+			bg.green = 0.45;
+			bg.blue = 0.85;
+			bg.alpha = 0.85;
+		}
+	} else if (state & GTK_STATE_FLAG_PRELIGHT) {
+		bg.red = bg.green = bg.blue = 1.0;
+		bg.alpha = 0.12;
+	} else if (context) {
+		(void) gtk_style_context_lookup_color (context, "theme_bg_color", &bg);
+	}
+	if (bg.alpha < 0.02)
+		return;
+	cairo_save (cr);
+	gdk_cairo_set_source_rgba (cr, &bg);
+	cairo_rectangle (cr, x, y, width, height);
+	cairo_fill (cr);
+	cairo_restore (cr);
+}
+
+void
+verne_gtk_render_frame (GtkStyleContext *context, cairo_t *cr,
+			double x, double y, double width, double height)
+{
+	GdkRGBA color;
+
+	if (cr == NULL || width <= 0 || height <= 0)
+		return;
+	verne_style_fg (context, &color);
+	color.alpha = MIN (color.alpha, 0.6);
+	cairo_save (cr);
+	gdk_cairo_set_source_rgba (cr, &color);
+	cairo_set_line_width (cr, 1.0);
+	cairo_rectangle (cr, x + 0.5, y + 0.5, width - 1.0, height - 1.0);
+	cairo_stroke (cr);
+	cairo_restore (cr);
+}
+
+void
+verne_gtk_render_focus (GtkStyleContext *context, cairo_t *cr,
+			double x, double y, double width, double height)
+{
+	GdkRGBA color;
+	const double dashes[] = { 1.0, 2.0 };
+
+	if (cr == NULL || width <= 0 || height <= 0)
+		return;
+	verne_style_fg (context, &color);
+	cairo_save (cr);
+	gdk_cairo_set_source_rgba (cr, &color);
+	cairo_set_line_width (cr, 1.0);
+	cairo_set_dash (cr, dashes, 2, 0);
+	cairo_rectangle (cr, x + 0.5, y + 0.5, width - 1.0, height - 1.0);
+	cairo_stroke (cr);
+	cairo_restore (cr);
 }
 
 static GtkIconLookupFlags
