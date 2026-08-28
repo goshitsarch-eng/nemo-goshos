@@ -532,12 +532,18 @@ on_scroll (GtkEventControllerScroll *self, gdouble dx, gdouble dy, gpointer data
 {
 	GtkWidget *widget = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (self));
 	VerneVfuncs *v = lookup_vfuncs_type (G_OBJECT_TYPE (widget));
+	GdkEvent *ge = gtk_event_controller_get_current_event (GTK_EVENT_CONTROLLER (self));
 	GdkEvent ev;
 
 	memset (&ev, 0, sizeof (ev));
 	ev.scroll.type = GDK_SCROLL;
 	ev.scroll.delta_x = dx;
 	ev.scroll.delta_y = dy;
+	/* Without the modifier state nemo_view_handle_scroll_event() never sees
+	 * Ctrl, so Ctrl+wheel zoom does nothing in any view. The other
+	 * synthesizers here already carry it. */
+	ev.scroll.state = ge ? gdk_event_get_modifier_state (ge) : 0;
+	ev.scroll.time = ge ? gdk_event_get_time (ge) : GDK_CURRENT_TIME;
 	if (dy > 0)
 		ev.scroll.direction = GDK_SCROLL_DOWN;
 	else if (dy < 0)
