@@ -579,6 +579,7 @@ verne_x11_hide_dummy_natives (GtkWindow *keep)
 		GtkNative *native;
 		GdkSurface *surf;
 		Window xid = 0;
+		int ww = 0, hh = 0;
 
 		if (!GTK_IS_WINDOW (w))
 			continue;
@@ -586,8 +587,15 @@ verne_x11_hide_dummy_natives (GtkWindow *keep)
 		surf = native ? gtk_native_get_surface (native) : NULL;
 		if (surf && GDK_IS_X11_SURFACE (surf))
 			xid = gdk_x11_surface_get_xid (GDK_X11_SURFACE (surf));
-		if (xid)
+		ww = gtk_widget_get_width (w);
+		hh = gtk_widget_get_height (w);
+		/* Abandoned 1×1 natives stay in gtk_window_list_toplevels.
+		 * Only protect the window we just mapped and real-sized ones. */
+		if (xid && (w == GTK_WIDGET (keep) || ww > 8 || hh > 8))
 			g_hash_table_add (live, GUINT_TO_POINTER (xid));
+		if (w != GTK_WIDGET (keep) && !GTK_IS_MENU (w) && ww <= 2 && hh <= 2 &&
+		    gtk_widget_get_visible (w))
+			gtk_widget_set_visible (w, FALSE);
 	}
 	g_list_free (toplevels);
 	if (GTK_IS_WINDOW (keep)) {
@@ -646,6 +654,14 @@ verne_x11_hide_dummy_natives (GtkWindow *keep)
 #else
 	(void) keep;
 #endif
+}
+
+static gboolean
+verne_hide_dummy_idle (gpointer data)
+{
+	if (GTK_IS_WINDOW (data))
+		verne_x11_hide_dummy_natives (GTK_WINDOW (data));
+	return G_SOURCE_REMOVE;
 }
 
 static void
@@ -723,6 +739,11 @@ verne_window_apply_x11 (GtkWindow *window)
 			     GPOINTER_TO_INT (xptr),
 			     GPOINTER_TO_INT (yptr));
 	verne_x11_hide_dummy_natives (window);
+	if (g_object_get_data (G_OBJECT (window), "verne-hide-dummy-idle") == NULL) {
+		g_object_set_data (G_OBJECT (window), "verne-hide-dummy-idle", GINT_TO_POINTER (1));
+		g_idle_add_full (G_PRIORITY_LOW, verne_hide_dummy_idle,
+				 g_object_ref (window), g_object_unref);
+	}
 #else
 	(void) window;
 #endif
