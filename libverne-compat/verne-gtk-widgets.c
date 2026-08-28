@@ -318,16 +318,100 @@ enum { LAYOUT_PROP_0, LAYOUT_PROP_HADJ, LAYOUT_PROP_VADJ, LAYOUT_PROP_HSCROLL, L
 typedef struct { int x, y; } ChildPos;
 
 static void
-gtk_layout_set_adjustment (GtkAdjustment **store, GtkAdjustment *adj)
+gtk_layout_adjustment_value_changed (GtkAdjustment *adj, gpointer layout)
+{
+	(void) adj;
+	/* Children are positioned relative to the scroll offset and the canvas
+	 * draws through it, so both have to be redone. */
+	gtk_widget_queue_allocate (GTK_WIDGET (layout));
+	gtk_widget_queue_draw (GTK_WIDGET (layout));
+}
+
+static void
+gtk_layout_set_adjustment (GtkWidget *layout, GtkAdjustment **store, GtkAdjustment *adj)
 {
 	if (*store == adj)
 		return;
-	if (*store)
+	if (*store) {
+		g_signal_handlers_disconnect_by_func (*store,
+						      G_CALLBACK (gtk_layout_adjustment_value_changed),
+						      layout);
 		g_object_unref (*store);
+	}
 	if (adj)
 		*store = g_object_ref (adj);
 	else
 		*store = gtk_adjustment_new (0, 0, 0, 0, 0, 0);
+	g_signal_connect (*store, "value-changed",
+			  G_CALLBACK (gtk_layout_adjustment_value_changed), layout);
+}
+
+/* gtk_widget_get_window() hands back the toplevel's GdkSurface in GTK4, so
+ * gdk_surface_get_device_position() on it answers in toplevel coordinates --
+ * off by the sidebar width and the whole header/menubar/toolbar stack, and
+ * ignorant of the scroll position. Translate it into the widget's own
+ * scrolled coordinate space. */
+gboolean
+verne_widget_get_pointer (GtkWidget *widget, gint *x, gint *y, GdkModifierType *mask)
+{
+	GtkNative *native;
+	GdkSurface *surface;
+	GdkDevice *device;
+	GdkSeat *seat;
+	double px = 0, py = 0, tx = 0, ty = 0, sx = 0, sy = 0;
+	graphene_point_t in, out;
+
+	if (x)
+		*x = 0;
+	if (y)
+		*y = 0;
+	if (mask)
+		*mask = 0;
+	if (!GTK_IS_WIDGET (widget))
+		return FALSE;
+
+	native = gtk_widget_get_native (widget);
+	surface = native ? gtk_native_get_surface (native) : NULL;
+	seat = gdk_display_get_default_seat (gtk_widget_get_display (widget));
+	device = seat ? gdk_seat_get_pointer (seat) : NULL;
+	if (surface == NULL || device == NULL)
+		return FALSE;
+	if (!gdk_surface_get_device_position (surface, device, &px, &py, mask))
+		return FALSE;
+
+	gtk_native_get_surface_transform (native, &tx, &ty);
+	in.x = (float) (px - tx);
+	in.y = (float) (py - ty);
+	if (!gtk_widget_compute_point (GTK_WIDGET (native), widget, &in, &out))
+		return FALSE;
+
+	verne_layout_get_scroll_offset (widget, &sx, &sy);
+	if (x)
+		*x = (gint) (out.x + sx);
+	if (y)
+		*y = (gint) (out.y + sy);
+	return TRUE;
+}
+
+/* GTK3 scrolled a GtkLayout by moving its bin window; GTK4 has no such
+ * window, so the offset has to be applied by hand wherever a coordinate
+ * crosses between the widget and the scrolled content. */
+void
+verne_layout_get_scroll_offset (GtkWidget *widget, double *ox, double *oy)
+{
+	GtkLayoutPrivate *priv;
+
+	if (ox)
+		*ox = 0;
+	if (oy)
+		*oy = 0;
+	if (widget == NULL || !GTK_IS_LAYOUT (widget))
+		return;
+	priv = gtk_layout_get_instance_private (GTK_LAYOUT (widget));
+	if (ox && priv->hadj)
+		*ox = gtk_adjustment_get_value (priv->hadj);
+	if (oy && priv->vadj)
+		*oy = gtk_adjustment_get_value (priv->vadj);
 }
 
 static void
@@ -348,8 +432,8 @@ gtk_layout_set_property (GObject *object, guint prop_id, const GValue *value, GP
 {
 	GtkLayoutPrivate *priv = gtk_layout_get_instance_private (GTK_LAYOUT (object));
 	switch (prop_id) {
-	case LAYOUT_PROP_HADJ: gtk_layout_set_adjustment (&priv->hadj, g_value_get_object (value)); break;
-	case LAYOUT_PROP_VADJ: gtk_layout_set_adjustment (&priv->vadj, g_value_get_object (value)); break;
+	case LAYOUT_PROP_HADJ: gtk_layout_set_adjustment (GTK_WIDGET (object), &priv->hadj, g_value_get_object (value)); break;
+	case LAYOUT_PROP_VADJ: gtk_layout_set_adjustment (GTK_WIDGET (object), &priv->vadj, g_value_get_object (value)); break;
 	case LAYOUT_PROP_HSCROLL: priv->hscroll_policy = g_value_get_enum (value); break;
 	case LAYOUT_PROP_VSCROLL: priv->vscroll_policy = g_value_get_enum (value); break;
 	default: G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
@@ -411,9 +495,23 @@ gtk_layout_size_allocate (GtkWidget *widget, int width, int height, int baseline
 {
 	GtkLayoutPrivate *priv = gtk_layout_get_instance_private (GTK_LAYOUT (widget));
 	GtkWidget *child;
+	double sx = 0, sy = 0;
 	(void) baseline;
-	(void) width;
-	(void) height;
+
+	verne_layout_get_scroll_offset (widget, &sx, &sy);
+
+	/* Keep the adjustments describing the current viewport, so the
+	 * scrollbars know how far they may travel. */
+	if (priv->hadj) {
+		gtk_adjustment_configure (priv->hadj, gtk_adjustment_get_value (priv->hadj),
+					  0, MAX ((double) priv->width, width),
+					  width * 0.1, width * 0.9, width);
+	}
+	if (priv->vadj) {
+		gtk_adjustment_configure (priv->vadj, gtk_adjustment_get_value (priv->vadj),
+					  0, MAX ((double) priv->height, height),
+					  height * 0.1, height * 0.9, height);
+	}
 	for (child = gtk_widget_get_first_child (widget); child; child = gtk_widget_get_next_sibling (child)) {
 		ChildPos *pos = g_hash_table_lookup (priv->child_pos, child);
 		int min_w = 0, nat_w = 0, min_h = 0, nat_h = 0;
@@ -430,8 +528,8 @@ gtk_layout_size_allocate (GtkWidget *widget, int width, int height, int baseline
 		ch = MAX (nat_h, min_h);
 		if (ch < 1)
 			ch = MAX (gtk_widget_get_height (child), 1);
-		x = pos ? pos->x : 0;
-		y = pos ? pos->y : 0;
+		x = (pos ? pos->x : 0) - (int) sx;
+		y = (pos ? pos->y : 0) - (int) sy;
 		t = gsk_transform_translate (NULL, &GRAPHENE_POINT_INIT ((float) x, (float) y));
 		gtk_widget_allocate (child, cw, ch, -1, t);
 	}
@@ -530,11 +628,11 @@ GtkAdjustment *gtk_layout_get_vadjustment (GtkLayout *layout) {
 }
 void gtk_layout_set_hadjustment (GtkLayout *layout, GtkAdjustment *adj) {
 	GtkLayoutPrivate *priv = gtk_layout_get_instance_private (layout);
-	gtk_layout_set_adjustment (&priv->hadj, adj);
+	gtk_layout_set_adjustment (GTK_WIDGET (layout), &priv->hadj, adj);
 }
 void gtk_layout_set_vadjustment (GtkLayout *layout, GtkAdjustment *adj) {
 	GtkLayoutPrivate *priv = gtk_layout_get_instance_private (layout);
-	gtk_layout_set_adjustment (&priv->vadj, adj);
+	gtk_layout_set_adjustment (GTK_WIDGET (layout), &priv->vadj, adj);
 }
 GdkSurface *gtk_layout_get_bin_window (GtkLayout *layout) {
 	return gtk_widget_get_window (GTK_WIDGET (layout));

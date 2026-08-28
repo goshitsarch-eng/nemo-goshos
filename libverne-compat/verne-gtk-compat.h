@@ -342,7 +342,24 @@ gboolean gtk_widget_is_drawable (GtkWidget *widget);
 void gtk_widget_get_pointer (GtkWidget *widget, gint *x, gint *y);
 
 #define gtk_cairo_should_draw_window(cr, win) TRUE
-#define gtk_cairo_transform_to_window(cr, widget, win) ((void)0)
+void verne_layout_get_scroll_offset (GtkWidget *widget, double *ox, double *oy);
+gboolean verne_widget_get_pointer (GtkWidget *widget, gint *x, gint *y, GdkModifierType *mask);
+/* GTK3 scrolled a GtkLayout by moving its bin window, and this call put the
+ * cairo context into that window's coordinates. GTK4 has no bin window, so
+ * apply the scroll offset directly -- without it the icon view painted the
+ * top-left corner of its contents no matter where the scrollbar was. */
+static inline void
+verne_cairo_transform_to_window (cairo_t *cr, GtkWidget *widget)
+{
+	double ox = 0, oy = 0;
+
+	if (cr == NULL || widget == NULL)
+		return;
+	verne_layout_get_scroll_offset (widget, &ox, &oy);
+	if (ox != 0 || oy != 0)
+		cairo_translate (cr, -ox, -oy);
+}
+#define gtk_cairo_transform_to_window(cr, widget, win) verne_cairo_transform_to_window ((cr), (widget))
 gboolean gtk_widget_event (GtkWidget *widget, GdkEvent *event);
 gboolean gtk_true (void);
 gboolean gtk_false (void);

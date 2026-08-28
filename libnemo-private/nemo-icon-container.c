@@ -1290,11 +1290,11 @@ rubberband_timeout_callback (gpointer data)
 		adj_changed = TRUE;
 	}
 
-	gdk_window_get_device_position (gtk_widget_get_window (widget),
-					gdk_device_manager_get_client_pointer (
-						gdk_display_get_device_manager (
-							gtk_widget_get_display (widget))),
-					&x, &y, NULL);
+	/* Must be in the container's own (scrolled) coordinates: the surface
+	 * that gtk_widget_get_window() returns is the toplevel's, so asking it
+	 * gave a point offset by the sidebar and the header stack and the
+	 * rubber band swept up most of the folder. */
+	verne_widget_get_pointer (widget, &x, &y, NULL);
 
 	if (x < RUBBERBAND_SCROLL_THRESHOLD) {
 		x_scroll = x - RUBBERBAND_SCROLL_THRESHOLD;

@@ -173,6 +173,7 @@ verne_pointer_event_widget (GtkWidget *widget, double x, double y)
 static void
 fill_button_event (GdkEvent *ev, GtkGestureClick *click, gint n_press, gdouble x, gdouble y)
 {
+	double sx = 0, sy = 0;
 	GtkWidget *widget = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (click));
 	GdkEvent *ge = gtk_event_controller_get_current_event (GTK_EVENT_CONTROLLER (click));
 
@@ -184,8 +185,11 @@ fill_button_event (GdkEvent *ev, GtkGestureClick *click, gint n_press, gdouble x
 	else
 		ev->button.type = GDK_BUTTON_PRESS;
 	ev->button.window = gtk_widget_get_window (widget);
-	ev->button.x = x;
-	ev->button.y = y;
+	/* GTK3 delivered these relative to the scrolled bin window; GTK4 gives
+	 * widget coordinates, so a scrolled canvas would pick the wrong item. */
+	verne_layout_get_scroll_offset (widget, &sx, &sy);
+	ev->button.x = x + sx;
+	ev->button.y = y + sy;
 	ev->button.x_root = x;
 	ev->button.y_root = y;
 	ev->button.button = gtk_gesture_single_get_current_button (GTK_GESTURE_SINGLE (click));
@@ -215,6 +219,7 @@ emit_widget_event (GtkWidget *widget, const char *signal, gpointer event)
 static void
 emit_motion (GtkWidget *widget, gdouble x, gdouble y, guint state, guint32 time)
 {
+	double sx = 0, sy = 0;
 	VerneVfuncs *v;
 	GdkEvent ev;
 
@@ -226,8 +231,9 @@ emit_motion (GtkWidget *widget, gdouble x, gdouble y, guint state, guint32 time)
 	memset (&ev, 0, sizeof (ev));
 	ev.motion.type = GDK_MOTION_NOTIFY;
 	ev.motion.window = gtk_widget_get_window (widget);
-	ev.motion.x = x;
-	ev.motion.y = y;
+	verne_layout_get_scroll_offset (widget, &sx, &sy);
+	ev.motion.x = x + sx;
+	ev.motion.y = y + sy;
 	ev.motion.x_root = x;
 	ev.motion.y_root = y;
 	ev.motion.state = state;
@@ -250,6 +256,7 @@ typedef struct {
 static gboolean
 verne_idle_second_click (gpointer data)
 {
+	double sx = 0, sy = 0;
 	VerneIdleClick *click = data;
 	GtkWidget *widget = click->widget;
 	VerneVfuncs *v;
@@ -262,8 +269,9 @@ verne_idle_second_click (gpointer data)
 		memset (&ev, 0, sizeof (ev));
 		ev.button.type = GDK_BUTTON_PRESS;
 		ev.button.window = gtk_widget_get_window (widget);
-		ev.button.x = click->x;
-		ev.button.y = click->y;
+		verne_layout_get_scroll_offset (widget, &sx, &sy);
+		ev.button.x = click->x + sx;
+		ev.button.y = click->y + sy;
 		ev.button.x_root = click->x;
 		ev.button.y_root = click->y;
 		ev.button.button = click->button;
@@ -443,6 +451,7 @@ on_local_drag_end (GtkGestureDrag *drag, gdouble offset_x, gdouble offset_y, gpo
 static void
 on_enter (GtkEventControllerMotion *motion, gdouble x, gdouble y, gpointer data)
 {
+	double sx = 0, sy = 0;
 	GtkWidget *widget = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (motion));
 	VerneVfuncs *v;
 	GdkEvent ev;
@@ -454,8 +463,9 @@ on_enter (GtkEventControllerMotion *motion, gdouble x, gdouble y, gpointer data)
 
 	memset (&ev, 0, sizeof (ev));
 	ev.crossing.type = GDK_ENTER_NOTIFY;
-	ev.crossing.x = x;
-	ev.crossing.y = y;
+	verne_layout_get_scroll_offset (widget, &sx, &sy);
+	ev.crossing.x = x + sx;
+	ev.crossing.y = y + sy;
 	ev.crossing.mode = GDK_CROSSING_NORMAL;
 	verne_set_current_event (widget, &ev);
 	if (!emit_widget_event (widget, "enter-notify-event", &ev) && v && v->enter)
