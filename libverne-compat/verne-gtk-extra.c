@@ -3756,12 +3756,93 @@ verne_dialog_new_with_buttons (const gchar *title, GtkWindow *parent, GtkDialogF
 	return dialog;
 }
 
+/* GTK4 removed the getters for resolved background and border colours.
+ * Rendering the context into a 1x1 surface and reading the pixel back gives
+ * the real, theme- and state-correct colour; the previous shim answered
+ * "opaque white" for every call, which painted the icon view, the rubber
+ * band and the properties-window capacity ring white in dark mode. */
+static void
+verne_read_back_pixel (GdkRGBA *color, cairo_surface_t *surface)
+{
+	const unsigned char *data;
+	guint32 pixel;
+	double alpha;
+
+	cairo_surface_flush (surface);
+	data = cairo_image_surface_get_data (surface);
+	if (data == NULL) {
+		color->red = color->green = color->blue = 0.0;
+		color->alpha = 0.0;
+		return;
+	}
+
+	memcpy (&pixel, data, sizeof pixel);
+	alpha = ((pixel >> 24) & 0xff) / 255.0;
+	if (alpha <= 0.0) {
+		color->red = color->green = color->blue = 0.0;
+		color->alpha = 0.0;
+		return;
+	}
+
+	/* cairo's ARGB32 is premultiplied. */
+	color->red   = (((pixel >> 16) & 0xff) / 255.0) / alpha;
+	color->green = (((pixel >>  8) & 0xff) / 255.0) / alpha;
+	color->blue  = (( pixel        & 0xff) / 255.0) / alpha;
+	color->alpha = alpha;
+}
+
+void
+verne_style_context_get_background_color (GtkStyleContext *context,
+					  GtkStateFlags    state,
+					  GdkRGBA         *color)
+{
+	cairo_surface_t *surface;
+	cairo_t *cr;
+
+	(void) state;
+	if (color == NULL)
+		return;
+
+	color->red = color->green = color->blue = color->alpha = 0.0;
+	if (context == NULL)
+		return;
+
+	surface = cairo_image_surface_create (CAIRO_FORMAT_ARGB32, 1, 1);
+	cr = cairo_create (surface);
+	gtk_render_background (context, cr, 0, 0, 1, 1);
+	cairo_destroy (cr);
+	verne_read_back_pixel (color, surface);
+	cairo_surface_destroy (surface);
+}
+
 void
 gtk_style_context_get_border_color (GtkStyleContext *context, GtkStateFlags state, GdkRGBA *color)
 {
+	cairo_surface_t *surface;
+	cairo_t *cr;
+
 	(void) state;
-	if (color)
+	if (color == NULL)
+		return;
+
+	color->red = color->green = color->blue = color->alpha = 0.0;
+	if (context == NULL)
+		return;
+
+	/* Render a 1x1 frame; with any non-zero border width the single pixel
+	 * that comes back is border-coloured. */
+	surface = cairo_image_surface_create (CAIRO_FORMAT_ARGB32, 1, 1);
+	cr = cairo_create (surface);
+	gtk_render_frame (context, cr, 0, 0, 1, 1);
+	cairo_destroy (cr);
+	verne_read_back_pixel (color, surface);
+	cairo_surface_destroy (surface);
+
+	/* Themes that draw no border on this node still need a usable line. */
+	if (color->alpha <= 0.0) {
 		(gtk_style_context_get_color) (context, color);
+		color->alpha *= 0.3;
+	}
 }
 
 void

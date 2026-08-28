@@ -155,17 +155,52 @@ use_default_color (GdkRGBA *color)
     color->alpha = 1;
 }
 
+/* GTK4 dropped widget style properties, so the -NemoPlacesTreeView-disk-full-*
+ * colours a GTK3 theme used to supply are gone. Derive the two colours from
+ * the row's own style instead: the accent colour for the used portion, and a
+ * washed-out version of the row's text colour for the trough. On a selected
+ * row both are taken from the selection foreground so the bar stays legible
+ * against the selection background. */
 static void
-convert_color (GdkColor *style_color, GdkRGBA *color)
+lookup_theme_color (GtkStyleContext *context,
+                    const gchar     *name,
+                    GdkRGBA         *color)
 {
-	if (style_color == NULL) {
-		use_default_color (color);
-		return;
-	}
-	color->red = style_color->red / 65535.0;
-	color->green = style_color->green / 65535.0;
-	color->blue = style_color->blue / 65535.0;
-	color->alpha = 1;
+    if (context != NULL && gtk_style_context_lookup_color (context, name, color))
+        return;
+
+    color->red = 0.21;
+    color->green = 0.52;
+    color->blue = 0.89;
+    color->alpha = 1.0;
+}
+
+static void
+get_disk_bar_colors (GtkWidget            *widget,
+                     GtkCellRendererState  flags,
+                     GdkRGBA              *bg_color,
+                     GdkRGBA              *fg_color)
+{
+    GtkStyleContext *context = widget ? gtk_widget_get_style_context (widget) : NULL;
+    GdkRGBA text_color;
+
+    if (context != NULL) {
+        gtk_style_context_get_color (context, gtk_widget_get_state_flags (widget), &text_color);
+    } else {
+        use_default_color (&text_color);
+    }
+
+    if (flags & GTK_CELL_RENDERER_SELECTED) {
+        /* Against the selection background the accent colour is invisible,
+         * so use the row's own foreground for both halves of the bar. */
+        *fg_color = text_color;
+        *bg_color = text_color;
+        bg_color->alpha = text_color.alpha * 0.35;
+    } else {
+        lookup_theme_color (context, "accent_bg_color", fg_color);
+        *bg_color = text_color;
+        bg_color->alpha = text_color.alpha * 0.25;
+    }
 }
 
 #define _270_DEG 270.0 * (M_PI/180.0)
@@ -221,32 +256,19 @@ nemo_cell_renderer_disk_render (GtkCellRenderer       *cell,
     GtkStyleContext *context;
 
     if (show) {
-        context = gtk_widget_get_style_context (widget);
-        GdkColor *gdk_bg_color, *gdk_fg_color;
         GdkRGBA bg_color, fg_color;
         gint bar_width, bar_radius, bottom_padding, max_length;
 
-        gtk_style_context_get_style (context,
-                                     "disk-full-bg-color",       &gdk_bg_color,
-                                     "disk-full-fg-color",       &gdk_fg_color,
-                                     "disk-full-bar-width",      &bar_width,
-                                     "disk-full-bar-radius",     &bar_radius,
-                                     "disk-full-bottom-padding", &bottom_padding,
-                                     "disk-full-max-length",     &max_length,
-                                     NULL);
+        context = gtk_widget_get_style_context (widget);
 
-        if (gdk_bg_color) {
-            convert_color (gdk_bg_color, &bg_color);
-            gdk_color_free (gdk_bg_color);
-        } else {
-            use_default_color (&bg_color);
-        }
-        if (gdk_fg_color) {
-            convert_color (gdk_fg_color, &fg_color);
-            gdk_color_free (gdk_fg_color);
-        } else {
-            use_default_color (&fg_color);
-        }
+        gtk_widget_style_get (widget,
+                              "disk-full-bar-width",      &bar_width,
+                              "disk-full-bar-radius",     &bar_radius,
+                              "disk-full-bottom-padding", &bottom_padding,
+                              "disk-full-max-length",     &max_length,
+                              NULL);
+
+        get_disk_bar_colors (widget, flags, &bg_color, &fg_color);
 
         gtk_cell_renderer_get_padding (cell, &xpad, &ypad);
 

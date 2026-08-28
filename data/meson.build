@@ -27,6 +27,18 @@ install_data(desktopFiles,
   install_dir: join_paths(get_option('datadir'), 'applications')
 )
 
+metainfoConf = configuration_data()
+metainfoConf.set('VERSION', meson.project_version())
+
+install_data(
+  configure_file(
+    input : 'nemo.metainfo.xml.in',
+    output: 'nemo.metainfo.xml',
+    configuration: metainfoConf,
+  ),
+  install_dir: join_paths(get_option('datadir'), 'metainfo')
+)
+
 ################################################################################
 dataConf = configuration_data()
 dataConf.set('bindir', join_paths(get_option('prefix'), get_option('bindir')))

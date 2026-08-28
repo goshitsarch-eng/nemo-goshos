@@ -353,10 +353,51 @@ action_about_nemo_callback (GtkAction *action,
 	adw_about_window_set_application_name (ADW_ABOUT_WINDOW (about), _("Verne"));
 	adw_about_window_set_version (ADW_ABOUT_WINDOW (about), VERSION);
 	adw_about_window_set_comments (ADW_ABOUT_WINDOW (about),
-				       _("Verne lets you organize files and folders, both on your computer and online."));
+				       _("Verne lets you organize files and folders, both on your computer and online.\n\n"
+					 "Verne is a GTK4 and libadwaita presentation of Nemo, the Cinnamon file "
+					 "manager developed by Linux Mint. Nemo is itself a fork of GNOME Files "
+					 "(Nautilus) 3.4. Nearly all of the file management, extension and action "
+					 "machinery here is their work."));
 	adw_about_window_set_license (ADW_ABOUT_WINDOW (about), license_trans);
-	adw_about_window_set_application_icon (ADW_ABOUT_WINDOW (about), "folder");
-	adw_about_window_set_developer_name (ADW_ABOUT_WINDOW (about), "Linux Mint / Cinnamon");
+	adw_about_window_set_license_type (ADW_ABOUT_WINDOW (about), GTK_LICENSE_GPL_2_0);
+	adw_about_window_set_application_icon (ADW_ABOUT_WINDOW (about), "system-file-manager");
+	adw_about_window_set_developer_name (ADW_ABOUT_WINDOW (about), _("The Verne, Nemo and Nautilus contributors"));
+	adw_about_window_set_copyright (ADW_ABOUT_WINDOW (about),
+					"\xc2\xa9 2012-2026 Linux Mint and the Nemo contributors\n"
+					"\xc2\xa9 1999-2012 Red Hat, Inc., Eazel, Inc. and the Nautilus contributors");
+	adw_about_window_set_website (ADW_ABOUT_WINDOW (about), "https://github.com/linuxmint/nemo");
+	adw_about_window_set_issue_url (ADW_ABOUT_WINDOW (about), "https://github.com/linuxmint/nemo/issues");
+	/* Translators: leave untranslated, or replace with your own credit line. */
+	adw_about_window_set_translator_credits (ADW_ABOUT_WINDOW (about), _("translator-credits"));
+
+	{
+		/* Kudos where they are due: this tree is a presentation layer on
+		 * top of two much larger projects. */
+		const char *nemo_credits[] = {
+			"Linux Mint https://linuxmint.com",
+			"Clement Lefebvre",
+			"Michael Webster",
+			"Gwendal Le Bihan",
+			NULL
+		};
+		const char *nautilus_credits[] = {
+			"The GNOME Project https://gitlab.gnome.org/GNOME/nautilus",
+			"Eazel, Inc.",
+			"Red Hat, Inc.",
+			NULL
+		};
+		const char *artwork_credits[] = {
+			"The GNOME Design Team https://gitlab.gnome.org/Teams/Design",
+			NULL
+		};
+
+		adw_about_window_add_credit_section (ADW_ABOUT_WINDOW (about),
+						     _("Based on Nemo, by"), nemo_credits);
+		adw_about_window_add_credit_section (ADW_ABOUT_WINDOW (about),
+						     _("Descended from Nautilus, by"), nautilus_credits);
+		adw_about_window_add_credit_section (ADW_ABOUT_WINDOW (about),
+						     _("Icons and visual design"), artwork_credits);
+	}
 	if (parent &&
 	    gtk_window_get_type_hint (parent) != GDK_WINDOW_TYPE_HINT_DESKTOP &&
 	    g_object_get_data (G_OBJECT (parent), "is_desktop_window") == NULL)

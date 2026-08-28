@@ -394,6 +394,24 @@ verne_map_icon_name (const char *name)
 		return "starred-symbolic";
 	if (g_strcmp0 (name, "unfavorite-symbolic") == 0)
 		return "non-starred-symbolic";
+	/* xapp-symbolic-icons is a Mint package Verne does not depend on, so
+	 * every xsi- name it owns has to resolve to a freedesktop/Adwaita one
+	 * or the menu item, button or sidebar row shows a broken-image glyph. */
+	if (g_strcmp0 (name, "search-symbolic") == 0)
+		return "system-search-symbolic";
+	if (g_strcmp0 (name, "keyboard-shortcuts-symbolic") == 0)
+		return "preferences-desktop-keyboard-shortcuts-symbolic";
+	if (g_strcmp0 (name, "media-mount-symbolic") == 0)
+		return "media-removable-symbolic";
+	if (g_strcmp0 (name, "pin-symbolic") == 0 ||
+	    g_strcmp0 (name, "unpin-symbolic") == 0)
+		return "view-pin-symbolic";
+	if (g_strcmp0 (name, "tools-symbolic") == 0)
+		return "applications-utilities-symbolic";
+	if (g_strcmp0 (name, "user-favorites-symbolic") == 0)
+		return "starred-symbolic";
+	if (g_strcmp0 (name, "mount-archive-symbolic") == 0)
+		return "package-x-generic-symbolic";
 	if (g_strcmp0 (name, "ok") == 0)
 		return "emblem-ok-symbolic";
 	if (g_strcmp0 (name, "stop") == 0)
@@ -1350,7 +1368,8 @@ typedef enum {
 gint gdk_window_get_origin (GdkSurface *window, gint *x, gint *y);
 #define gdk_window_get_toplevel(w) (w)
 #define gdk_cairo_get_clip_rectangle(cr, r) verne_gdk_cairo_get_clip_rectangle (cr, r)
-#define gtk_style_context_get_background_color(ctx, state, rgba) G_STMT_START { if (rgba) { (rgba)->red=1; (rgba)->green=1; (rgba)->blue=1; (rgba)->alpha=1; } } G_STMT_END
+void verne_style_context_get_background_color (GtkStyleContext *context, GtkStateFlags state, GdkRGBA *rgba);
+#define gtk_style_context_get_background_color(ctx, state, rgba) verne_style_context_get_background_color ((ctx), (state), (rgba))
 #define gtk_widget_set_realized(w, b) ((void)0)
 #define gtk_widget_get_visual(w) NULL
 #define gtk_widget_set_window(w, win) ((void)0)

@@ -61,6 +61,25 @@ on_row_activated (GtkWidget *box, GtkWidget *row, GtkWidget *widget)
     gtk_button_clicked (GTK_BUTTON (button));
 }
 
+/* Actions ship with whatever icon name their author picked - Cinnamon's
+ * cs-* set, for instance - and a name the running theme has never heard of
+ * renders as a broken-image glyph in this list. Fall back to something
+ * neutral instead. */
+static const gchar *
+action_icon_name_or_fallback (const gchar *icon_name)
+{
+    GdkDisplay *display = gdk_display_get_default ();
+    GtkIconTheme *theme = display ? gtk_icon_theme_get_for_display (display) : NULL;
+    const gchar *mapped = verne_map_icon_name (icon_name);
+
+    if (mapped == NULL || mapped[0] == '\0')
+        return "application-x-executable-symbolic";
+    if (theme != NULL && !gtk_icon_theme_has_icon (theme, mapped))
+        return "application-x-executable-symbolic";
+
+    return icon_name;
+}
+
 static void
 on_check_toggled(GtkWidget *button, ActionProxy *proxy)
 {
@@ -289,7 +308,9 @@ refresh_widget (NemoActionConfigWidget *widget)
             if (proxy->stock_id != NULL)
                 gtk_image_set_from_stock (GTK_IMAGE (w), proxy->stock_id, GTK_ICON_SIZE_MENU);
             else if (proxy->icon_name != NULL)
-                gtk_image_set_from_icon_name (GTK_IMAGE (w), proxy->icon_name, GTK_ICON_SIZE_MENU);
+                gtk_image_set_from_icon_name (GTK_IMAGE (w),
+                                              action_icon_name_or_fallback (proxy->icon_name),
+                                              GTK_ICON_SIZE_MENU);
             gtk_box_pack_start (GTK_BOX (box), w, FALSE, FALSE, 2);
 
             gchar *display_name = strip_accel (proxy->name);
