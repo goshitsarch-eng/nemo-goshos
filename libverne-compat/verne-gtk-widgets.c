@@ -1573,7 +1573,22 @@ verne_dest_overlay_scroll (GtkEventControllerScroll *controller,
 	(void) dx;
 	if (va == NULL)
 		return FALSE;
-	gtk_adjustment_set_value (va, gtk_adjustment_get_value (va) + dy * 32.0);
+	if (dy > -0.01 && dy < 0.01)
+		return FALSE;
+	{
+		gdouble step = (dy > -2.0 && dy < 2.0) ? dy * 48.0 : dy;
+		gdouble lower = gtk_adjustment_get_lower (va);
+		gdouble upper = gtk_adjustment_get_upper (va) - gtk_adjustment_get_page_size (va);
+		gdouble next = gtk_adjustment_get_value (va) + step;
+
+		if (upper < lower)
+			upper = lower;
+		if (next < lower)
+			next = lower;
+		if (next > upper)
+			next = upper;
+		gtk_adjustment_set_value (va, next);
+	}
 	g_warning ("verne: overlay menu scroll dy=%.1f value=%.0f",
 		   dy, gtk_adjustment_get_value (va));
 	return TRUE;

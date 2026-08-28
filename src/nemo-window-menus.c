@@ -465,6 +465,7 @@ action_show_shortcuts_window (GtkAction *action,
 		gtk_window_set_default_size (GTK_WINDOW (shortcuts_window), 760, 520);
 		/* GTK4 GtkShortcutsWindow otherwise sizes to content (~natural). */
 		gtk_widget_set_size_request (shortcuts_window, 700, 480);
+		gtk_window_set_hide_on_close (GTK_WINDOW (shortcuts_window), TRUE);
 
 		g_object_unref (builder);
 	}
@@ -472,7 +473,7 @@ action_show_shortcuts_window (GtkAction *action,
 	if (GTK_WINDOW (window) != gtk_window_get_transient_for (GTK_WINDOW (shortcuts_window)))
 		gtk_window_set_transient_for (GTK_WINDOW (shortcuts_window), GTK_WINDOW (window));
 
-	gtk_widget_show (shortcuts_window);
+	gtk_widget_set_visible (shortcuts_window, TRUE);
 	gtk_window_present (GTK_WINDOW (shortcuts_window));
 }
 

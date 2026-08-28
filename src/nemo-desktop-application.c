@@ -174,7 +174,7 @@ desktop_handler_is_ignored (GdkWindow *window, gchar **ignored)
 
     ret = FALSE;
 
-    xw = gdk_x11_window_get_xid (GDK_X11_WINDOW (window));
+    xw = verne_x11_get_xid (window);
     xd = gdk_x11_display_get_xdisplay (gdk_display_get_default ());
 
     for (i = 0; i < g_strv_length (ignored); i++) {

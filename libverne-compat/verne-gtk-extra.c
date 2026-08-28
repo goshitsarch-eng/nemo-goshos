@@ -1180,8 +1180,17 @@ gdk_screen_get_monitor_geometry (GdkScreen *screen, int monitor, GdkRectangle *d
 int
 gdk_screen_get_monitor_scale_factor (GdkScreen *screen, int monitor)
 {
-	(void) screen; (void) monitor;
-	return 1;
+	GdkDisplay *display;
+	GdkMonitor *m;
+
+	(void) screen;
+	display = gdk_display_get_default ();
+	if (display == NULL)
+		return 1;
+	m = gdk_display_get_monitor (display, monitor);
+	if (m == NULL)
+		m = gdk_display_get_monitor (display, 0);
+	return m ? gdk_monitor_get_scale_factor (m) : 1;
 }
 
 gchar *
@@ -1191,11 +1200,194 @@ gdk_screen_get_monitor_plug_name (GdkScreen *screen, int monitor)
 	return g_strdup ("default");
 }
 
+struct _GdkKeymap {
+	GObject parent_instance;
+};
+
+typedef struct _GdkKeymapClass {
+	GObjectClass parent_class;
+} GdkKeymapClass;
+
+enum {
+	VERNE_KEYMAP_DIRECTION_CHANGED,
+	VERNE_KEYMAP_LAST_SIGNAL
+};
+
+static guint verne_keymap_signals[VERNE_KEYMAP_LAST_SIGNAL];
+
+G_DEFINE_TYPE (GdkKeymap, gdk_keymap, G_TYPE_OBJECT)
+
+static void
+gdk_keymap_class_init (GdkKeymapClass *klass)
+{
+	verne_keymap_signals[VERNE_KEYMAP_DIRECTION_CHANGED] =
+		g_signal_new ("direction-changed",
+			      G_TYPE_FROM_CLASS (klass),
+			      G_SIGNAL_RUN_FIRST,
+			      0, NULL, NULL, NULL,
+			      G_TYPE_NONE, 0);
+}
+
+static void
+gdk_keymap_init (GdkKeymap *keymap)
+{
+	(void) keymap;
+}
+
+static GdkKeymap *
+verne_keymap_singleton (void)
+{
+	static GdkKeymap *keymap;
+
+	if (keymap == NULL)
+		keymap = g_object_new (GDK_TYPE_KEYMAP, NULL);
+	return keymap;
+}
+
+GdkKeymap *
+gdk_keymap_get_default (void)
+{
+	return verne_keymap_singleton ();
+}
+
+GdkKeymap *
+gdk_keymap_get_for_display (GdkDisplay *display)
+{
+	(void) display;
+	return verne_keymap_singleton ();
+}
+
+PangoDirection
+gdk_keymap_get_direction (GdkKeymap *keymap)
+{
+	(void) keymap;
+	return gtk_get_locale_direction () == GTK_TEXT_DIR_RTL
+		? PANGO_DIRECTION_RTL
+		: PANGO_DIRECTION_LTR;
+}
+
+#ifdef GDK_WINDOWING_X11
+static Display *
+verne_xdisplay (void)
+{
+	GdkDisplay *display = gdk_display_get_default ();
+
+	if (display == NULL || !GDK_IS_X11_DISPLAY (display))
+		return NULL;
+	return gdk_x11_display_get_xdisplay (display);
+}
+
+static Atom
+verne_gdk_atom_to_xatom (Display *dpy, GdkAtom atom)
+{
+	const gchar *name;
+
+	if (dpy == NULL || atom == NULL)
+		return None;
+	name = (const gchar *) atom;
+	if (g_strcmp0 (name, "PRIMARY") == 0)
+		return XA_PRIMARY;
+	if (g_strcmp0 (name, "SECONDARY") == 0)
+		return XA_SECONDARY;
+	if (g_strcmp0 (name, "STRING") == 0)
+		return XA_STRING;
+	if (g_strcmp0 (name, "ATOM") == 0)
+		return XA_ATOM;
+	if (g_strcmp0 (name, "INTEGER") == 0)
+		return XA_INTEGER;
+	if (g_strcmp0 (name, "WINDOW") == 0)
+		return XA_WINDOW;
+	if (g_strcmp0 (name, "CARDINAL") == 0)
+		return XA_CARDINAL;
+	if (g_strcmp0 (name, "UTF8_STRING") == 0)
+		return XInternAtom (dpy, "UTF8_STRING", False);
+	return XInternAtom (dpy, name, False);
+}
+
+static gboolean
+verne_net_workarea (GdkRectangle *rect)
+{
+	Display *dpy;
+	Window root;
+	Atom workarea, actual_type = None;
+	int actual_format = 0;
+	unsigned long nitems = 0, bytes_after = 0;
+	unsigned char *prop = NULL;
+	unsigned long *values;
+	gboolean ok = FALSE;
+
+	dpy = verne_xdisplay ();
+	if (dpy == NULL || rect == NULL)
+		return FALSE;
+	root = DefaultRootWindow (dpy);
+	workarea = XInternAtom (dpy, "_NET_WORKAREA", True);
+	if (workarea == None)
+		return FALSE;
+	if (XGetWindowProperty (dpy, root, workarea, 0, 4, False, XA_CARDINAL,
+				&actual_type, &actual_format, &nitems, &bytes_after,
+				&prop) != Success || prop == NULL)
+		return FALSE;
+	if (actual_type == XA_CARDINAL && actual_format == 32 && nitems >= 4) {
+		values = (unsigned long *) prop;
+		rect->x = (gint) values[0];
+		rect->y = (gint) values[1];
+		rect->width = (gint) values[2];
+		rect->height = (gint) values[3];
+		ok = rect->width > 0 && rect->height > 0;
+	}
+	XFree (prop);
+	return ok;
+}
+#endif
+
+unsigned long
+verne_x11_get_xid (gpointer window)
+{
+#ifdef GDK_WINDOWING_X11
+	gpointer stored;
+
+	if (window == NULL)
+		return 0;
+	stored = g_object_get_data (G_OBJECT (window), "verne-xid");
+	if (stored)
+		return (unsigned long) GPOINTER_TO_UINT (stored);
+	if (GDK_IS_X11_SURFACE (window))
+		return (unsigned long) gdk_x11_surface_get_xid (GDK_X11_SURFACE (window));
+#else
+	(void) window;
+#endif
+	return 0;
+}
+
 void
 gdk_monitor_get_workarea (GdkMonitor *monitor, GdkRectangle *workarea)
 {
-	if (monitor && workarea)
-		gdk_monitor_get_geometry (monitor, workarea);
+	GdkRectangle geo = { 0, 0, 0, 0 };
+
+	if (workarea == NULL)
+		return;
+	if (monitor)
+		gdk_monitor_get_geometry (monitor, &geo);
+	*workarea = geo;
+#ifdef GDK_WINDOWING_X11
+	{
+		GdkRectangle net;
+
+		if (verne_net_workarea (&net)) {
+			gint x1 = MAX (net.x, geo.x);
+			gint y1 = MAX (net.y, geo.y);
+			gint x2 = MIN (net.x + net.width, geo.x + geo.width);
+			gint y2 = MIN (net.y + net.height, geo.y + geo.height);
+
+			if (x2 > x1 && y2 > y1) {
+				workarea->x = x1;
+				workarea->y = y1;
+				workarea->width = x2 - x1;
+				workarea->height = y2 - y1;
+			}
+		}
+	}
+#endif
 }
 
 GdkEvent *
@@ -2454,7 +2646,81 @@ gtk_widget_override_background_color (GtkWidget *widget, GtkStateFlags state, co
 }
 void gdk_window_set_background_rgba (GdkSurface *window, const GdkRGBA *rgba) { (void) window; (void) rgba; }
 void gdk_window_set_transient_for (GdkSurface *window, GdkSurface *parent) { (void) window; (void) parent; }
-GdkWindowTypeHint gdk_window_get_type_hint (GdkSurface *window) { (void) window; return GDK_WINDOW_TYPE_HINT_NORMAL; }
+GdkWindowTypeHint
+gdk_window_get_type_hint (GdkSurface *window)
+{
+#ifdef GDK_WINDOWING_X11
+	Display *dpy;
+	Window xid;
+	Atom actual_type = None, prop, desktop, dialog, menu, dock, utility, splash, tooltip, combo, dnd, dropdown, popup, notification, toolbar, normal;
+	int actual_format = 0;
+	unsigned long nitems = 0, bytes_after = 0;
+	unsigned char *data = NULL;
+	Atom value = None;
+
+	xid = (Window) verne_x11_get_xid (window);
+	dpy = verne_xdisplay ();
+	if (dpy == NULL || xid == 0)
+		return GDK_WINDOW_TYPE_HINT_NORMAL;
+	prop = XInternAtom (dpy, "_NET_WM_WINDOW_TYPE", True);
+	if (prop == None)
+		return GDK_WINDOW_TYPE_HINT_NORMAL;
+	if (XGetWindowProperty (dpy, xid, prop, 0, 1, False, XA_ATOM,
+				&actual_type, &actual_format, &nitems, &bytes_after,
+				&data) != Success || data == NULL || nitems < 1) {
+		if (data)
+			XFree (data);
+		return GDK_WINDOW_TYPE_HINT_NORMAL;
+	}
+	value = *(Atom *) data;
+	XFree (data);
+	desktop = XInternAtom (dpy, "_NET_WM_WINDOW_TYPE_DESKTOP", True);
+	dialog = XInternAtom (dpy, "_NET_WM_WINDOW_TYPE_DIALOG", True);
+	menu = XInternAtom (dpy, "_NET_WM_WINDOW_TYPE_MENU", True);
+	dock = XInternAtom (dpy, "_NET_WM_WINDOW_TYPE_DOCK", True);
+	utility = XInternAtom (dpy, "_NET_WM_WINDOW_TYPE_UTILITY", True);
+	splash = XInternAtom (dpy, "_NET_WM_WINDOW_TYPE_SPLASH", True);
+	tooltip = XInternAtom (dpy, "_NET_WM_WINDOW_TYPE_TOOLTIP", True);
+	combo = XInternAtom (dpy, "_NET_WM_WINDOW_TYPE_COMBO", True);
+	dnd = XInternAtom (dpy, "_NET_WM_WINDOW_TYPE_DND", True);
+	dropdown = XInternAtom (dpy, "_NET_WM_WINDOW_TYPE_DROPDOWN_MENU", True);
+	popup = XInternAtom (dpy, "_NET_WM_WINDOW_TYPE_POPUP_MENU", True);
+	notification = XInternAtom (dpy, "_NET_WM_WINDOW_TYPE_NOTIFICATION", True);
+	toolbar = XInternAtom (dpy, "_NET_WM_WINDOW_TYPE_TOOLBAR", True);
+	normal = XInternAtom (dpy, "_NET_WM_WINDOW_TYPE_NORMAL", True);
+	if (value == desktop)
+		return GDK_WINDOW_TYPE_HINT_DESKTOP;
+	if (value == dialog)
+		return GDK_WINDOW_TYPE_HINT_DIALOG;
+	if (value == menu)
+		return GDK_WINDOW_TYPE_HINT_MENU;
+	if (value == dock)
+		return GDK_WINDOW_TYPE_HINT_DOCK;
+	if (value == utility)
+		return GDK_WINDOW_TYPE_HINT_UTILITY;
+	if (value == splash)
+		return GDK_WINDOW_TYPE_HINT_SPLASHSCREEN;
+	if (value == tooltip)
+		return GDK_WINDOW_TYPE_HINT_TOOLTIP;
+	if (value == combo)
+		return GDK_WINDOW_TYPE_HINT_COMBO;
+	if (value == dnd)
+		return GDK_WINDOW_TYPE_HINT_DND;
+	if (value == dropdown)
+		return GDK_WINDOW_TYPE_HINT_DROPDOWN_MENU;
+	if (value == popup)
+		return GDK_WINDOW_TYPE_HINT_POPUP_MENU;
+	if (value == notification)
+		return GDK_WINDOW_TYPE_HINT_NOTIFICATION;
+	if (value == toolbar)
+		return GDK_WINDOW_TYPE_HINT_TOOLBAR;
+	if (value == normal)
+		return GDK_WINDOW_TYPE_HINT_NORMAL;
+#else
+	(void) window;
+#endif
+	return GDK_WINDOW_TYPE_HINT_NORMAL;
+}
 cairo_surface_t *gdk_window_create_similar_surface (GdkSurface *window, cairo_content_t content, int w, int h) {
 	(void) window;
 	if (w < 1)
@@ -2478,21 +2744,267 @@ cairo_surface_t *gdk_window_create_similar_image_surface (GdkSurface *window, ca
 void gdk_window_move_to_rect (GdkSurface *window, const GdkRectangle *rect, GdkGravity rect_anchor, GdkGravity window_anchor, GdkAnchorHints hints, int dx, int dy) {
 	(void) window; (void) rect; (void) rect_anchor; (void) window_anchor; (void) hints; (void) dx; (void) dy;
 }
-gboolean gdk_property_get (GdkSurface *window, GdkAtom property, GdkAtom type, gulong offset, gulong length, gint pdelete, GdkAtom *actual_type, gint *actual_format, gint *actual_length, guchar **data) {
+gboolean
+gdk_property_get (GdkSurface *window, GdkAtom property, GdkAtom type, gulong offset, gulong length,
+		  gint pdelete, GdkAtom *actual_type, gint *actual_format, gint *actual_length, guchar **data)
+{
+#ifdef GDK_WINDOWING_X11
+	Display *dpy;
+	Window xid = None;
+	Atom xprop, xtype, ret_type = None;
+	int ret_format = 0;
+	unsigned long nitems = 0, bytes_after = 0, xlength;
+	unsigned char *ret = NULL;
+	int res;
+
+	if (actual_type)
+		*actual_type = NULL;
+	if (actual_format)
+		*actual_format = 0;
+	if (actual_length)
+		*actual_length = 0;
+	if (data)
+		*data = NULL;
+
+	dpy = verne_xdisplay ();
+	if (dpy == NULL || property == NULL)
+		return FALSE;
+	xid = (Window) verne_x11_get_xid (window);
+	/* XDirectSave lives on the drag source, which GTK4's GdkDrop surface
+	 * is not. The XdndSelection owner is that source window. */
+	if (g_strcmp0 ((const gchar *) property, "XdndDirectSave0") == 0) {
+		Window owner = XGetSelectionOwner (dpy, XInternAtom (dpy, "XdndSelection", False));
+
+		if (owner != None)
+			xid = owner;
+	}
+	if (xid == 0)
+		return FALSE;
+	xprop = verne_gdk_atom_to_xatom (dpy, property);
+	xtype = type ? verne_gdk_atom_to_xatom (dpy, type) : AnyPropertyType;
+	if (xprop == None)
+		return FALSE;
+	xlength = (length + 3) / 4;
+	if (xlength == 0)
+		xlength = 1;
+	res = XGetWindowProperty (dpy, xid, xprop, offset, xlength, pdelete ? True : False,
+				  xtype, &ret_type, &ret_format, &nitems, &bytes_after, &ret);
+	if (res != Success || ret == NULL) {
+		if (ret)
+			XFree (ret);
+		if (xtype != AnyPropertyType) {
+			res = XGetWindowProperty (dpy, xid, xprop, offset, xlength, False,
+						  AnyPropertyType, &ret_type, &ret_format,
+						  &nitems, &bytes_after, &ret);
+		}
+	}
+	if (res != Success || ret == NULL) {
+		if (ret)
+			XFree (ret);
+		return FALSE;
+	}
+	if (actual_type) {
+		char *tname = ret_type ? XGetAtomName (dpy, ret_type) : NULL;
+
+		*actual_type = tname ? gdk_atom_intern (tname, FALSE) : NULL;
+		if (tname)
+			XFree (tname);
+	}
+	if (actual_format)
+		*actual_format = ret_format;
+	if (ret_format == 32) {
+		unsigned long *src = (unsigned long *) ret;
+		guint32 *dst = g_new (guint32, nitems);
+		unsigned long i;
+
+		for (i = 0; i < nitems; i++)
+			dst[i] = (guint32) src[i];
+		if (actual_length)
+			*actual_length = (gint) (nitems * 4);
+		if (data)
+			*data = (guchar *) dst;
+		else
+			g_free (dst);
+	} else if (ret_format == 16) {
+		if (actual_length)
+			*actual_length = (gint) (nitems * 2);
+		if (data)
+			*data = g_memdup2 (ret, nitems * 2);
+	} else {
+		if (actual_length)
+			*actual_length = (gint) nitems;
+		if (data)
+			*data = g_memdup2 (ret, nitems);
+	}
+	XFree (ret);
+	return TRUE;
+#else
 	(void) window; (void) property; (void) type; (void) offset; (void) length; (void) pdelete;
 	if (actual_type) *actual_type = NULL;
 	if (actual_format) *actual_format = 0;
 	if (actual_length) *actual_length = 0;
 	if (data) *data = NULL;
 	return FALSE;
+#endif
 }
-void gdk_property_change (GdkSurface *window, GdkAtom property, GdkAtom type, gint format, gint mode, const guchar *data, gint nelements) {
+
+void
+gdk_property_change (GdkSurface *window, GdkAtom property, GdkAtom type, gint format, gint mode,
+		     const guchar *data, gint nelements)
+{
+#ifdef GDK_WINDOWING_X11
+	Display *dpy;
+	Window xid = None;
+	Atom xprop, xtype;
+	int xmode = PropModeReplace;
+
+	dpy = verne_xdisplay ();
+	if (dpy == NULL || property == NULL || data == NULL || nelements < 0)
+		return;
+	xid = (Window) verne_x11_get_xid (window);
+	if (g_strcmp0 ((const gchar *) property, "XdndDirectSave0") == 0) {
+		Window owner = XGetSelectionOwner (dpy, XInternAtom (dpy, "XdndSelection", False));
+
+		if (owner != None)
+			xid = owner;
+	}
+	if (xid == 0)
+		return;
+	xprop = verne_gdk_atom_to_xatom (dpy, property);
+	xtype = type ? verne_gdk_atom_to_xatom (dpy, type) : XA_STRING;
+	if (xprop == None)
+		return;
+	if (mode == GDK_PROP_MODE_PREPEND)
+		xmode = PropModePrepend;
+	else if (mode == GDK_PROP_MODE_APPEND)
+		xmode = PropModeAppend;
+	if (format != 8 && format != 16 && format != 32)
+		format = 8;
+	XChangeProperty (dpy, xid, xprop, xtype, format, xmode, data, nelements);
+	XFlush (dpy);
+#else
 	(void) window; (void) property; (void) type; (void) format; (void) mode; (void) data; (void) nelements;
+#endif
 }
-GdkSurface *gdk_selection_owner_get (GdkAtom selection) { (void) selection; return NULL; }
-gboolean gdk_display_supports_selection_notification (GdkDisplay *display) { (void) display; return FALSE; }
-gboolean gdk_screen_get_setting (GdkScreen *screen, const gchar *name, GValue *value) { (void) screen; (void) name; (void) value; return FALSE; }
-GList *gdk_screen_get_window_stack (GdkScreen *screen) { (void) screen; return NULL; }
+
+GdkSurface *
+gdk_selection_owner_get (GdkAtom selection)
+{
+#ifdef GDK_WINDOWING_X11
+	Display *dpy;
+	Window owner;
+	GdkDisplay *display;
+
+	dpy = verne_xdisplay ();
+	display = gdk_display_get_default ();
+	if (dpy == NULL || display == NULL)
+		return NULL;
+	owner = XGetSelectionOwner (dpy, verne_gdk_atom_to_xatom (dpy, selection));
+	if (owner == None)
+		return NULL;
+	return gdk_x11_surface_lookup_for_display (display, owner);
+#else
+	(void) selection;
+	return NULL;
+#endif
+}
+
+gboolean
+gdk_display_supports_selection_notification (GdkDisplay *display)
+{
+#ifdef GDK_WINDOWING_X11
+	return display != NULL && GDK_IS_X11_DISPLAY (display);
+#else
+	(void) display;
+	return FALSE;
+#endif
+}
+
+gboolean
+gdk_screen_get_setting (GdkScreen *screen, const gchar *name, GValue *value)
+{
+	GtkSettings *settings;
+	GParamSpec *pspec;
+	GValue src = G_VALUE_INIT;
+
+	(void) screen;
+	if (name == NULL || value == NULL)
+		return FALSE;
+	if (g_strcmp0 (name, "gdk-window-scaling-factor") == 0) {
+		GdkDisplay *display = gdk_display_get_default ();
+		GdkMonitor *monitor = display ? gdk_display_get_monitor (display, 0) : NULL;
+		guint scale = monitor ? (guint) gdk_monitor_get_scale_factor (monitor) : 1u;
+
+		if (G_VALUE_TYPE (value) == G_TYPE_UINT)
+			g_value_set_uint (value, scale);
+		else if (G_VALUE_TYPE (value) == G_TYPE_INT)
+			g_value_set_int (value, (gint) scale);
+		else if (G_VALUE_TYPE (value) == 0) {
+			g_value_init (value, G_TYPE_UINT);
+			g_value_set_uint (value, scale);
+		} else
+			return FALSE;
+		return TRUE;
+	}
+	settings = gtk_settings_get_default ();
+	if (settings == NULL)
+		return FALSE;
+	pspec = g_object_class_find_property (G_OBJECT_GET_CLASS (settings), name);
+	if (pspec == NULL)
+		return FALSE;
+	g_value_init (&src, G_PARAM_SPEC_VALUE_TYPE (pspec));
+	g_object_get_property (G_OBJECT (settings), name, &src);
+	if (G_VALUE_TYPE (value) == 0)
+		g_value_init (value, G_VALUE_TYPE (&src));
+	if (!g_value_transform (&src, value)) {
+		g_value_unset (&src);
+		return FALSE;
+	}
+	g_value_unset (&src);
+	return TRUE;
+}
+
+GList *
+gdk_screen_get_window_stack (GdkScreen *screen)
+{
+#ifdef GDK_WINDOWING_X11
+	Display *dpy;
+	Window root;
+	Atom stacking, list_atom, actual_type = None;
+	int actual_format = 0;
+	unsigned long nitems = 0, bytes_after = 0, i;
+	unsigned char *prop = NULL;
+	unsigned long *ids;
+	GList *windows = NULL;
+
+	(void) screen;
+	dpy = verne_xdisplay ();
+	if (dpy == NULL)
+		return NULL;
+	root = DefaultRootWindow (dpy);
+	stacking = XInternAtom (dpy, "_NET_CLIENT_LIST_STACKING", True);
+	list_atom = stacking != None ? stacking : XInternAtom (dpy, "_NET_CLIENT_LIST", True);
+	if (list_atom == None)
+		return NULL;
+	if (XGetWindowProperty (dpy, root, list_atom, 0, 4096, False, XA_WINDOW,
+				&actual_type, &actual_format, &nitems, &bytes_after,
+				&prop) != Success || prop == NULL)
+		return NULL;
+	ids = (unsigned long *) prop;
+	for (i = nitems; i-- > 0; ) {
+		GObject *token = g_object_new (G_TYPE_OBJECT, NULL);
+
+		g_object_set_data (token, "verne-xid", GUINT_TO_POINTER ((guint) ids[i]));
+		windows = g_list_prepend (windows, token);
+	}
+	XFree (prop);
+	return windows;
+#else
+	(void) screen;
+	return NULL;
+#endif
+}
+
 struct passwd *
 gnome_desktop_get_session_user_pwent (void)
 {

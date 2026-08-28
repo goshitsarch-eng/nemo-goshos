@@ -1439,9 +1439,14 @@ void gtk_target_table_free (GtkTargetEntry *targets, gint n_targets);
 
 void gtk_misc_get_padding (GtkMisc *misc, gint *xpad, gint *ypad);
 void gtk_style_context_get (GtkStyleContext *context, GtkStateFlags state, ...) G_GNUC_NULL_TERMINATED;
-#define gtk_render_insertion_cursor(ctx, cr, x, y, layout, index, dir) ((void)0)
-#define gdk_keymap_get_default() NULL
-#define gdk_keymap_get_direction(k) PANGO_DIRECTION_LTR
+
+typedef struct _GdkKeymap GdkKeymap;
+GType gdk_keymap_get_type (void);
+#define GDK_TYPE_KEYMAP (gdk_keymap_get_type ())
+#define GDK_IS_KEYMAP(obj) (G_TYPE_CHECK_INSTANCE_TYPE ((obj), GDK_TYPE_KEYMAP))
+GdkKeymap *gdk_keymap_get_default (void);
+GdkKeymap *gdk_keymap_get_for_display (GdkDisplay *display);
+PangoDirection gdk_keymap_get_direction (GdkKeymap *keymap);
 
 static inline GtkClipboard *
 verne_gtk_widget_get_clipboard (GtkWidget *widget, GdkAtom selection)
@@ -1454,7 +1459,6 @@ verne_gtk_widget_get_clipboard (GtkWidget *widget, GdkAtom selection)
 #endif
 #define gtk_widget_get_clipboard(w, sel) verne_gtk_widget_get_clipboard (w, sel)
 
-typedef struct _GdkKeymap GdkKeymap;
 #define gtk_im_multicontext_append_menuitems(ctx, shell) verne_im_multicontext_append_menuitems ((ctx), (shell))
 void verne_im_multicontext_append_menuitems (gpointer context, gpointer menushell);
 void gtk_menu_shell_select_first (gpointer shell, gboolean search_sensitive);
@@ -1959,6 +1963,9 @@ void gtk_menu_item_set_accel_path (GtkMenuItem *item, const gchar *accel_path);
 #define GTK_PACK_DIRECTION_LTR 0
 #define GTK_ICON_LOOKUP_FORCE_SIZE 0
 #define GDK_PROP_MODE_REPLACE 0
+#define GDK_PROP_MODE_PREPEND 1
+#define GDK_PROP_MODE_APPEND 2
+unsigned long verne_x11_get_xid (gpointer window);
 #ifndef GTK_WINDOW_TOPLEVEL
 #define GTK_WINDOW_TOPLEVEL 0
 #define GTK_WINDOW_POPUP 1
