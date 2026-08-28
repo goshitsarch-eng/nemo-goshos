@@ -475,6 +475,16 @@ action_show_shortcuts_window (GtkAction *action,
 
 	gtk_widget_set_visible (shortcuts_window, TRUE);
 	gtk_window_present (GTK_WINDOW (shortcuts_window));
+	g_warning ("Verne: presenting keyboard shortcuts window");
+}
+
+static gboolean
+window_shortcuts_activate (GtkWidget *widget, GVariant *args, gpointer user_data)
+{
+	(void) widget;
+	(void) args;
+	action_show_shortcuts_window (NULL, user_data);
+	return TRUE;
 }
 
 static gboolean
@@ -2080,11 +2090,24 @@ nemo_window_initialize_menus (NemoWindow *window)
 
 	if (g_object_get_data (G_OBJECT (window), "verne-shortcuts-keys") == NULL) {
 		GtkEventController *keys = gtk_event_controller_key_new ();
+		GtkEventController *shortcuts;
+		GtkShortcut *shortcut;
 
 		gtk_event_controller_set_propagation_phase (keys, GTK_PHASE_CAPTURE);
 		g_signal_connect (keys, "key-pressed", G_CALLBACK (window_shortcuts_key), window);
 		gtk_widget_add_controller (GTK_WIDGET (window), keys);
+
+		shortcuts = gtk_shortcut_controller_new ();
+		gtk_shortcut_controller_set_scope (GTK_SHORTCUT_CONTROLLER (shortcuts),
+						   GTK_SHORTCUT_SCOPE_GLOBAL);
+		shortcut = gtk_shortcut_new (gtk_keyval_trigger_new (GDK_KEY_F1, GDK_CONTROL_MASK),
+					     gtk_callback_action_new (window_shortcuts_activate,
+								      window, NULL));
+		gtk_shortcut_controller_add_shortcut (GTK_SHORTCUT_CONTROLLER (shortcuts), shortcut);
+		gtk_widget_add_controller (GTK_WIDGET (window), shortcuts);
 		g_object_set_data (G_OBJECT (window), "verne-shortcuts-keys", GINT_TO_POINTER (1));
+		g_warning ("Verne: installed Ctrl+F1 shortcut handlers on %s",
+			   G_OBJECT_TYPE_NAME (window));
 	}
 
 	g_signal_connect (ui_manager, "connect_proxy",
