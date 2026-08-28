@@ -61,6 +61,44 @@ struct _NemoProgressUIHandlerPriv {
 
 G_DEFINE_TYPE (NemoProgressUIHandler, nemo_progress_ui_handler, G_TYPE_OBJECT);
 
+/* GtkApplication quits when its window list empties, and hiding a window does
+ * not remove it from that list. The File Operations window is created once and
+ * then reused, so leaving it registered while hidden meant nemo never exited
+ * again after the first file operation that ran long enough to show it. Keep
+ * its registration tied to whether it is actually on screen. */
+static void
+progress_ui_handler_present_window (NemoProgressUIHandler *self)
+{
+	GtkApplication *app;
+
+	if (self->priv->progress_window == NULL)
+		return;
+
+	app = GTK_APPLICATION (g_application_get_default ());
+	if (app != NULL &&
+	    !g_list_find (gtk_application_get_windows (app), self->priv->progress_window))
+		gtk_application_add_window (app, GTK_WINDOW (self->priv->progress_window));
+
+	gtk_widget_set_visible (self->priv->progress_window, TRUE);
+	gtk_window_present (GTK_WINDOW (self->priv->progress_window));
+}
+
+static void
+progress_ui_handler_hide_window (NemoProgressUIHandler *self)
+{
+	GtkApplication *app;
+
+	if (self->priv->progress_window == NULL)
+		return;
+
+	gtk_widget_hide (self->priv->progress_window);
+
+	app = GTK_APPLICATION (g_application_get_default ());
+	if (app != NULL &&
+	    g_list_find (gtk_application_get_windows (app), self->priv->progress_window))
+		gtk_application_remove_window (app, GTK_WINDOW (self->priv->progress_window));
+}
+
 static void
 status_icon_activate_cb (XAppStatusIcon        *icon,
                          guint                  button,
@@ -69,7 +107,7 @@ status_icon_activate_cb (XAppStatusIcon        *icon,
 {
     self->priv->should_show_status_icon = FALSE;
     xapp_status_icon_set_visible (icon, FALSE);
-    gtk_window_present (GTK_WINDOW (self->priv->progress_window));
+    progress_ui_handler_present_window (self);
 }
 
 static void
@@ -134,7 +172,7 @@ progress_window_delete_event (GtkWidget *widget,
 			      GdkEvent *event,
 			      NemoProgressUIHandler *self)
 {
-    gtk_widget_hide (widget);
+    progress_ui_handler_hide_window (self);
 
     self->priv->should_show_status_icon = TRUE;
     g_message ("File Operations hidden; showing status icon");
@@ -276,21 +314,20 @@ progress_ui_handler_ensure_window (NemoProgressUIHandler *self)
 
     gtk_box_pack_start (GTK_BOX (main_box), frame, FALSE, FALSE, 0);
     gtk_widget_show_all (main_box);
-    gtk_widget_set_visible (progress_window, TRUE);
 
 	{
 		GtkApplication *app = GTK_APPLICATION (g_application_get_default ());
 		if (app != NULL) {
 			GtkWindow *parent;
 
-			gtk_application_add_window (app, GTK_WINDOW (progress_window));
 			parent = progress_ui_pick_transient_parent (app, GTK_WINDOW (progress_window));
 			if (parent != NULL)
 				gtk_window_set_transient_for (GTK_WINDOW (progress_window), parent);
 		}
 	}
-	gtk_widget_set_visible (progress_window, TRUE);
-	gtk_window_present (GTK_WINDOW (progress_window));
+	/* Registers the window with the application as well; the matching
+	 * removal happens in progress_ui_handler_hide_window(). */
+	progress_ui_handler_present_window (self);
 
 	gtk_window_set_hide_on_close (GTK_WINDOW (progress_window), TRUE);
 	g_signal_connect (progress_window,
@@ -354,7 +391,7 @@ progress_info_finished_cb (NemoProgressInfo *info,
         ensure_first_separator_hidden (self);
 	} else {
 		if (gtk_widget_get_visible (self->priv->progress_window)) {
-			gtk_widget_hide (self->priv->progress_window);
+			progress_ui_handler_hide_window (self);
 		} else {
 			progress_ui_handler_hide_status (self);
 			progress_ui_handler_show_complete_notification (self);
@@ -423,8 +460,7 @@ handle_new_progress_info (NemoProgressUIHandler *self,
 	if (self->priv->active_infos == 1) {
 		/* this is the only active operation, present the window */
 		progress_ui_handler_add_to_window (self, info);
-		gtk_widget_set_visible (self->priv->progress_window, TRUE);
-		gtk_window_present (GTK_WINDOW (self->priv->progress_window));
+		progress_ui_handler_present_window (self);
         gchar *details = nemo_progress_info_get_details (info);
 		gtk_window_set_title (GTK_WINDOW (self->priv->progress_window), details);
         g_free (details);
@@ -435,7 +471,7 @@ handle_new_progress_info (NemoProgressUIHandler *self,
             progress_ui_handler_update_status_icon (self);
         }
         if (gtk_widget_get_visible (GTK_WIDGET (self->priv->progress_window))) {
-            gtk_window_present (GTK_WINDOW (self->priv->progress_window));
+            progress_ui_handler_present_window (self);
         }
 	}
 }
