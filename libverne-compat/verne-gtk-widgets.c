@@ -3987,12 +3987,18 @@ gtk_menu_item_set_accel_path (GtkMenuItem *item, const gchar *accel_path)
 {
 	GtkAccelKey key;
 	gchar *accel_label = NULL;
+	gchar *path_copy;
 	GtkAction *action;
 
 	if (item == NULL)
 		return;
+	/* verne_menu_refresh_accels() re-feeds us the stored path, and
+	 * g_object_set_data_full() frees the old value -- which is that very
+	 * string. Work from our own copy from here on. */
+	path_copy = g_strdup (accel_path);
 	g_object_set_data_full (G_OBJECT (item), "verne-accel-path",
-				g_strdup (accel_path), g_free);
+				path_copy, g_free);
+	accel_path = path_copy;
 	memset (&key, 0, sizeof key);
 	if (accel_path && accel_path[0] && gtk_accel_map_lookup_entry (accel_path, &key) && key.accel_key)
 		accel_label = gtk_accelerator_get_label (key.accel_key, key.accel_mods);
