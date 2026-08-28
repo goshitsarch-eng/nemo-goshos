@@ -748,6 +748,10 @@ verne_window_present_keep (GtkWindow *window)
 {
 	if (!GTK_IS_WINDOW (window))
 		return;
+	/* Before anything realizes the window: a titlebar can only be installed
+	 * on an unrealized one, and gtk_window_present() on a GtkDialog is how
+	 * most of Nemo's dialogs first reach the screen. */
+	verne_prepare_dialog (GTK_WIDGET (window));
 	verne_window_keep_native (window);
 	gtk_widget_set_visible (GTK_WIDGET (window), TRUE);
 	(gtk_window_present) (window);

@@ -1103,6 +1103,10 @@ verne_gtk_widget_show (GtkWidget *widget)
 	/* GTK3 gtk_widget_show() on a GtkMenu does not pop it up. */
 	if (GTK_IS_POPOVER (widget) || GTK_IS_MENU (widget))
 		return;
+	/* Showing a window realizes it, and a titlebar can only be installed
+	 * before that, so prepare the dialog first. */
+	if (GTK_IS_DIALOG (widget))
+		verne_prepare_dialog (widget);
 	gtk_widget_set_visible (widget, TRUE);
 	if (GTK_IS_WINDOW (widget))
 		verne_window_present_safe (GTK_WINDOW (widget));

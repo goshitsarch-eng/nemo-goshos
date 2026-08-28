@@ -552,6 +552,26 @@ verne_prepare_dialog (GtkWidget *widget)
 	g_object_set_data (G_OBJECT (widget), "verne-keep-native", GINT_TO_POINTER (1));
 	g_signal_connect (widget, "close-request", G_CALLBACK (verne_dialog_close_request), NULL);
 
+	/* A GtkDialog with no titlebar widget gets server-side decorations, so
+	 * Properties, Bookmarks and Connect to Server came up wearing the window
+	 * manager's frame while the main window and the Adw dialogs used their
+	 * own. Give them a header bar so the whole app is decorated alike. */
+	if (gtk_window_get_titlebar (GTK_WINDOW (widget)) == NULL) {
+		/* A titlebar can only be installed before the window is
+		 * realized. Some dialogs are already realized by the time they
+		 * reach us; as long as they are not on screen yet, dropping the
+		 * surface and letting the present path re-create it is safe. */
+		if (gtk_widget_get_realized (widget) && !gtk_widget_get_mapped (widget))
+			gtk_widget_unrealize (widget);
+
+		if (!gtk_widget_get_realized (widget)) {
+			GtkWidget *header = gtk_header_bar_new ();
+
+			gtk_header_bar_set_show_title_buttons (GTK_HEADER_BAR (header), TRUE);
+			gtk_window_set_titlebar (GTK_WINDOW (widget), header);
+		}
+	}
+
 	if (gtk_window_get_transient_for (GTK_WINDOW (widget)) == NULL) {
 		app = GTK_APPLICATION (g_application_get_default ());
 		if (app) {
