@@ -342,7 +342,7 @@ action_about_nemo_callback (GtkAction *action,
 
 	about = g_object_get_data (G_OBJECT (parent), "verne-about-window");
 	if (GTK_IS_WINDOW (about)) {
-		gtk_window_present (GTK_WINDOW (about));
+		verne_window_present_keep (GTK_WINDOW (about));
 		return;
 	}
 
@@ -357,11 +357,15 @@ action_about_nemo_callback (GtkAction *action,
 	adw_about_window_set_license (ADW_ABOUT_WINDOW (about), license_trans);
 	adw_about_window_set_application_icon (ADW_ABOUT_WINDOW (about), "folder");
 	adw_about_window_set_developer_name (ADW_ABOUT_WINDOW (about), "Linux Mint / Cinnamon");
-	gtk_window_set_transient_for (GTK_WINDOW (about), parent);
+	if (parent &&
+	    gtk_window_get_type_hint (parent) != GDK_WINDOW_TYPE_HINT_DESKTOP &&
+	    g_object_get_data (G_OBJECT (parent), "is_desktop_window") == NULL)
+		gtk_window_set_transient_for (GTK_WINDOW (about), parent);
 	gtk_window_set_hide_on_close (GTK_WINDOW (about), TRUE);
+	verne_window_keep_native (GTK_WINDOW (about));
 	g_object_set_data (G_OBJECT (parent), "verne-about-window", about);
 	g_object_weak_ref (G_OBJECT (about), verne_about_weak_notify, parent);
-	gtk_window_present (GTK_WINDOW (about));
+	verne_window_present_keep (GTK_WINDOW (about));
 
 	g_free (license_trans);
 }

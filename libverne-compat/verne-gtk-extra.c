@@ -714,6 +714,35 @@ verne_window_keep_native (GtkWindow *window)
 		g_object_set_data (G_OBJECT (window), "verne-keep-native", GINT_TO_POINTER (1));
 }
 
+static void
+verne_x11_lower_desktop_toplevels (void)
+{
+#ifdef GDK_WINDOWING_X11
+	GListModel *model = gtk_window_get_toplevels ();
+	guint i, n = g_list_model_get_n_items (model);
+
+	for (i = 0; i < n; i++) {
+		gpointer w = g_list_model_get_item (model, i);
+		GdkSurface *s;
+
+		if (w && GTK_IS_WINDOW (w) &&
+		    (gtk_window_get_type_hint (GTK_WINDOW (w)) == GDK_WINDOW_TYPE_HINT_DESKTOP ||
+		     g_object_get_data (G_OBJECT (w), "is_desktop_window") != NULL)) {
+			s = gtk_native_get_surface (GTK_NATIVE (w));
+			if (s && GDK_IS_X11_SURFACE (s)) {
+				Display *dpy = gdk_x11_display_get_xdisplay (gdk_surface_get_display (s));
+
+				gdk_x11_display_error_trap_push (gdk_display_get_default ());
+				XLowerWindow (dpy, gdk_x11_surface_get_xid (s));
+				gdk_x11_display_error_trap_pop_ignored (gdk_display_get_default ());
+			}
+		}
+		if (w)
+			g_object_unref (w);
+	}
+#endif
+}
+
 void
 verne_window_present_keep (GtkWindow *window)
 {
@@ -733,12 +762,54 @@ verne_window_present_keep (GtkWindow *window)
 
 			if (dpy && xid) {
 				gdk_x11_display_error_trap_push (gdk_display_get_default ());
+				if (gtk_window_get_type_hint (window) != GDK_WINDOW_TYPE_HINT_DESKTOP &&
+				    g_object_get_data (G_OBJECT (window), "is_desktop_window") == NULL)
+					verne_x11_lower_desktop_toplevels ();
 				XRaiseWindow (dpy, xid);
 				gdk_x11_display_error_trap_pop_ignored (gdk_display_get_default ());
 			}
 		}
 	}
 #endif
+}
+
+GtkWidget *
+verne_adw_window_from_body (GtkWidget *body, const char *title, int width, int height)
+{
+	GtkWidget *win;
+	GtkWidget *header;
+	GtkWidget *toolbar;
+
+	if (width < 320)
+		width = 320;
+	if (height < 240)
+		height = 240;
+
+	win = g_object_new (ADW_TYPE_WINDOW, NULL);
+	gtk_window_set_title (GTK_WINDOW (win), title ? title : "");
+	gtk_window_set_default_size (GTK_WINDOW (win), width, height);
+	gtk_widget_set_size_request (win, MAX (width - 80, 320), MAX (height - 80, 240));
+	gtk_window_set_hide_on_close (GTK_WINDOW (win), TRUE);
+	verne_window_keep_native (GTK_WINDOW (win));
+
+	header = adw_header_bar_new ();
+	toolbar = adw_toolbar_view_new ();
+	adw_toolbar_view_add_top_bar (ADW_TOOLBAR_VIEW (toolbar), header);
+	if (GTK_IS_WIDGET (body)) {
+		GtkWidget *parent = gtk_widget_get_parent (body);
+
+		g_object_ref (body);
+		if (GTK_IS_WINDOW (parent) && gtk_window_get_child (GTK_WINDOW (parent)) == body)
+			gtk_window_set_child (GTK_WINDOW (parent), NULL);
+		else if (parent != NULL)
+			gtk_widget_unparent (body);
+		gtk_widget_set_hexpand (body, TRUE);
+		gtk_widget_set_vexpand (body, TRUE);
+		adw_toolbar_view_set_content (ADW_TOOLBAR_VIEW (toolbar), body);
+		g_object_unref (body);
+	}
+	adw_window_set_content (ADW_WINDOW (win), toolbar);
+	return win;
 }
 
 static gboolean

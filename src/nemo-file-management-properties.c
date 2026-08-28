@@ -1155,15 +1155,32 @@ nemo_file_management_properties_dialog_setup (GtkBuilder  *builder,
 
     dialog = GTK_WIDGET (gtk_builder_get_object (builder, "file_management_dialog"));
 
-	g_signal_connect (dialog, "delete-event",
-			  G_CALLBACK (gtk_widget_destroy), NULL);
-
-    g_signal_connect (dialog, "destroy",
-                      G_CALLBACK (on_dialog_destroy), builder);
-
 	gtk_window_set_icon_name (GTK_WINDOW (dialog), "folder");
 
-	if (window) {
+	{
+		GtkWidget *body;
+		GtkWidget *adw;
+
+		body = gtk_window_get_child (GTK_WINDOW (dialog));
+		if (GTK_IS_WIDGET (body)) {
+			adw = verne_adw_window_from_body (body,
+							  _("File Management Preferences"),
+							  800, 600);
+			gtk_window_set_icon_name (GTK_WINDOW (adw), "folder");
+			verne_window_keep_native (GTK_WINDOW (dialog));
+			gtk_widget_set_visible (dialog, FALSE);
+			g_signal_connect (adw, "destroy",
+					  G_CALLBACK (on_dialog_destroy), builder);
+			dialog = adw;
+		} else {
+			g_signal_connect (dialog, "destroy",
+					  G_CALLBACK (on_dialog_destroy), builder);
+		}
+	}
+
+	if (window &&
+	    gtk_window_get_type_hint (window) != GDK_WINDOW_TYPE_HINT_DESKTOP &&
+	    g_object_get_data (G_OBJECT (window), "is_desktop_window") == NULL) {
 		gtk_window_set_transient_for (GTK_WINDOW (dialog), window);
 	}
 
@@ -1178,8 +1195,8 @@ nemo_file_management_properties_dialog_setup (GtkBuilder  *builder,
         gtk_stack_set_visible_child_name (stack, initial_page);
     }
 
-	gtk_widget_show (dialog);
-	gtk_window_present (GTK_WINDOW (dialog));
+	verne_window_present_keep (GTK_WINDOW (dialog));
+	g_warning ("Verne: presenting File Management Preferences");
 }
 
 void
@@ -1189,7 +1206,7 @@ nemo_file_management_properties_dialog_show (GtkWindow   *window,
 	GtkBuilder *builder;
 
 	if (preferences_dialog != NULL) {
-		gtk_window_present (GTK_WINDOW (preferences_dialog));
+		verne_window_present_keep (GTK_WINDOW (preferences_dialog));
 		return;
 	}
 
