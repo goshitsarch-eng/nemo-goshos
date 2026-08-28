@@ -32,6 +32,15 @@ dest_targets_quark (void)
 }
 
 static GQuark
+dest_flags_quark (void)
+{
+	static GQuark q;
+	if (!q)
+		q = g_quark_from_static_string ("verne-drop-flags");
+	return q;
+}
+
+static GQuark
 drop_xy_quark (void)
 {
 	static GQuark q;
@@ -480,15 +489,6 @@ verne_ensure_native_drop_forwarder (GtkWidget *widget)
 {
 	GtkWidget *win;
 	GtkDropTargetAsync *async;
-	GdkContentFormats *formats;
-	const char *mimes[] = {
-		"x-special/gnome-icon-list",
-		"text/uri-list",
-		"x-special/gnome-copied-files",
-		"text/plain",
-		"_NETSCAPE_URL",
-		NULL
-	};
 
 	if (widget == NULL)
 		return;
@@ -497,8 +497,12 @@ verne_ensure_native_drop_forwarder (GtkWidget *widget)
 		return;
 	if (g_object_get_qdata (G_OBJECT (win), forwarder_quark ()))
 		return;
-	formats = gdk_content_formats_new (mimes, 5);
-	async = gtk_drop_target_async_new (formats,
+	/* NULL formats means "offer me everything". The hard-coded list here
+	 * used to reject anything else outright - a GTK_TREE_MODEL_ROW drag
+	 * (reordering bookmarks in the sidebar) or an XdndDirectSave0 drag from
+	 * a browser never reached a destination at all. Which drags are
+	 * actually acceptable is the destination's decision, below. */
+	async = gtk_drop_target_async_new (NULL,
 					   GDK_ACTION_COPY | GDK_ACTION_MOVE | GDK_ACTION_LINK | GDK_ACTION_ASK);
 	gtk_event_controller_set_propagation_phase (GTK_EVENT_CONTROLLER (async), GTK_PHASE_CAPTURE);
 	g_signal_connect (async, "accept", G_CALLBACK (on_async_accept), win);
@@ -621,6 +625,11 @@ on_async_motion (GtkDropTargetAsync *self, GdkDrop *drop, double x, double y, gp
 	g_debug ("drop dest motion at %.0f,%.0f on %s", x, y, G_OBJECT_TYPE_NAME (widget));
 	pack_drop_xy (drop, x, y);
 	g_signal_emit_by_name (widget, "drag-motion", drop, (int) x, (int) y, time, &handled);
+	/* GTK3 replied for a destination registered with GTK_DEST_DEFAULT_MOTION;
+	 * such a destination has no drag-motion handler of its own. */
+	if (!handled &&
+	    (GPOINTER_TO_INT (g_object_get_qdata (G_OBJECT (widget), dest_flags_quark ())) & GTK_DEST_DEFAULT_MOTION))
+		handled = TRUE;
 	selected = (GdkDragAction) GPOINTER_TO_INT (g_object_get_qdata (G_OBJECT (drop), selected_action_quark ()));
 	if (selected == 0 && handled)
 		selected = GDK_ACTION_COPY;
@@ -638,6 +647,12 @@ on_async_motion (GtkDropTargetAsync *self, GdkDrop *drop, double x, double y, gp
 		if (pending_drop)
 			g_object_unref (pending_drop);
 		pending_drop = g_object_ref (drop);
+		/* This latch stops one GdkDrop being delivered twice. It was
+		 * only ever cleared by gtk_drag_finish(), so a destination that
+		 * never finished a drop - a read that timed out, a drop nothing
+		 * accepted - killed drag and drop process-wide until restart.
+		 * A new drop means the previous one is over either way. */
+		drop_already_emitted = FALSE;
 	}
 	pending_drop_widget = widget;
 	pending_drop_x = x;
@@ -670,6 +685,19 @@ on_async_drop (GtkDropTargetAsync *self, GdkDrop *drop, double x, double y, gpoi
 		   x, y, G_OBJECT_TYPE_NAME (widget),
 		   GPOINTER_TO_INT (g_object_get_qdata (G_OBJECT (drop), selected_action_quark ())));
 	g_signal_emit_by_name (widget, "drag-drop", drop, (int) x, (int) y, GDK_CURRENT_TIME, &handled);
+	/* GTK3 fetched the data itself for a destination registered with
+	 * GTK_DEST_DEFAULT_DROP - the properties window icon, the location bar
+	 * and the templates list only connect drag-data-received - so without
+	 * this their drops did nothing at all. */
+	if (!handled &&
+	    (GPOINTER_TO_INT (g_object_get_qdata (G_OBJECT (widget), dest_flags_quark ())) & GTK_DEST_DEFAULT_DROP)) {
+		GdkAtom target = gtk_drag_dest_find_target (widget, (GdkDragContext *) drop, NULL);
+
+		if (target != NULL) {
+			gtk_drag_get_data (widget, (GdkDragContext *) drop, target, GDK_CURRENT_TIME);
+			handled = TRUE;
+		}
+	}
 	g_debug ("drag-drop handled=%d", handled);
 	return handled;
 }
@@ -1070,6 +1098,18 @@ verne_local_emit_drop (VerneLocalDrag *local)
 		pack_drop_xy (local, local->dest_x, local->dest_y);
 		g_signal_emit_by_name (dest, "drag-drop", local,
 				       (int) local->dest_x, (int) local->dest_y, GDK_CURRENT_TIME, &handled);
+		/* Same as the foreign-drop path: a destination registered with
+		 * GTK_DEST_DEFAULT_DROP has no drag-drop handler and expects the
+		 * data to be fetched for it. */
+		if (!handled &&
+		    (GPOINTER_TO_INT (g_object_get_qdata (G_OBJECT (dest), dest_flags_quark ())) & GTK_DEST_DEFAULT_DROP)) {
+			GdkAtom target = gtk_drag_dest_find_target (dest, (GdkDragContext *) local, NULL);
+
+			if (target != NULL) {
+				gtk_drag_get_data (dest, (GdkDragContext *) local, target, GDK_CURRENT_TIME);
+				handled = TRUE;
+			}
+		}
 		g_debug ("local drag-drop handled=%d", handled);
 		g_signal_emit_by_name (dest, "drag-leave", local, GDK_CURRENT_TIME);
 	} else {
@@ -1932,7 +1972,7 @@ gtk_drag_dest_set (GtkWidget *widget, GtkDestDefaults flags, const GtkTargetEntr
 	GtkWidget *native;
 	gpointer existing;
 
-	(void) flags;
+	g_object_set_qdata (G_OBJECT (widget), dest_flags_quark (), GINT_TO_POINTER ((int) flags));
 	list = gtk_target_list_new (targets, (guint) MAX (n_targets, 0));
 	g_object_set_qdata_full (G_OBJECT (widget), dest_targets_quark (), list, (GDestroyNotify) gtk_target_list_unref);
 	formats = formats_from_entries (targets, n_targets);
