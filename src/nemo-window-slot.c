@@ -517,7 +517,7 @@ nemo_window_slot_dispose (GObject *object)
 		slot->find_mount_cancellable = NULL;
 	}
 
-	slot->pane = NULL;
+	nemo_window_slot_set_pane (slot, NULL);
 
 	g_free (slot->title);
 	slot->title = NULL;
@@ -631,7 +631,14 @@ NemoWindow *
 nemo_window_slot_get_window (NemoWindowSlot *slot)
 {
 	g_return_val_if_fail (NEMO_IS_WINDOW_SLOT (slot), NULL);
-	g_return_val_if_fail (slot->pane != NULL, NULL);
+
+	/* A slot outliving its pane is an ordinary transient state now that
+	 * the pane pointer is weak -- closing a split view leaves it that way
+	 * until the slot itself goes -- so answer NULL rather than warning. */
+	if (slot->pane == NULL) {
+		return NULL;
+	}
+
 	return slot->pane->window;
 }
 
@@ -889,6 +896,12 @@ nemo_window_slot_set_status (NemoWindowSlot *slot,
 {
 	NemoWindow *window;
 
+	/* The view can outlive its slot; it reports status through a NULL
+	 * pointer rather than a live one in that window. */
+	if (slot == NULL) {
+		return;
+	}
+
 	g_assert (NEMO_IS_WINDOW_SLOT (slot));
 
 	g_free (slot->status_text);
@@ -1072,13 +1085,41 @@ nemo_window_slot_should_close_with_mount (NemoWindowSlot *slot,
 	return close_with_mount;
 }
 
+/* Closing a split view frees the extra pane, and a slot can outlive it -- a
+ * pending idle or a GTK gesture still holding a reference is enough. A plain
+ * pointer then leaves nemo_window_slot_get_window() reading pane->window out
+ * of freed memory; a weak one turns that into the NULL the callers already
+ * check for. */
+void
+nemo_window_slot_set_pane (NemoWindowSlot *slot,
+			   NemoWindowPane *pane)
+{
+	g_return_if_fail (NEMO_IS_WINDOW_SLOT (slot));
+
+	if (slot->pane == pane) {
+		return;
+	}
+
+	if (slot->pane != NULL) {
+		g_object_remove_weak_pointer (G_OBJECT (slot->pane),
+					      (gpointer *) &slot->pane);
+	}
+
+	slot->pane = pane;
+
+	if (slot->pane != NULL) {
+		g_object_add_weak_pointer (G_OBJECT (slot->pane),
+					   (gpointer *) &slot->pane);
+	}
+}
+
 NemoWindowSlot *
 nemo_window_slot_new (NemoWindowPane *pane)
 {
 	NemoWindowSlot *slot;
 
 	slot = g_object_new (NEMO_TYPE_WINDOW_SLOT, NULL);
-	slot->pane = pane;
+	nemo_window_slot_set_pane (slot, pane);
 
 	return slot;
 }

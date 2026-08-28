@@ -200,4 +200,10 @@ void nemo_window_slot_set_show_thumbnails (NemoWindowSlot *slot,
 
 void nemo_window_slot_hide_filter_bar (NemoWindowSlot *slot);
 
+/* Assign the hosting pane. Always go through this rather than writing
+ * slot->pane directly: it keeps a weak pointer so the field cannot outlive
+ * the pane it names. */
+void nemo_window_slot_set_pane (NemoWindowSlot *slot,
+                                NemoWindowPane *pane);
+
 #endif /* NEMO_WINDOW_SLOT_H */

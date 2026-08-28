@@ -1,9 +1,14 @@
-/* Desktop text stuff */
+/* Application chrome.
+ *
+ * Colours here must come from the libadwaita named palette so the window
+ * follows the user's light/dark preference. Hardcoded literals leave the
+ * window light while the rest of the desktop turns dark.
+ */
 
 .verne-window,
 .nemo-window {
-	background-color: #fafafa;
-	color: #2e3436;
+	background-color: @window_bg_color;
+	color: @window_fg_color;
 }
 
 .verne-window headerbar,
@@ -24,33 +29,37 @@
 .nemo-window .search-bar,
 .verne-window .verne-chrome,
 .nemo-window .verne-chrome {
-	background-color: #ebebeb;
+	background-color: @headerbar_bg_color;
+	color: @headerbar_fg_color;
 	background-image: none;
 }
 
 .verne-window notebook,
 .nemo-window notebook {
-	background-color: #fafafa;
+	background-color: @window_bg_color;
 }
 
-.verne-window .sidebar,
-.nemo-window .sidebar,
-.verne-window .places-sidebar,
-.nemo-window .places-sidebar,
-.verne-window .nemo-places-sidebar,
-.nemo-window .nemo-places-sidebar {
-	background-color: #f6f5f4;
-	color: #2e3436;
+.verne-window .sidebar:not(:selected),
+.nemo-window .sidebar:not(:selected),
+.verne-window .places-sidebar:not(:selected),
+.nemo-window .places-sidebar:not(:selected),
+.verne-window .nemo-places-sidebar:not(:selected),
+.nemo-window .nemo-places-sidebar:not(:selected) {
+	background-color: @sidebar_bg_color;
+	color: @sidebar_fg_color;
 }
 
-.verne-window layout.view,
-.nemo-window layout.view,
-.verne-window .nemo-canvas-container,
-.nemo-window .nemo-canvas-container,
-.verne-window treeview,
-.nemo-window treeview {
-	background-color: #ffffff;
-	color: #2e3436;
+/* :not(:selected) matters: these rules sit at application priority, above
+ * the theme, so an unqualified background here paints straight over the
+ * selection highlight and selected rows become invisible. */
+.verne-window layout.view:not(:selected),
+.nemo-window layout.view:not(:selected),
+.verne-window .nemo-canvas-container:not(:selected),
+.nemo-window .nemo-canvas-container:not(:selected),
+.verne-window treeview:not(:selected),
+.nemo-window treeview:not(:selected) {
+	background-color: @view_bg_color;
+	color: @view_fg_color;
 }
 
 .nemo-window.nemo-desktop-window notebook,
@@ -78,21 +87,13 @@ window.verne-desktop .verne-chrome {
     box-shadow: none;
 }
 
-NemoDesktopWindow GtkPaned {
-    background-color: transparent;
-}
-
 .nemo-canvas-item {
-    border-radius: 3px;
+    border-radius: 6px;
 }
 
 .nemo-canvas-item:selected {
-    background-color: alpha(#3584e4, 0.45);
-    color: #ffffff;
-}
-
-.nemo-desktop {
-    -NemoIconContainer-activate-prelight-icon-label: true;
+    background-color: alpha(@accent_bg_color, 0.45);
+    color: @view_fg_color;
 }
 
 .nemo-desktop.nemo-canvas-item {
@@ -107,10 +108,10 @@ NemoDesktopWindow GtkPaned {
 }
 
 .nemo-desktop.nemo-canvas-item:selected {
-    background-color: alpha(@theme_selected_bg_color, 0.8);
+    background-color: alpha(@accent_bg_color, 0.8);
     background-image: none;
     text-shadow: none;
-    color: #f5f5f5;
+    color: @accent_fg_color;
 }
 
 /* EelEditableLabel (icon labels) */
@@ -121,23 +122,19 @@ NemoDesktopWindow GtkPaned {
     border-image: none;
     border-style: solid;
     border-width: 1px;
-    border-color: #000000;
-    border-radius: 3px;
-    color: #000000;
-    caret-color: #000000;
+    border-color: @borders;
+    border-radius: 6px;
+    color: @view_fg_color;
+    caret-color: @view_fg_color;
     text-shadow: none;
-    background-image: -gtk-gradient(linear,
-                                    left top, left bottom,
-                                    from       (shade(rgba(255,255,255,1), 0.86)),
-                                    color-stop (0.15, shade(rgba(255,255,255,1), 0.96)),
-                                    color-stop (0.50, shade(rgba(255,255,255,1), 0.98)),
-                                    to         (shade(rgba(255,255,255,1), 1.00)));
+    background-image: none;
+    background-color: @view_bg_color;
 }
 
 .nemo-desktop.view .entry:selected,
 .nemo-desktop.view .entry:focus:selected,
 .nemo-desktop.view .entry:backdrop:selected {
-    background-color: @theme_selected_bg_color;
-    color: @theme_selected_fg_color;
+    background-color: @accent_bg_color;
+    color: @accent_fg_color;
     text-shadow: none;
 }

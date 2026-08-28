@@ -103,6 +103,11 @@ gtk_container_add (gpointer container_ptr, GtkWidget *child)
 		gtk_info_bar_add_child (GTK_INFO_BAR (container), child);
 	} else if (GTK_IS_FLOW_BOX (container)) {
 		gtk_flow_box_append (GTK_FLOW_BOX (container), child);
+	} else if (GTK_IS_LIST_BOX_ROW (container)) {
+		/* Without this the row's content ends up parented but not set as
+		 * the row's child, so gtk_list_box_row_get_child() answers NULL
+		 * and anything looking up a widget inside the row falls over. */
+		gtk_list_box_row_set_child (GTK_LIST_BOX_ROW (container), child);
 	} else if (GTK_IS_LIST_BOX (container)) {
 		gtk_list_box_append (GTK_LIST_BOX (container), child);
 	} else if (GTK_IS_STACK (container)) {
@@ -222,6 +227,10 @@ gtk_container_get_children (GtkWidget *container)
 {
 	GList *list = NULL;
 	GtkWidget *child;
+
+	if (!GTK_IS_WIDGET (container))
+		return NULL;
+
 	for (child = gtk_widget_get_last_child (container); child; child = gtk_widget_get_prev_sibling (child))
 		list = g_list_prepend (list, child);
 	return list;
@@ -551,6 +560,26 @@ verne_prepare_dialog (GtkWidget *widget)
 	gtk_window_set_hide_on_close (GTK_WINDOW (widget), TRUE);
 	g_object_set_data (G_OBJECT (widget), "verne-keep-native", GINT_TO_POINTER (1));
 	g_signal_connect (widget, "close-request", G_CALLBACK (verne_dialog_close_request), NULL);
+
+	/* A GtkDialog with no titlebar widget gets server-side decorations, so
+	 * Properties, Bookmarks and Connect to Server came up wearing the window
+	 * manager's frame while the main window and the Adw dialogs used their
+	 * own. Give them a header bar so the whole app is decorated alike. */
+	if (gtk_window_get_titlebar (GTK_WINDOW (widget)) == NULL) {
+		/* A titlebar can only be installed before the window is
+		 * realized. Some dialogs are already realized by the time they
+		 * reach us; as long as they are not on screen yet, dropping the
+		 * surface and letting the present path re-create it is safe. */
+		if (gtk_widget_get_realized (widget) && !gtk_widget_get_mapped (widget))
+			gtk_widget_unrealize (widget);
+
+		if (!gtk_widget_get_realized (widget)) {
+			GtkWidget *header = gtk_header_bar_new ();
+
+			gtk_header_bar_set_show_title_buttons (GTK_HEADER_BAR (header), TRUE);
+			gtk_window_set_titlebar (GTK_WINDOW (widget), header);
+		}
+	}
 
 	if (gtk_window_get_transient_for (GTK_WINDOW (widget)) == NULL) {
 		app = GTK_APPLICATION (g_application_get_default ());

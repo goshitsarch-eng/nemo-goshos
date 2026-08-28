@@ -1574,10 +1574,35 @@ eel_editable_label_draw (GtkWidget *widget,
   /* GTK4 gtk_render_* is deprecated and paints nothing for this
    * custom widget, so the rename editor received events while staying
    * invisible. Draw a readable entry with cairo/pango instead. */
-  cairo_save (cr);
-  cairo_set_source_rgb (cr, 1.0, 1.0, 1.0);
-  cairo_rectangle (cr, 0, 0, width, height);
-  cairo_fill (cr);
+  {
+    GtkStyleContext *context = gtk_widget_get_style_context (widget);
+    GdkRGBA bg;
+
+    /* A hardcoded white fill here left the filename white-on-white the
+     * moment the theme went dark. Take the entry background from the
+     * theme, and only fall back to a colour derived from the text colour
+     * if the theme gives us nothing to work with. */
+    gtk_style_context_get_background_color (context,
+                                            gtk_widget_get_state_flags (widget),
+                                            &bg);
+    if (bg.alpha <= 0.01 &&
+        !gtk_style_context_lookup_color (context, "view_bg_color", &bg))
+      {
+        GdkRGBA text;
+
+        gtk_widget_get_color (widget, &text);
+        if (text.red + text.green + text.blue > 1.5)
+          bg.red = bg.green = bg.blue = 0.12;   /* light text: dark entry */
+        else
+          bg.red = bg.green = bg.blue = 1.0;
+        bg.alpha = 1.0;
+      }
+
+    cairo_save (cr);
+    gdk_cairo_set_source_rgba (cr, &bg);
+    cairo_rectangle (cr, 0, 0, width, height);
+    cairo_fill (cr);
+  }
 
   eel_editable_label_ensure_layout (label, TRUE);
 

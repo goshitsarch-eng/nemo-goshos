@@ -105,6 +105,13 @@ static void
 restore_focus_widget (NemoWindowPane *pane)
 {
 	if (pane->last_focus_widget != NULL) {
+		/* The weak pointer keeps this from dangling, but a widget that
+		 * has been taken out of the window (a slot whose tab just
+		 * closed) must not be handed the focus back. */
+		if (gtk_widget_get_root (pane->last_focus_widget) == NULL) {
+			unset_focus_widget (pane);
+			return;
+		}
 		if (NEMO_IS_VIEW (pane->last_focus_widget)) {
 			nemo_view_grab_focus (NEMO_VIEW (pane->last_focus_widget));
 		} else {
@@ -726,7 +733,7 @@ notebook_page_added_cb (GtkNotebook *notebook,
 	//So reassociate the pane if needed.
 	if (slot->pane != pane) {
 		slot->pane->slots = g_list_remove (slot->pane->slots, slot);
-		slot->pane = pane;
+		nemo_window_slot_set_pane (slot, pane);
 		pane->slots = g_list_append (pane->slots, slot);
 		g_signal_emit_by_name (slot, "changed-pane");
 		nemo_window_set_active_slot (nemo_window_slot_get_window (slot), slot);

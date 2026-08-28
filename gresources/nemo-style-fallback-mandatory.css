@@ -1,36 +1,39 @@
 /* Things that can traditionally be controlled by the user theme, but that we *must*
- * have regardless, for a usable application.  A couple things that we cannot do without. */
+ * have regardless, for a usable application.  A couple things that we cannot do without.
+ *
+ * Colours come from the libadwaita named palette so these rules stay correct
+ * in both light and dark. */
 
 /* Inactive F3 pane shading */
 
 .nemo-window .nemo-inactive-pane .view:not(:selected), .nemo-window .nemo-inactive-pane iconview {
-    background-color: @theme_unfocused_bg_color;
+    background-color: mix(@view_bg_color, @window_bg_color, 0.5);
 }
 
 /* Rename box styling in the icon view. */
 
 .nemo-window .nemo-window-pane widget.entry {
     border: 1px solid;
-    border-radius: 3px;
-    color: @theme_fg_color;
-    border-color: @theme_selected_bg_color;
-    background-color: @theme_bg_color;
+    border-radius: 6px;
+    color: @view_fg_color;
+    border-color: @accent_bg_color;
+    background-color: @view_bg_color;
 }
 
 .nemo-window .nemo-window-pane widget.entry:selected {
     border: 1px solid;
-    border-radius: 3px;
-    color: @theme_selected_fg_color;
-    border-color: @theme_selected_bg_color;
-    background-color: @theme_selected_bg_color;
+    border-radius: 6px;
+    color: @accent_fg_color;
+    border-color: @accent_bg_color;
+    background-color: @accent_bg_color;
 }
 
 /* Floating bar in the bottom of a file view, used when the 'status bar' is turned off */
 
 .floating-bar {
-  border: 1px solid;
-  border-radius: 3px 3px 0 0;
+  border: 1px solid @borders;
+  border-radius: 6px 6px 0 0;
   border-bottom-width: 0;
-  color: @theme_selected_fg_color;
-  background-color: @theme_selected_bg_color;
+  color: @view_fg_color;
+  background-color: @view_bg_color;
 }

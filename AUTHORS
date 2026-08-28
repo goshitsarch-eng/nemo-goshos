@@ -1,1 +1,9 @@
-https://github.com/linuxmint/nemo/graphs/contributors
+Verne is a fork of Nemo, which is a fork of GNOME Files (Nautilus).
+
+Nemo contributors (the bulk of this codebase):
+    https://github.com/linuxmint/nemo/graphs/contributors
+
+Nautilus contributors (the code Nemo was forked from):
+    https://gitlab.gnome.org/GNOME/nautilus/-/graphs/gnome-3-4
+
+See THANKS for a fuller acknowledgement and COPYING for licensing.

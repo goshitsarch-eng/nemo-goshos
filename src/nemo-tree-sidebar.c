@@ -1277,41 +1277,10 @@ run_action_callback (GtkAction *action, gpointer user_data)
     nemo_file_unref (parent);
 }
 
-#if GTK_CHECK_VERSION (3, 24, 8)
-static void
-moved_to_rect_cb (GdkWindow          *window,
-                  const GdkRectangle *flipped_rect,
-                  const GdkRectangle *final_rect,
-                  gboolean            flipped_x,
-                  gboolean            flipped_y,
-                  GtkMenu            *menu)
-{
-    g_signal_emit_by_name (menu,
-                           "popped-up",
-                           0,
-                           flipped_rect,
-                           final_rect,
-                           flipped_x,
-                           flipped_y);
-
-    // Don't let the emission run in gtkmenu.c
-    g_signal_stop_emission_by_name (window, "moved-to-rect");
-}
-
-static void
-popup_menu_realized (GtkWidget    *menu,
-                     gpointer      user_data)
-{
-    GdkWindow *toplevel;
-
-    toplevel = gtk_widget_get_window (gtk_widget_get_toplevel (menu));
-
-    g_signal_handlers_disconnect_by_func (toplevel, moved_to_rect_cb, menu);
-
-    g_signal_connect (toplevel, "moved-to-rect", G_CALLBACK (moved_to_rect_cb),
-                      menu);
-}
-#endif
+/* The GTK3 Wayland popup-repositioning workaround that used to live here
+ * (moved_to_rect_cb / popup_menu_realized) is gone: GdkWindow::moved-to-rect
+ * does not exist in GTK4, and menu placement is handled by the compat layer's
+ * eel_pop_up_context_menu path instead. */
 
 static void
 popup_menu (FMTreeView     *view,

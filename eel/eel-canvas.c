@@ -3470,14 +3470,27 @@ idle_handler (gpointer data)
 static void
 add_idle (EelCanvas *canvas)
 {
+	/* eel_canvas_destroy() removes the idle, but tearing the item tree
+	 * down afterwards can request another update. Scheduling one now
+	 * leaves idle_handler() reading canvas->destroying out of freed
+	 * memory once the widget is gone. */
+	if (canvas->destroying) {
+		return;
+	}
+
 	if (!canvas->idle_id) {
 		/* We let the update idle handler have higher priority
 		 * than the redraw idle handler so the canvas state
 		 * will be updated during the expose event.  canvas in
 		 * expose_event.
 		 */
+		/* Hold a reference for the duration: not every teardown path in
+		 * this tree reaches eel_canvas_destroy(), and without one the
+		 * handler can outlive the canvas and read it after free. */
 		canvas->idle_id = g_idle_add_full (GDK_PRIORITY_REDRAW - 20,
-						   idle_handler, canvas, NULL);
+						   idle_handler,
+						   g_object_ref (canvas),
+						   g_object_unref);
 	}
 }
 

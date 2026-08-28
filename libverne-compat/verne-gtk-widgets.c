@@ -29,17 +29,14 @@ verne_snapshot_css_background (GtkWidget *widget, GtkSnapshot *snapshot)
 					0, 0, width, height);
 }
 
+/* Menubar, toolbar and statusbar are plain GtkBox subclasses, so GTK draws
+ * no background for them. Render the one CSS gives us rather than a fixed
+ * colour: a literal here ignores the theme and leaves the whole window's
+ * chrome light while everything else follows the dark preference. */
 static void
 verne_chrome_snapshot (GtkWidget *widget, GtkSnapshot *snapshot, GtkWidgetClass *parent_class)
 {
-	int width;
-	int height;
-	const GdkRGBA bg = { 0.922f, 0.922f, 0.922f, 1.0f };
-
-	width = gtk_widget_get_width (widget);
-	height = gtk_widget_get_height (widget);
-	if (width > 0 && height > 0)
-		gtk_snapshot_append_color (snapshot, &bg, &GRAPHENE_RECT_INIT (0, 0, (float) width, (float) height));
+	verne_snapshot_css_background (widget, snapshot);
 	if (parent_class != NULL && parent_class->snapshot != NULL)
 		parent_class->snapshot (widget, snapshot);
 }
@@ -175,14 +172,8 @@ static void
 gtk_bin_snapshot (GtkWidget *widget, GtkSnapshot *snapshot)
 {
 	GtkBin *bin = GTK_BIN (widget);
-	const GdkRGBA bg = { 0.922f, 0.922f, 0.922f, 1.0f };
-	int width;
-	int height;
 
-	width = gtk_widget_get_width (widget);
-	height = gtk_widget_get_height (widget);
-	if (width > 0 && height > 0)
-		gtk_snapshot_append_color (snapshot, &bg, &GRAPHENE_RECT_INIT (0, 0, (float) width, (float) height));
+	verne_snapshot_css_background (widget, snapshot);
 	if (bin->child)
 		gtk_widget_snapshot_child (widget, bin->child, snapshot);
 }
@@ -211,6 +202,63 @@ gtk_bin_get_child (GtkBin *bin)
 		return gtk_window_get_child (GTK_WINDOW (obj));
 	if (G_TYPE_CHECK_INSTANCE_TYPE (obj, GTK_TYPE_BIN))
 		return ((GtkBin *) obj)->child;
+	/* Everything else that was a GtkBin in GTK3 has its own get_child() in
+	 * GTK4. Returning NULL for a GtkListBoxRow crashed the Plugins and
+	 * Actions preference pages the moment a row was clicked. */
+	/* Each getter can legitimately answer NULL for a widget whose child was
+	 * parented directly; fall through to the first child in that case. */
+	if (GTK_IS_LIST_BOX_ROW (obj)) {
+		GtkWidget *c = gtk_list_box_row_get_child (GTK_LIST_BOX_ROW (obj));
+		if (c != NULL)
+			return c;
+	}
+	if (GTK_IS_FLOW_BOX_CHILD (obj)) {
+		GtkWidget *c = gtk_flow_box_child_get_child (GTK_FLOW_BOX_CHILD (obj));
+		if (c != NULL)
+			return c;
+	}
+	if (GTK_IS_FRAME (obj)) {
+		GtkWidget *c = gtk_frame_get_child (GTK_FRAME (obj));
+		if (c != NULL)
+			return c;
+	}
+	if (GTK_IS_EXPANDER (obj)) {
+		GtkWidget *c = gtk_expander_get_child (GTK_EXPANDER (obj));
+		if (c != NULL)
+			return c;
+	}
+	if (GTK_IS_VIEWPORT (obj)) {
+		GtkWidget *c = gtk_viewport_get_child (GTK_VIEWPORT (obj));
+		if (c != NULL)
+			return c;
+	}
+	if (GTK_IS_REVEALER (obj)) {
+		GtkWidget *c = gtk_revealer_get_child (GTK_REVEALER (obj));
+		if (c != NULL)
+			return c;
+	}
+	if (GTK_IS_POPOVER (obj)) {
+		GtkWidget *c = gtk_popover_get_child (GTK_POPOVER (obj));
+		if (c != NULL)
+			return c;
+	}
+	if (GTK_IS_SEARCH_BAR (obj)) {
+		GtkWidget *c = gtk_search_bar_get_child (GTK_SEARCH_BAR (obj));
+		if (c != NULL)
+			return c;
+	}
+	if (GTK_IS_ASPECT_FRAME (obj)) {
+		GtkWidget *c = gtk_aspect_frame_get_child (GTK_ASPECT_FRAME (obj));
+		if (c != NULL)
+			return c;
+	}
+	if (GTK_IS_BUTTON (obj)) {
+		GtkWidget *c = gtk_button_get_child (GTK_BUTTON (obj));
+		if (c != NULL)
+			return c;
+	}
+	if (GTK_IS_WIDGET (obj))
+		return gtk_widget_get_first_child (GTK_WIDGET (obj));
 	return NULL;
 }
 
@@ -327,16 +375,100 @@ enum { LAYOUT_PROP_0, LAYOUT_PROP_HADJ, LAYOUT_PROP_VADJ, LAYOUT_PROP_HSCROLL, L
 typedef struct { int x, y; } ChildPos;
 
 static void
-gtk_layout_set_adjustment (GtkAdjustment **store, GtkAdjustment *adj)
+gtk_layout_adjustment_value_changed (GtkAdjustment *adj, gpointer layout)
+{
+	(void) adj;
+	/* Children are positioned relative to the scroll offset and the canvas
+	 * draws through it, so both have to be redone. */
+	gtk_widget_queue_allocate (GTK_WIDGET (layout));
+	gtk_widget_queue_draw (GTK_WIDGET (layout));
+}
+
+static void
+gtk_layout_set_adjustment (GtkWidget *layout, GtkAdjustment **store, GtkAdjustment *adj)
 {
 	if (*store == adj)
 		return;
-	if (*store)
+	if (*store) {
+		g_signal_handlers_disconnect_by_func (*store,
+						      G_CALLBACK (gtk_layout_adjustment_value_changed),
+						      layout);
 		g_object_unref (*store);
+	}
 	if (adj)
 		*store = g_object_ref (adj);
 	else
 		*store = gtk_adjustment_new (0, 0, 0, 0, 0, 0);
+	g_signal_connect (*store, "value-changed",
+			  G_CALLBACK (gtk_layout_adjustment_value_changed), layout);
+}
+
+/* gtk_widget_get_window() hands back the toplevel's GdkSurface in GTK4, so
+ * gdk_surface_get_device_position() on it answers in toplevel coordinates --
+ * off by the sidebar width and the whole header/menubar/toolbar stack, and
+ * ignorant of the scroll position. Translate it into the widget's own
+ * scrolled coordinate space. */
+gboolean
+verne_widget_get_pointer (GtkWidget *widget, gint *x, gint *y, GdkModifierType *mask)
+{
+	GtkNative *native;
+	GdkSurface *surface;
+	GdkDevice *device;
+	GdkSeat *seat;
+	double px = 0, py = 0, tx = 0, ty = 0, sx = 0, sy = 0;
+	graphene_point_t in, out;
+
+	if (x)
+		*x = 0;
+	if (y)
+		*y = 0;
+	if (mask)
+		*mask = 0;
+	if (!GTK_IS_WIDGET (widget))
+		return FALSE;
+
+	native = gtk_widget_get_native (widget);
+	surface = native ? gtk_native_get_surface (native) : NULL;
+	seat = gdk_display_get_default_seat (gtk_widget_get_display (widget));
+	device = seat ? gdk_seat_get_pointer (seat) : NULL;
+	if (surface == NULL || device == NULL)
+		return FALSE;
+	if (!gdk_surface_get_device_position (surface, device, &px, &py, mask))
+		return FALSE;
+
+	gtk_native_get_surface_transform (native, &tx, &ty);
+	in.x = (float) (px - tx);
+	in.y = (float) (py - ty);
+	if (!gtk_widget_compute_point (GTK_WIDGET (native), widget, &in, &out))
+		return FALSE;
+
+	verne_layout_get_scroll_offset (widget, &sx, &sy);
+	if (x)
+		*x = (gint) (out.x + sx);
+	if (y)
+		*y = (gint) (out.y + sy);
+	return TRUE;
+}
+
+/* GTK3 scrolled a GtkLayout by moving its bin window; GTK4 has no such
+ * window, so the offset has to be applied by hand wherever a coordinate
+ * crosses between the widget and the scrolled content. */
+void
+verne_layout_get_scroll_offset (GtkWidget *widget, double *ox, double *oy)
+{
+	GtkLayoutPrivate *priv;
+
+	if (ox)
+		*ox = 0;
+	if (oy)
+		*oy = 0;
+	if (widget == NULL || !GTK_IS_LAYOUT (widget))
+		return;
+	priv = gtk_layout_get_instance_private (GTK_LAYOUT (widget));
+	if (ox && priv->hadj)
+		*ox = gtk_adjustment_get_value (priv->hadj);
+	if (oy && priv->vadj)
+		*oy = gtk_adjustment_get_value (priv->vadj);
 }
 
 static void
@@ -357,8 +489,8 @@ gtk_layout_set_property (GObject *object, guint prop_id, const GValue *value, GP
 {
 	GtkLayoutPrivate *priv = gtk_layout_get_instance_private (GTK_LAYOUT (object));
 	switch (prop_id) {
-	case LAYOUT_PROP_HADJ: gtk_layout_set_adjustment (&priv->hadj, g_value_get_object (value)); break;
-	case LAYOUT_PROP_VADJ: gtk_layout_set_adjustment (&priv->vadj, g_value_get_object (value)); break;
+	case LAYOUT_PROP_HADJ: gtk_layout_set_adjustment (GTK_WIDGET (object), &priv->hadj, g_value_get_object (value)); break;
+	case LAYOUT_PROP_VADJ: gtk_layout_set_adjustment (GTK_WIDGET (object), &priv->vadj, g_value_get_object (value)); break;
 	case LAYOUT_PROP_HSCROLL: priv->hscroll_policy = g_value_get_enum (value); break;
 	case LAYOUT_PROP_VSCROLL: priv->vscroll_policy = g_value_get_enum (value); break;
 	default: G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
@@ -420,9 +552,23 @@ gtk_layout_size_allocate (GtkWidget *widget, int width, int height, int baseline
 {
 	GtkLayoutPrivate *priv = gtk_layout_get_instance_private (GTK_LAYOUT (widget));
 	GtkWidget *child;
+	double sx = 0, sy = 0;
 	(void) baseline;
-	(void) width;
-	(void) height;
+
+	verne_layout_get_scroll_offset (widget, &sx, &sy);
+
+	/* Keep the adjustments describing the current viewport, so the
+	 * scrollbars know how far they may travel. */
+	if (priv->hadj) {
+		gtk_adjustment_configure (priv->hadj, gtk_adjustment_get_value (priv->hadj),
+					  0, MAX ((double) priv->width, width),
+					  width * 0.1, width * 0.9, width);
+	}
+	if (priv->vadj) {
+		gtk_adjustment_configure (priv->vadj, gtk_adjustment_get_value (priv->vadj),
+					  0, MAX ((double) priv->height, height),
+					  height * 0.1, height * 0.9, height);
+	}
 	for (child = gtk_widget_get_first_child (widget); child; child = gtk_widget_get_next_sibling (child)) {
 		ChildPos *pos = g_hash_table_lookup (priv->child_pos, child);
 		int min_w = 0, nat_w = 0, min_h = 0, nat_h = 0;
@@ -439,8 +585,8 @@ gtk_layout_size_allocate (GtkWidget *widget, int width, int height, int baseline
 		ch = MAX (nat_h, min_h);
 		if (ch < 1)
 			ch = MAX (gtk_widget_get_height (child), 1);
-		x = pos ? pos->x : 0;
-		y = pos ? pos->y : 0;
+		x = (pos ? pos->x : 0) - (int) sx;
+		y = (pos ? pos->y : 0) - (int) sy;
 		t = gsk_transform_translate (NULL, &GRAPHENE_POINT_INIT ((float) x, (float) y));
 		gtk_widget_allocate (child, cw, ch, -1, t);
 	}
@@ -539,11 +685,11 @@ GtkAdjustment *gtk_layout_get_vadjustment (GtkLayout *layout) {
 }
 void gtk_layout_set_hadjustment (GtkLayout *layout, GtkAdjustment *adj) {
 	GtkLayoutPrivate *priv = gtk_layout_get_instance_private (layout);
-	gtk_layout_set_adjustment (&priv->hadj, adj);
+	gtk_layout_set_adjustment (GTK_WIDGET (layout), &priv->hadj, adj);
 }
 void gtk_layout_set_vadjustment (GtkLayout *layout, GtkAdjustment *adj) {
 	GtkLayoutPrivate *priv = gtk_layout_get_instance_private (layout);
-	gtk_layout_set_adjustment (&priv->vadj, adj);
+	gtk_layout_set_adjustment (GTK_WIDGET (layout), &priv->vadj, adj);
 }
 GdkSurface *gtk_layout_get_bin_window (GtkLayout *layout) {
 	return gtk_widget_get_window (GTK_WIDGET (layout));
@@ -668,26 +814,30 @@ verne_menu_ensure_css (void)
 	if (provider)
 		return;
 	provider = gtk_css_provider_new ();
+	/* Colours come from the libadwaita named palette: hardcoding light
+	 * literals here left every menu white-on-white in dark mode. Menu
+	 * items are plain GtkButtons, whose child is centred by default, so
+	 * the label/accelerator box has to be told to fill the width. */
 	gtk_css_provider_load_from_string (provider,
 		"window.popup.menu, window.popup.menu box.menu {\n"
-		"  background-color: #ffffff;\n"
+		"  background-color: @popover_bg_color;\n"
 		"  background-image: none;\n"
-		"  color: #1e1e1e;\n"
+		"  color: @popover_fg_color;\n"
 		"  opacity: 1;\n"
 		"}\n"
 		"window.popup.menu {\n"
 		"  border-radius: 12px;\n"
-		"  border: 1px solid #c0c0c0;\n"
+		"  border: 1px solid @borders;\n"
 		"  padding: 6px;\n"
 		"}\n"
 		"window.popup.menu button, window.popup.menu checkbutton {\n"
 		"  padding: 6px 12px;\n"
 		"  border-radius: 6px;\n"
-		"  color: #1e1e1e;\n"
+		"  color: @popover_fg_color;\n"
 		"  background-color: transparent;\n"
 		"}\n"
 		"window.popup.menu button:hover, window.popup.menu checkbutton:hover {\n"
-		"  background-color: #e6e6e6;\n"
+		"  background-color: alpha(currentColor, 0.1);\n"
 		"}\n"
 		"window.popup.menu button.separator,\n"
 		"popover.menu button.separator,\n"
@@ -706,43 +856,43 @@ verne_menu_ensure_css (void)
 		"popover.menu button.separator separator,\n"
 		"box.verne-dest-menu button.separator separator {\n"
 		"  min-height: 1px;\n"
-		"  background-color: #d0d0d0;\n"
+		"  background-color: alpha(currentColor, 0.25);\n"
 		"}\n"
 		"popover.menu, popover.menu > contents, popover.menu box {\n"
-		"  background-color: #ffffff;\n"
+		"  background-color: @popover_bg_color;\n"
 		"  background-image: none;\n"
-		"  color: #1e1e1e;\n"
+		"  color: @popover_fg_color;\n"
 		"}\n"
 		"popover.menu button, popover.menu checkbutton {\n"
 		"  padding: 6px 12px;\n"
-		"  color: #1e1e1e;\n"
+		"  color: @popover_fg_color;\n"
 		"  background-color: transparent;\n"
 		"}\n"
 		"popover.menu button:hover, popover.menu checkbutton:hover {\n"
-		"  background-color: #e6e6e6;\n"
+		"  background-color: alpha(currentColor, 0.1);\n"
 		"}\n"
 		"box.verne-dest-menu {\n"
-		"  background-color: #ffffff;\n"
+		"  background-color: @popover_bg_color;\n"
 		"  background-image: none;\n"
-		"  color: #1e1e1e;\n"
+		"  color: @popover_fg_color;\n"
 		"  border-radius: 12px;\n"
-		"  border: 1px solid #c0c0c0;\n"
+		"  border: 1px solid @borders;\n"
 		"  padding: 6px;\n"
 		"  min-width: 240px;\n"
 		"}\n"
 		"box.verne-dest-menu button, box.verne-dest-menu checkbutton {\n"
 		"  padding: 6px 12px;\n"
 		"  min-height: 32px;\n"
-		"  color: #1e1e1e;\n"
+		"  color: @popover_fg_color;\n"
 		"  background-color: transparent;\n"
 		"}\n"
 		"box.verne-dest-menu button:hover, box.verne-dest-menu checkbutton:hover {\n"
-		"  background-color: #e6e6e6;\n"
+		"  background-color: alpha(currentColor, 0.1);\n"
 		"}\n"
 		"scrolledwindow.verne-dest-menu {\n"
-		"  background-color: #ffffff;\n"
+		"  background-color: @popover_bg_color;\n"
 		"  border-radius: 12px;\n"
-		"  border: 1px solid #c0c0c0;\n"
+		"  border: 1px solid @borders;\n"
 		"  min-width: 240px;\n"
 		"}\n"
 		"scrolledwindow.verne-dest-menu box.verne-dest-menu {\n"
@@ -751,11 +901,11 @@ verne_menu_ensure_css (void)
 		"  min-width: 0;\n"
 		"}\n"
 		"box.verne-overlay-scroll {\n"
-		"  background-color: #ffffff;\n"
+		"  background-color: @popover_bg_color;\n"
 		"  background-image: none;\n"
-		"  color: #1e1e1e;\n"
+		"  color: @popover_fg_color;\n"
 		"  border-radius: 12px;\n"
-		"  border: 1px solid #c0c0c0;\n"
+		"  border: 1px solid @borders;\n"
 		"  min-width: 240px;\n"
 		"}\n"
 		"box.verne-overlay-scroll box.verne-dest-menu {\n"
@@ -765,14 +915,34 @@ verne_menu_ensure_css (void)
 		"  padding: 6px;\n"
 		"}\n"
 		"box.verne-dest-customize {\n"
-		"  background-color: #ffffff;\n"
+		"  background-color: @popover_bg_color;\n"
 		"  background-image: none;\n"
-		"  color: #1e1e1e;\n"
+		"  color: @popover_fg_color;\n"
 		"  border-radius: 12px;\n"
-		"  border: 1px solid #c0c0c0;\n"
+		"  border: 1px solid @borders;\n"
+		"}\n"
+		/* Menu rows read left to right: label hard left, accelerator hard
+		 * right and dimmed. Without this the GtkButton centres its child. */
+		"window.popup.menu button > box.verne-menu-item,\n"
+		"popover.menu button > box.verne-menu-item,\n"
+		"box.verne-dest-menu button > box.verne-menu-item {\n"
+		"  min-width: 140px;\n"
+		"}\n"
+		"box.verne-menu-item > label.verne-menu-accel {\n"
+		"  opacity: 0.55;\n"
+		"  margin-left: 24px;\n"
+		"}\n"
+		"box.verne-menu-item > image.verne-menu-check,\n"
+		"box.verne-menu-item > image.verne-menu-arrow {\n"
+		"  min-width: 16px;\n"
+		"}\n"
+		"box.verne-menu-item > image.verne-menu-arrow {\n"
+		"  opacity: 0.55;\n"
+		"  margin-left: 12px;\n"
 		"}\n"
 		".menubar {\n"
-		"  background-color: #f6f5f4;\n"
+		"  background-color: @headerbar_bg_color;\n"
+		"  color: @headerbar_fg_color;\n"
 		"  min-height: 28px;\n"
 		"}\n"
 		".menubar > button {\n"
@@ -3785,8 +3955,79 @@ verne_menu_item_leave (GtkEventControllerMotion *motion, gpointer data)
 	verne_menu_item_cancel_submenu_timeout (GTK_WIDGET (data));
 }
 
+/* GTK3 laid a menu item out as icon | label | accelerator, all left aligned
+ * with the accelerator pushed right. A GtkButton centres a plain string child
+ * instead, which left every menu in the app looking centre-justified and the
+ * accelerator floating mid-row. Build the row explicitly. */
+static void
+verne_menu_item_update_child (GtkMenuItem *item)
+{
+	GtkWidget *box, *label;
+	const gchar *accel;
+	const gchar *check;
+
+	if (item == NULL)
+		return;
+
+	box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 6);
+	gtk_widget_add_css_class (box, "verne-menu-item");
+	gtk_widget_set_halign (box, GTK_ALIGN_FILL);
+	/* The label below expands so the accelerator sits hard right. Pin the
+	 * box's own hexpand to FALSE so that does not propagate up and stretch
+	 * menubar items across the whole bar. */
+	gtk_widget_set_hexpand (box, FALSE);
+
+	check = g_object_get_data (G_OBJECT (item), "verne-menu-check");
+	if (check != NULL) {
+		GtkWidget *tick = (gtk_image_new_from_icon_name) (check[0] ? check : NULL);
+		gtk_widget_add_css_class (tick, "verne-menu-check");
+		gtk_widget_set_valign (tick, GTK_ALIGN_CENTER);
+		gtk_box_append (GTK_BOX (box), tick);
+	}
+
+	label = gtk_label_new (item->label ? item->label : "");
+	gtk_label_set_use_underline (GTK_LABEL (label), TRUE);
+	gtk_label_set_xalign (GTK_LABEL (label), 0.0);
+	gtk_widget_set_halign (label, GTK_ALIGN_START);
+	gtk_widget_set_hexpand (label, TRUE);
+	gtk_box_append (GTK_BOX (box), label);
+
+	accel = g_object_get_data (G_OBJECT (item), "verne-accel-label");
+	if (accel != NULL && accel[0] != '\0') {
+		GtkWidget *acc = gtk_label_new (accel);
+		gtk_widget_add_css_class (acc, "verne-menu-accel");
+		gtk_widget_add_css_class (acc, "dim-label");
+		gtk_label_set_xalign (GTK_LABEL (acc), 1.0);
+		gtk_widget_set_halign (acc, GTK_ALIGN_END);
+		gtk_box_append (GTK_BOX (box), acc);
+	}
+
+	/* Top-level menubar items open downwards and never showed an arrow. */
+	if (item->submenu != NULL &&
+	    !GTK_IS_MENU_BAR (gtk_widget_get_parent (GTK_WIDGET (item)))) {
+		GtkWidget *arrow = (gtk_image_new_from_icon_name) ("pan-end-symbolic");
+		gtk_widget_add_css_class (arrow, "verne-menu-arrow");
+		gtk_widget_set_halign (arrow, GTK_ALIGN_END);
+		gtk_widget_set_valign (arrow, GTK_ALIGN_CENTER);
+		gtk_box_append (GTK_BOX (box), arrow);
+	}
+
+	(gtk_button_set_child) (GTK_BUTTON (item), box);
+}
+
+static void
+verne_menu_item_parent_changed (GObject *item, GParamSpec *pspec, gpointer data)
+{
+	(void) pspec; (void) data;
+	/* Whether the trailing submenu arrow belongs depends on the parent, and
+	 * items are often given their submenu before being appended. */
+	verne_menu_item_update_child (GTK_MENU_ITEM (item));
+}
+
 static void gtk_menu_item_init (GtkMenuItem *item) {
 	GtkEventController *motion;
+	g_signal_connect (item, "notify::parent",
+			  G_CALLBACK (verne_menu_item_parent_changed), NULL);
 	gtk_button_set_has_frame (GTK_BUTTON (item), FALSE);
 	gtk_widget_set_halign (GTK_WIDGET (item), GTK_ALIGN_FILL);
 	motion = GTK_EVENT_CONTROLLER (gtk_event_controller_motion_new ());
@@ -3882,6 +4123,8 @@ void gtk_menu_item_set_submenu (GtkMenuItem *item, GtkWidget *submenu)
 		g_object_set_data (G_OBJECT (item), "verne-sub-hooked", NULL);
 	}
 	item->submenu = submenu;
+	/* Rebuild so the trailing submenu arrow appears or disappears. */
+	verne_menu_item_update_child (item);
 	if (submenu == NULL)
 		return;
 	g_signal_connect (item, "clicked", G_CALLBACK (verne_submenu_clicked), submenu);
@@ -3890,8 +4133,7 @@ void gtk_menu_item_set_submenu (GtkMenuItem *item, GtkWidget *submenu)
 GtkWidget *gtk_menu_item_get_submenu (GtkMenuItem *item) { return item->submenu; }
 void gtk_menu_item_set_label (GtkMenuItem *item, const gchar *label) {
 	g_free (item->label); item->label = g_strdup (label);
-	gtk_button_set_use_underline (GTK_BUTTON (item), TRUE);
-	gtk_button_set_label (GTK_BUTTON (item), label);
+	verne_menu_item_update_child (item);
 }
 const gchar *gtk_menu_item_get_label (GtkMenuItem *item) { return item->label; }
 
@@ -3899,14 +4141,19 @@ void
 gtk_menu_item_set_accel_path (GtkMenuItem *item, const gchar *accel_path)
 {
 	GtkAccelKey key;
-	gchar *accel_label = NULL, *combined;
-	const gchar *base;
+	gchar *accel_label = NULL;
+	gchar *path_copy;
 	GtkAction *action;
 
 	if (item == NULL)
 		return;
+	/* verne_menu_refresh_accels() re-feeds us the stored path, and
+	 * g_object_set_data_full() frees the old value -- which is that very
+	 * string. Work from our own copy from here on. */
+	path_copy = g_strdup (accel_path);
 	g_object_set_data_full (G_OBJECT (item), "verne-accel-path",
-				g_strdup (accel_path), g_free);
+				path_copy, g_free);
+	accel_path = path_copy;
 	memset (&key, 0, sizeof key);
 	if (accel_path && accel_path[0] && gtk_accel_map_lookup_entry (accel_path, &key) && key.accel_key)
 		accel_label = gtk_accelerator_get_label (key.accel_key, key.accel_mods);
@@ -3925,16 +4172,13 @@ gtk_menu_item_set_accel_path (GtkMenuItem *item, const gchar *accel_path)
 	}
 	if (accel_label == NULL || accel_label[0] == '\0') {
 		g_free (accel_label);
+		g_object_set_data (G_OBJECT (item), "verne-accel-label", NULL);
+		verne_menu_item_update_child (item);
 		return;
 	}
-	base = item->label ? item->label : gtk_button_get_label (GTK_BUTTON (item));
-	if (base == NULL)
-		base = "";
-	combined = g_strdup_printf ("%s    %s", base, accel_label);
-	gtk_button_set_use_underline (GTK_BUTTON (item), TRUE);
-	gtk_button_set_label (GTK_BUTTON (item), combined);
-	g_free (combined);
-	g_free (accel_label);
+	g_object_set_data_full (G_OBJECT (item), "verne-accel-label",
+				accel_label, g_free);
+	verne_menu_item_update_child (item);
 }
 void gtk_image_menu_item_set_image (GtkMenuItem *item, GtkWidget *image) { item->image = image; }
 GtkWidget *gtk_image_menu_item_get_image (GtkMenuItem *item) { return item->image; }
@@ -4000,10 +4244,13 @@ G_DEFINE_TYPE (GtkCheckMenuItem, gtk_check_menu_item, GTK_TYPE_MENU_ITEM)
 static void
 gtk_check_menu_item_sync_label (GtkCheckMenuItem *item)
 {
-	const gchar *raw = item->raw_label ? item->raw_label : "";
-	gchar *shown = g_strdup_printf ("%s%s", item->active ? "✓  " : "     ", raw);
-	gtk_menu_item_set_label (GTK_MENU_ITEM (item), shown);
-	g_free (shown);
+	/* An empty string keeps the tick's slot reserved, so labels in a menu
+	 * stay aligned whether or not the item is currently checked. */
+	g_object_set_data_full (G_OBJECT (item), "verne-menu-check",
+				g_strdup (item->active ? "object-select-symbolic" : ""),
+				g_free);
+	gtk_menu_item_set_label (GTK_MENU_ITEM (item),
+				 item->raw_label ? item->raw_label : "");
 }
 
 static void

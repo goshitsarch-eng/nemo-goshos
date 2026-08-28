@@ -14,3 +14,5 @@ option('tracker',type : 'combo', choices : ['true', 'false', 'auto'], value : 'f
        description: 'Tracker support')
 option('gtk_layer_shell', type : 'boolean', value : false,
        description: 'Use gtk-layer-shell to draw desktop on wayland')
+option('cinnamon_schemas', type : 'boolean', value : true,
+       description: 'Install Verne\'s cut-down copy of the org.cinnamon.desktop schemas. Turn this OFF on a Cinnamon system: cinnamon-desktop-data already provides the full schemas, and this copy carries only the handful of keys Verne itself reads.')

@@ -748,6 +748,10 @@ verne_window_present_keep (GtkWindow *window)
 {
 	if (!GTK_IS_WINDOW (window))
 		return;
+	/* Before anything realizes the window: a titlebar can only be installed
+	 * on an unrealized one, and gtk_window_present() on a GtkDialog is how
+	 * most of Nemo's dialogs first reach the screen. */
+	verne_prepare_dialog (GTK_WIDGET (window));
 	verne_window_keep_native (window);
 	gtk_widget_set_visible (GTK_WIDGET (window), TRUE);
 	(gtk_window_present) (window);
@@ -2333,11 +2337,29 @@ on_related_toggle_toggled (GtkToggleButton *button, gpointer action)
 {
 	if (g_object_get_data (G_OBJECT (button), "verne-syncing-toggle"))
 		return;
-	if (GTK_IS_TOGGLE_ACTION (action))
-		gtk_toggle_action_set_active (GTK_TOGGLE_ACTION (action),
-					      gtk_toggle_button_get_active (button));
-	else if (gtk_toggle_button_get_active (button))
+	if (GTK_IS_TOGGLE_ACTION (action)) {
+		/* A GTK3 proxy activated its action rather than writing the
+		 * state directly, and ::activate is what the application
+		 * connects to. Poking ->active only emitted ::toggled, so the
+		 * toolbar's Icons/List/Compact, Show Thumbnails and Extra Pane
+		 * buttons moved but did nothing. */
+		if (gtk_toggle_action_get_active (GTK_TOGGLE_ACTION (action)) !=
+		    gtk_toggle_button_get_active (button))
+			gtk_action_activate (GTK_ACTION (action));
+	} else if (gtk_toggle_button_get_active (button)) {
 		gtk_action_activate (GTK_ACTION (action));
+	}
+}
+
+/* GTK3 kept a proxy's sensitivity and visibility in step with its action;
+ * without this the toolbar's Back and Forward buttons keep whatever state
+ * they had when they were built, which is insensitive. */
+static void
+on_related_action_sensitive (GObject *action, GParamSpec *pspec, gpointer activatable)
+{
+	(void) pspec;
+	gtk_widget_set_sensitive (GTK_WIDGET (activatable),
+				  gtk_action_get_sensitive (GTK_ACTION (action)));
 }
 
 static void
@@ -2374,6 +2396,12 @@ gtk_activatable_set_related_action (gpointer activatable, GtkAction *action)
 		if (gtk_action_get_tooltip (action))
 			gtk_widget_set_tooltip_text (GTK_WIDGET (activatable), gtk_action_get_tooltip (action));
 		gtk_widget_set_sensitive (GTK_WIDGET (activatable), gtk_action_get_sensitive (action));
+		if (g_object_get_data (G_OBJECT (activatable), "verne-action-sensitive") == NULL) {
+			g_signal_connect_object (action, "notify::sensitive",
+						 G_CALLBACK (on_related_action_sensitive),
+						 activatable, 0);
+			g_object_set_data (G_OBJECT (activatable), "verne-action-sensitive", GINT_TO_POINTER (1));
+		}
 		if (GTK_IS_TOGGLE_BUTTON (activatable) && GTK_IS_TOGGLE_ACTION (action)) {
 			gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (activatable),
 						      gtk_toggle_action_get_active (GTK_TOGGLE_ACTION (action)));
@@ -3756,12 +3784,93 @@ verne_dialog_new_with_buttons (const gchar *title, GtkWindow *parent, GtkDialogF
 	return dialog;
 }
 
+/* GTK4 removed the getters for resolved background and border colours.
+ * Rendering the context into a 1x1 surface and reading the pixel back gives
+ * the real, theme- and state-correct colour; the previous shim answered
+ * "opaque white" for every call, which painted the icon view, the rubber
+ * band and the properties-window capacity ring white in dark mode. */
+static void
+verne_read_back_pixel (GdkRGBA *color, cairo_surface_t *surface)
+{
+	const unsigned char *data;
+	guint32 pixel;
+	double alpha;
+
+	cairo_surface_flush (surface);
+	data = cairo_image_surface_get_data (surface);
+	if (data == NULL) {
+		color->red = color->green = color->blue = 0.0;
+		color->alpha = 0.0;
+		return;
+	}
+
+	memcpy (&pixel, data, sizeof pixel);
+	alpha = ((pixel >> 24) & 0xff) / 255.0;
+	if (alpha <= 0.0) {
+		color->red = color->green = color->blue = 0.0;
+		color->alpha = 0.0;
+		return;
+	}
+
+	/* cairo's ARGB32 is premultiplied. */
+	color->red   = (((pixel >> 16) & 0xff) / 255.0) / alpha;
+	color->green = (((pixel >>  8) & 0xff) / 255.0) / alpha;
+	color->blue  = (( pixel        & 0xff) / 255.0) / alpha;
+	color->alpha = alpha;
+}
+
+void
+verne_style_context_get_background_color (GtkStyleContext *context,
+					  GtkStateFlags    state,
+					  GdkRGBA         *color)
+{
+	cairo_surface_t *surface;
+	cairo_t *cr;
+
+	(void) state;
+	if (color == NULL)
+		return;
+
+	color->red = color->green = color->blue = color->alpha = 0.0;
+	if (context == NULL)
+		return;
+
+	surface = cairo_image_surface_create (CAIRO_FORMAT_ARGB32, 1, 1);
+	cr = cairo_create (surface);
+	gtk_render_background (context, cr, 0, 0, 1, 1);
+	cairo_destroy (cr);
+	verne_read_back_pixel (color, surface);
+	cairo_surface_destroy (surface);
+}
+
 void
 gtk_style_context_get_border_color (GtkStyleContext *context, GtkStateFlags state, GdkRGBA *color)
 {
+	cairo_surface_t *surface;
+	cairo_t *cr;
+
 	(void) state;
-	if (color)
+	if (color == NULL)
+		return;
+
+	color->red = color->green = color->blue = color->alpha = 0.0;
+	if (context == NULL)
+		return;
+
+	/* Render a 1x1 frame; with any non-zero border width the single pixel
+	 * that comes back is border-coloured. */
+	surface = cairo_image_surface_create (CAIRO_FORMAT_ARGB32, 1, 1);
+	cr = cairo_create (surface);
+	gtk_render_frame (context, cr, 0, 0, 1, 1);
+	cairo_destroy (cr);
+	verne_read_back_pixel (color, surface);
+	cairo_surface_destroy (surface);
+
+	/* Themes that draw no border on this node still need a usable line. */
+	if (color->alpha <= 0.0) {
 		(gtk_style_context_get_color) (context, color);
+		color->alpha *= 0.3;
+	}
 }
 
 void
@@ -3790,6 +3899,28 @@ gtk_style_context_get_style (GtkStyleContext *context, ...)
 			*(gint *) dest = 0;
 	}
 	va_end (args);
+}
+
+void
+verne_gdk_error_trap_push (void)
+{
+#ifdef GDK_WINDOWING_X11
+	GdkDisplay *display = gdk_display_get_default ();
+
+	if (display != NULL && GDK_IS_X11_DISPLAY (display))
+		gdk_x11_display_error_trap_push (display);
+#endif
+}
+
+void
+verne_gdk_error_trap_pop_ignored (void)
+{
+#ifdef GDK_WINDOWING_X11
+	GdkDisplay *display = gdk_display_get_default ();
+
+	if (display != NULL && GDK_IS_X11_DISPLAY (display))
+		gdk_x11_display_error_trap_pop_ignored (display);
+#endif
 }
 
 unsigned long

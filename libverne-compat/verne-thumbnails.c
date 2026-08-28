@@ -240,6 +240,19 @@ verne_find_thumbnailer (const char *mime_type)
 	return NULL;
 }
 
+/* The expanded string is handed to g_shell_parse_argv(), so every
+ * substituted value has to be quoted. Without this a file named
+ * `clip -o /somewhere x.mkv` splits into extra arguments for the
+ * thumbnailer -- argument injection through a filename. */
+static void
+verne_append_quoted (GString *s, const gchar *value)
+{
+	gchar *quoted = g_shell_quote (value ? value : "");
+
+	g_string_append (s, quoted);
+	g_free (quoted);
+}
+
 static gchar *
 verne_expand_thumbnailer (const gchar *exec, const gchar *uri, const gchar *input, const gchar *output, int size)
 {
@@ -251,17 +264,17 @@ verne_expand_thumbnailer (const gchar *exec, const gchar *uri, const gchar *inpu
 			switch (p[1]) {
 			case 'u':
 			case 'U':
-				g_string_append (s, uri ? uri : "");
+				verne_append_quoted (s, uri);
 				p++;
 				break;
 			case 'i':
 			case 'I':
-				g_string_append (s, input ? input : (uri ? uri : ""));
+				verne_append_quoted (s, input ? input : uri);
 				p++;
 				break;
 			case 'o':
 			case 'O':
-				g_string_append (s, output ? output : "");
+				verne_append_quoted (s, output);
 				p++;
 				break;
 			case 's':

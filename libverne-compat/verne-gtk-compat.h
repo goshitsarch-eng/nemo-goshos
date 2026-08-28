@@ -342,7 +342,24 @@ gboolean gtk_widget_is_drawable (GtkWidget *widget);
 void gtk_widget_get_pointer (GtkWidget *widget, gint *x, gint *y);
 
 #define gtk_cairo_should_draw_window(cr, win) TRUE
-#define gtk_cairo_transform_to_window(cr, widget, win) ((void)0)
+void verne_layout_get_scroll_offset (GtkWidget *widget, double *ox, double *oy);
+gboolean verne_widget_get_pointer (GtkWidget *widget, gint *x, gint *y, GdkModifierType *mask);
+/* GTK3 scrolled a GtkLayout by moving its bin window, and this call put the
+ * cairo context into that window's coordinates. GTK4 has no bin window, so
+ * apply the scroll offset directly -- without it the icon view painted the
+ * top-left corner of its contents no matter where the scrollbar was. */
+static inline void
+verne_cairo_transform_to_window (cairo_t *cr, GtkWidget *widget)
+{
+	double ox = 0, oy = 0;
+
+	if (cr == NULL || widget == NULL)
+		return;
+	verne_layout_get_scroll_offset (widget, &ox, &oy);
+	if (ox != 0 || oy != 0)
+		cairo_translate (cr, -ox, -oy);
+}
+#define gtk_cairo_transform_to_window(cr, widget, win) verne_cairo_transform_to_window ((cr), (widget))
 gboolean gtk_widget_event (GtkWidget *widget, GdkEvent *event);
 gboolean gtk_true (void);
 gboolean gtk_false (void);
@@ -394,6 +411,24 @@ verne_map_icon_name (const char *name)
 		return "starred-symbolic";
 	if (g_strcmp0 (name, "unfavorite-symbolic") == 0)
 		return "non-starred-symbolic";
+	/* xapp-symbolic-icons is a Mint package Verne does not depend on, so
+	 * every xsi- name it owns has to resolve to a freedesktop/Adwaita one
+	 * or the menu item, button or sidebar row shows a broken-image glyph. */
+	if (g_strcmp0 (name, "search-symbolic") == 0)
+		return "system-search-symbolic";
+	if (g_strcmp0 (name, "keyboard-shortcuts-symbolic") == 0)
+		return "preferences-desktop-keyboard-shortcuts-symbolic";
+	if (g_strcmp0 (name, "media-mount-symbolic") == 0)
+		return "media-removable-symbolic";
+	if (g_strcmp0 (name, "pin-symbolic") == 0 ||
+	    g_strcmp0 (name, "unpin-symbolic") == 0)
+		return "view-pin-symbolic";
+	if (g_strcmp0 (name, "tools-symbolic") == 0)
+		return "applications-utilities-symbolic";
+	if (g_strcmp0 (name, "user-favorites-symbolic") == 0)
+		return "starred-symbolic";
+	if (g_strcmp0 (name, "mount-archive-symbolic") == 0)
+		return "package-x-generic-symbolic";
 	if (g_strcmp0 (name, "ok") == 0)
 		return "emblem-ok-symbolic";
 	if (g_strcmp0 (name, "stop") == 0)
@@ -1350,7 +1385,8 @@ typedef enum {
 gint gdk_window_get_origin (GdkSurface *window, gint *x, gint *y);
 #define gdk_window_get_toplevel(w) (w)
 #define gdk_cairo_get_clip_rectangle(cr, r) verne_gdk_cairo_get_clip_rectangle (cr, r)
-#define gtk_style_context_get_background_color(ctx, state, rgba) G_STMT_START { if (rgba) { (rgba)->red=1; (rgba)->green=1; (rgba)->blue=1; (rgba)->alpha=1; } } G_STMT_END
+void verne_style_context_get_background_color (GtkStyleContext *context, GtkStateFlags state, GdkRGBA *rgba);
+#define gtk_style_context_get_background_color(ctx, state, rgba) verne_style_context_get_background_color ((ctx), (state), (rgba))
 #define gtk_widget_set_realized(w, b) ((void)0)
 #define gtk_widget_get_visual(w) NULL
 #define gtk_widget_set_window(w, win) ((void)0)
@@ -1668,7 +1704,27 @@ typedef guint GtkJunctionSides;
 #define gtk_style_context_add_provider_for_screen(s, p, pri) gtk_style_context_add_provider_for_display (gdk_display_get_default (), p, pri)
 #define gtk_style_context_remove_provider_for_screen(s, p) gtk_style_context_remove_provider_for_display (gdk_display_get_default (), p)
 #define gtk_settings_get_for_screen(s) gtk_settings_get_default ()
-#define gtk_button_clicked(b) g_signal_emit_by_name (b, "clicked")
+/* GtkCheckButton is not a GtkButton in GTK4 and has no ::clicked, so
+ * "activate this row's control" has to mean toggling for those. */
+static inline void
+verne_button_clicked (gpointer button)
+{
+	if (button == NULL)
+		return;
+	if (GTK_IS_CHECK_BUTTON (button)) {
+		gtk_check_button_set_active (GTK_CHECK_BUTTON (button),
+					     !gtk_check_button_get_active (GTK_CHECK_BUTTON (button)));
+		return;
+	}
+	if (GTK_IS_TOGGLE_BUTTON (button)) {
+		gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (button),
+					      !gtk_toggle_button_get_active (GTK_TOGGLE_BUTTON (button)));
+		return;
+	}
+	if (GTK_IS_BUTTON (button))
+		g_signal_emit_by_name (button, "clicked");
+}
+#define gtk_button_clicked(b) verne_button_clicked (b)
 #define gtk_image_menu_item_new_with_mnemonic(l) gtk_menu_item_new_with_mnemonic (l)
 #define gtk_check_menu_item_new_with_label(l) gtk_check_menu_item_new_with_mnemonic (l)
 #define gtk_icon_theme_append_search_path(t, p) gtk_icon_theme_add_search_path (t, p)
@@ -1877,8 +1933,12 @@ typedef GtkWidget GtkMenuShell;
 #define gtk_menu_reposition(m) ((void)0)
 #define gtk_menu_item_get_reserve_indicator(i) FALSE
 #define gdk_monitor_is_primary(m) TRUE
-#define gdk_error_trap_push() ((void)0)
-#define gdk_error_trap_pop_ignored() ((void)0)
+/* Not optional: an untrapped X error (XGetClassHint on a window that has just
+ * gone away, say) takes the whole process down. */
+void verne_gdk_error_trap_push (void);
+void verne_gdk_error_trap_pop_ignored (void);
+#define gdk_error_trap_push() verne_gdk_error_trap_push ()
+#define gdk_error_trap_pop_ignored() verne_gdk_error_trap_pop_ignored ()
 #define GTK_STYLE_CLASS_BUTTON "button"
 #define GTK_STYLE_CLASS_RUBBERBAND "rubberband"
 #define GTK_STYLE_CLASS_DND "dnd"
@@ -1907,8 +1967,34 @@ gboolean verne_toggle_button_get_active (gpointer button);
 void verne_toggle_button_set_active (gpointer button, gboolean active);
 #define gtk_toggle_button_get_active(b) verne_toggle_button_get_active (b)
 #define gtk_toggle_button_set_active(b, v) verne_toggle_button_set_active ((b), (v))
-#define gtk_toggle_button_get_inconsistent(b) FALSE
-#define gtk_toggle_button_set_inconsistent(b, v) ((void)0)
+/* GTK4 keeps the inconsistent ("mixed") state on GtkCheckButton rather than
+ * GtkToggleButton. Stubbing these out cost more than a visual: the
+ * Permissions page uses the inconsistent flag to mean "these files disagree,
+ * leave this bit alone", so with the flag always FALSE, applying permissions
+ * to a multi-file selection rewrote the bits that should have been left. */
+static inline void
+verne_toggle_button_set_inconsistent (gpointer button, gboolean setting)
+{
+	if (button == NULL)
+		return;
+	g_object_set_data (G_OBJECT (button), "verne-inconsistent",
+			   GINT_TO_POINTER (setting ? 1 : 0));
+	if (GTK_IS_CHECK_BUTTON (button))
+		gtk_check_button_set_inconsistent (GTK_CHECK_BUTTON (button), setting);
+}
+
+static inline gboolean
+verne_toggle_button_get_inconsistent (gpointer button)
+{
+	if (button == NULL)
+		return FALSE;
+	if (GTK_IS_CHECK_BUTTON (button))
+		return gtk_check_button_get_inconsistent (GTK_CHECK_BUTTON (button));
+	return GPOINTER_TO_INT (g_object_get_data (G_OBJECT (button), "verne-inconsistent")) != 0;
+}
+
+#define gtk_toggle_button_get_inconsistent(b) verne_toggle_button_get_inconsistent (b)
+#define gtk_toggle_button_set_inconsistent(b, v) verne_toggle_button_set_inconsistent ((b), (v))
 /* GTK4 GtkCheckButton is no longer a GtkToggleButton. Nemo still casts. */
 #undef GTK_TOGGLE_BUTTON
 #define GTK_TOGGLE_BUTTON(o) ((GtkToggleButton *) (gpointer) (o))

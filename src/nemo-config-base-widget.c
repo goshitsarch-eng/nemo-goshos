@@ -26,6 +26,10 @@ nemo_config_base_widget_init (NemoConfigBaseWidget *self)
     GtkWidget *toolbar_item;
 
     GtkWidget *frame = gtk_frame_new (NULL);
+    gtk_widget_set_hexpand (GTK_WIDGET (self), TRUE);
+    gtk_widget_set_vexpand (GTK_WIDGET (self), TRUE);
+    gtk_widget_set_hexpand (frame, TRUE);
+    gtk_widget_set_vexpand (frame, TRUE);
     gtk_container_add (GTK_CONTAINER (self), frame);
     gtk_frame_set_shadow_type (GTK_FRAME (frame), GTK_SHADOW_IN);
 
@@ -50,6 +54,10 @@ nemo_config_base_widget_init (NemoConfigBaseWidget *self)
 
     w = gtk_scrolled_window_new (NULL, NULL);
     gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (w), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+    /* Without a floor the list collapses to a couple of rows and the last
+     * one sits half-hidden behind the button row underneath. */
+    gtk_scrolled_window_set_min_content_height (GTK_SCROLLED_WINDOW (w), 160);
+    gtk_widget_set_vexpand (w, TRUE);
     gtk_box_pack_start (GTK_BOX (box), w, TRUE, TRUE, 0);
 
     self->listbox = gtk_list_box_new ();

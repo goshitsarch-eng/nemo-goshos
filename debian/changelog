@@ -1,3 +1,40 @@
+nemo (6.8.0) alfa; urgency=medium
+
+  Verne 6.8.0 -- the first release of the GTK4 + libadwaita presentation of
+  Nemo, based on Nemo 6.7.5.
+
+  [ Verne ]
+  * Port the user interface from GTK3 to GTK4 and libadwaita, keeping Nemo's
+    internal APIs, D-Bus names, GSettings schemas, extensions and actions.
+  * Follow the desktop's light/dark preference throughout the window. The
+    menubar, toolbar and statusbar painted a fixed light grey over their CSS
+    background, and gtk_style_context_get_background_color() answered "opaque
+    white" for every caller, which left the icon view, the rubber band and the
+    properties-window capacity ring white in dark mode.
+  * Lay menu rows out as label-left / accelerator-right again, with a real
+    check mark and a submenu arrow, instead of centring a single string that
+    had the accelerator appended to it.
+  * Restore the places-sidebar free-space indicator. It relied on GTK3 widget
+    style properties, which GTK4 removed; it now derives its colours from the
+    row's accent and text colours, and no longer emits theme parser errors.
+  * Map the remaining xsi-* icon names onto freedesktop/Adwaita ones so the
+    search placeholder, Keyboard Shortcuts, Mount Volume, Pin/Unpin, the
+    desktop overlay's tools button and the sidebar's favourites row stop
+    rendering as broken-image glyphs on systems without xapp-symbolic-icons.
+  * Fall back to a neutral icon in the plugin manager, where a third-party
+    action may name an icon the running theme does not have.
+  * Let the Plugins preferences page fill its width and give both lists room,
+    so the last action is no longer hidden behind the button row.
+  * Credit the upstream projects properly: the About dialog now carries
+    copyright, website, issue URL, license type and credit sections for Nemo
+    and Nautilus; README, AUTHORS and THANKS say what this tree is; and a new
+    AppStream metainfo file gives software centres the same story.
+  * Stop overriding the desktop entry's name to "Files" in 54 locales.
+  * Remove the GTK3 Wayland popup-repositioning workaround from the places and
+    tree sidebars; GdkWindow::moved-to-rect does not exist in GTK4.
+
+ -- Verne maintainers <root@linuxmint.com>  Fri, 28 Aug 2026 12:00:00 +0200
+
 nemo (6.7.5) alfa; urgency=medium
 
   [ Michael Webster ]

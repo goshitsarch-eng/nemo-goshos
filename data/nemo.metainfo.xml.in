@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>nemo.desktop</id>
+  <launchable type="desktop-id">nemo.desktop</launchable>
+
+  <name>Verne</name>
+  <summary>Browse and organise your files</summary>
+
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-2.0-or-later</project_license>
+  <developer id="org.linuxmint">
+    <name>The Verne, Nemo and Nautilus contributors</name>
+  </developer>
+
+  <description>
+    <p>
+      Verne is a file manager for the desktop. It browses local and remote
+      locations, manages bookmarks and devices, previews and renames files, and
+      keeps several folders open at once in tabs or a split view.
+    </p>
+    <p>
+      Verne is a GTK4 and libadwaita presentation of Nemo, the file manager of
+      the Cinnamon desktop developed by Linux Mint, which is itself a fork of
+      GNOME Files (Nautilus) 3.4. It keeps Nemo's internal APIs, D-Bus names,
+      extensions, actions and settings schemas, so Nemo plugins and actions
+      continue to work unchanged.
+    </p>
+    <p>Features carried over from Nemo include:</p>
+    <ul>
+      <li>Icon, list and compact views, with a configurable set of columns</li>
+      <li>Tabs, a dual-pane split view, and full back/forward/up navigation</li>
+      <li>Remote locations over SSH, FTP, SMB and MTP through GVfs</li>
+      <li>Open in terminal and open as root, built in</li>
+      <li>Scriptable custom entries through Nemo actions</li>
+      <li>Third-party extensions through the Nemo extension API</li>
+    </ul>
+  </description>
+
+  <categories>
+    <category>Utility</category>
+    <category>FileManager</category>
+  </categories>
+
+  <keywords>
+    <keyword>folders</keyword>
+    <keyword>filesystem</keyword>
+    <keyword>explorer</keyword>
+    <keyword>files</keyword>
+  </keywords>
+
+  <provides>
+    <binary>nemo</binary>
+  </provides>
+
+  <url type="homepage">https://github.com/linuxmint/nemo</url>
+  <url type="bugtracker">https://github.com/linuxmint/nemo/issues</url>
+  <url type="vcs-browser">https://github.com/linuxmint/nemo</url>
+
+  <content_rating type="oars-1.1"/>
+
+  <releases>
+    <release version="@VERSION@" date="2026-08-28">
+      <description>
+        <p>
+          Dark-mode correctness across the whole window, left-aligned menus with
+          right-aligned accelerators, a working places-sidebar free-space
+          indicator, and full attribution to the Nemo and Nautilus projects.
+        </p>
+      </description>
+    </release>
+  </releases>
+</component>
