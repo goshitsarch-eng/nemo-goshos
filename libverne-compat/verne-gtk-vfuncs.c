@@ -652,6 +652,34 @@ on_window_state_notify (GtkWindow *window, GParamSpec *pspec, gpointer data)
 	(void) data;
 }
 
+/* GTK3 gave the toplevel the first look at every button press, which is how
+ * window subclasses implement the mouse back/forward buttons. GTK4 routes the
+ * press straight at the widget under the pointer, so run the toplevel vfunc
+ * from a capture-phase gesture and only swallow the press if it was used. */
+static void
+on_window_pressed (GtkGestureClick *click, gint n_press, gdouble x, gdouble y, gpointer data)
+{
+	GtkWidget *widget = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (click));
+	VerneVfuncs *v = lookup_vfuncs_type (G_OBJECT_TYPE (widget));
+	GdkEvent ev;
+	gboolean handled = FALSE;
+
+	(void) data;
+	if (n_press != 1)
+		return;
+	fill_button_event (&ev, click, n_press, x, y);
+	/* The primary buttons belong to whatever is under the pointer. */
+	if (ev.button.button <= 3)
+		return;
+	verne_set_current_event (widget, &ev);
+	handled = emit_widget_event (widget, "button-press-event", &ev);
+	if (!handled && v && v->button_press)
+		handled = v->button_press (widget, &ev.button);
+	verne_clear_current_event ();
+	if (handled)
+		gtk_gesture_set_state (GTK_GESTURE (click), GTK_EVENT_SEQUENCE_CLAIMED);
+}
+
 static void
 ensure_controllers (GtkWidget *widget)
 {
@@ -667,6 +695,25 @@ ensure_controllers (GtkWidget *widget)
 		g_signal_connect (widget, "close-request", G_CALLBACK (on_close_request), NULL);
 		g_signal_connect (widget, "notify::maximized", G_CALLBACK (on_window_state_notify), NULL);
 		g_signal_connect (widget, "notify::fullscreened", G_CALLBACK (on_window_state_notify), NULL);
+		/* A window subclass that installed GTK3 key/button vfuncs still needs
+		 * them: NemoWindow drives the Alt menubar toggle, the XF86 keybinding
+		 * table and the mouse back/forward buttons from there. GTK3 gave the
+		 * toplevel the event before any child, so capture phase it is. The
+		 * full set of controllers below would fight GTK4's own window
+		 * machinery, so only these two go on. */
+		if (v == NULL)
+			return;
+		key = gtk_event_controller_key_new ();
+		gtk_event_controller_set_propagation_phase (key, GTK_PHASE_CAPTURE);
+		g_signal_connect (key, "key-pressed", G_CALLBACK (on_key), GINT_TO_POINTER (TRUE));
+		g_signal_connect (key, "key-released", G_CALLBACK (on_key), GINT_TO_POINTER (FALSE));
+		gtk_widget_add_controller (widget, key);
+
+		click = gtk_gesture_click_new ();
+		gtk_gesture_single_set_button (GTK_GESTURE_SINGLE (click), 0);
+		gtk_event_controller_set_propagation_phase (GTK_EVENT_CONTROLLER (click), GTK_PHASE_CAPTURE);
+		g_signal_connect (click, "pressed", G_CALLBACK (on_window_pressed), NULL);
+		gtk_widget_add_controller (widget, GTK_EVENT_CONTROLLER (click));
 		return;
 	}
 	/* Extra capture controllers on GTK4-native widgets (AppChooser,
