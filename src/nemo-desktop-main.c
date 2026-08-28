@@ -118,9 +118,10 @@ main (int argc, char *argv[])
 
 	g_set_prgname ("nemo-desktop");
 	g_set_application_name (_("Verne Desktop"));
-	verne_compat_init ();
-	adw_init ();
-
+	/* Choose the backend before adw_init(), which calls gtk_init() and
+	 * opens the display: after that gdk_set_allowed_backends() has no
+	 * effect and the X11 fallback below never happened. The layer-shell
+	 * probe talks to Wayland directly, so it does not need GTK. */
 #ifdef HAVE_GTK_LAYER_SHELL
 	if (check_layer_shell_support ())
 	{
@@ -135,6 +136,9 @@ main (int argc, char *argv[])
 	g_message ("nemo-desktop: using X11");
 	gdk_set_allowed_backends ("x11");
 #endif
+
+	verne_compat_init ();
+	adw_init ();
 
 #ifdef HAVE_EXEMPI
 	xmp_init();
