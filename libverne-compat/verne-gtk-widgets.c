@@ -829,31 +829,13 @@ static GtkWidget *
 verne_menu_overlay_host (GtkMenu *menu)
 {
 	GtkWindow *dest;
-	GtkWidget *start;
-	GtkWidget *w;
 
+	/* Only dest hosts menus on GtkOverlay (dest GSK used to cover sibling
+	 * X popups). File windows keep native popups so Edit→Preferences is
+	 * not clipped to a 360px-tall Home window. */
 	dest = verne_menu_dest_attach_window (GTK_WIDGET (menu));
 	if (dest)
 		return GTK_WIDGET (dest);
-
-	if (!GTK_IS_MENU (menu))
-		return NULL;
-	start = menu->attach;
-	if (!GTK_IS_WIDGET (start))
-		start = g_object_get_data (G_OBJECT (menu), "verne-submenu-item");
-	for (w = start; GTK_IS_WIDGET (w); w = gtk_widget_get_parent (w)) {
-		GtkWidget *overlay;
-
-		if (GTK_IS_MENU (w))
-			continue;
-		overlay = g_object_get_data (G_OBJECT (w), "verne-file-menu-overlay");
-		if (overlay == NULL)
-			overlay = g_object_get_data (G_OBJECT (w), "verne-dest-menu-overlay");
-		if (GTK_IS_OVERLAY (overlay))
-			return w;
-		if (GTK_IS_WINDOW (w) && !GTK_IS_MENU (w))
-			return w;
-	}
 	return NULL;
 }
 
