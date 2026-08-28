@@ -315,7 +315,7 @@ tree_view_row_at_pos (GtkTreeView *tree_view,
 				if (logs < 8) {
 					char *ps = gtk_tree_path_to_string (path);
 
-					g_warning ("tree dest fallback path=%s xy=%d,%d rect=%d,%d %dx%d",
+					g_debug ("tree dest fallback path=%s xy=%d,%d rect=%d,%d %dx%d",
 						   ps ? ps : "?", x, y,
 						   rect.x, rect.y, rect.width, rect.height);
 					g_free (ps);

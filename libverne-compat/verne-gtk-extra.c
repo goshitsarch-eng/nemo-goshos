@@ -671,7 +671,7 @@ verne_x11_hide_dummy_natives (GtkWindow *keep)
 		XWithdrawWindow (dpy, w, DefaultScreen (dpy));
 		XUnmapWindow (dpy, w);
 		XMoveWindow (dpy, w, -2000, -2000);
-		g_warning ("verne: hid dummy 1x1 native xid=0x%lx", (unsigned long) w);
+		g_debug ("verne: hid dummy 1x1 native xid=0x%lx", (unsigned long) w);
 	}
 	gdk_x11_display_error_trap_pop_ignored (gdk_display_get_default ());
 	XFree (children);
@@ -2053,7 +2053,7 @@ verne_paint_tree_dest_row (GtkTreeView *tree_view, GtkSnapshot *snapshot)
 	if (verne_tree_dest_paint_logs < 8) {
 		char *ps = gtk_tree_path_to_string (row->path);
 
-		g_warning ("paint dest row path=%s pos=%d rect=%d,%d %dx%d widget=%dx%d",
+		g_debug ("paint dest row path=%s pos=%d rect=%d,%d %dx%d widget=%dx%d",
 			   ps ? ps : "?", (int) row->pos, rect.x, rect.y, rect.width, rect.height, ww, wh);
 		g_free (ps);
 		verne_tree_dest_paint_logs++;
@@ -2189,7 +2189,7 @@ verne_gtk_tree_view_set_drag_dest_row (GtkTreeView *tree_view, GtkTreePath *path
 	verne_tree_view_hook_snapshot (tree_view);
 	if (path == NULL) {
 		if (g_object_get_qdata (G_OBJECT (tree_view), verne_tree_dest_quark ()) != NULL)
-			g_warning ("tree dest row cleared widget=%s", G_OBJECT_TYPE_NAME (tree_view));
+			g_debug ("tree dest row cleared widget=%s", G_OBJECT_TYPE_NAME (tree_view));
 		g_object_set_qdata (G_OBJECT (tree_view), verne_tree_dest_quark (), NULL);
 		verne_tree_dest_remove_tick (GTK_WIDGET (tree_view));
 		gtk_widget_queue_draw (GTK_WIDGET (tree_view));
@@ -2202,7 +2202,7 @@ verne_gtk_tree_view_set_drag_dest_row (GtkTreeView *tree_view, GtkTreePath *path
 		prev = g_object_get_qdata (G_OBJECT (tree_view), verne_tree_dest_quark ());
 		if (prev == NULL || prev->pos != pos || prev->path == NULL ||
 		    gtk_tree_path_compare (prev->path, path) != 0)
-			g_warning ("tree dest row widget=%s path=%s pos=%d",
+			g_debug ("tree dest row widget=%s path=%s pos=%d",
 				   G_OBJECT_TYPE_NAME (tree_view), ps ? ps : "?", (int) pos);
 		g_free (ps);
 	}

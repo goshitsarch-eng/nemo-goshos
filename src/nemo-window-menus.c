@@ -676,7 +676,7 @@ action_show_shortcuts_window (GtkAction *action,
 		gtk_window_set_transient_for (GTK_WINDOW (shortcuts_window), GTK_WINDOW (window));
 
 	verne_window_present_keep (GTK_WINDOW (shortcuts_window));
-	g_warning ("Verne: presenting keyboard shortcuts window");
+	g_debug ("Verne: presenting keyboard shortcuts window");
 }
 
 static void
@@ -2338,7 +2338,7 @@ nemo_window_initialize_menus (NemoWindow *window)
 				}
 			}
 		}
-		g_warning ("Verne: installed Ctrl+F1 shortcut handlers on %s",
+		g_debug ("Verne: installed Ctrl+F1 shortcut handlers on %s",
 			   G_OBJECT_TYPE_NAME (window));
 	}
 

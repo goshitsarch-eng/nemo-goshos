@@ -1455,7 +1455,7 @@ nemo_icon_container_receive_dropped_icons (NemoIconContainer *container,
 			local_move_only = nemo_icon_container_selection_items_local
 				(container, container->details->dnd_info->drag_info.selection_list);
 		}
-		g_warning ("receive_dropped_icons action=%d local_move=%d icon_hit=%d auto=%d",
+		g_debug ("receive_dropped_icons action=%d local_move=%d icon_hit=%d auto=%d",
 			   (int) real_action, local_move_only, icon_hit,
 			   container->details->auto_layout);
 
@@ -1602,11 +1602,11 @@ set_drop_target (NemoIconContainer *container,
 
         if (file)
             name = nemo_file_get_display_name (file);
-        g_warning ("icon drop target now %s", name ? name : "(unknown)");
+        g_debug ("icon drop target now %s", name ? name : "(unknown)");
         g_free (name);
         nemo_icon_container_icon_raise (container, icon);
     } else if (old_icon != NULL) {
-        g_warning ("icon drop target cleared");
+        g_debug ("icon drop target cleared");
     }
 	gtk_widget_queue_draw (GTK_WIDGET (container));
 }

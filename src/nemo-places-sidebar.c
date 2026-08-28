@@ -1474,9 +1474,19 @@ clicked_eject_button (NemoPlacesSidebar *sidebar,
 
 	if (event) {
 		GdkEventButton *button_event = (GdkEventButton *) event;
-		if ((event->type == GDK_BUTTON_PRESS || event->type == GDK_BUTTON_RELEASE) &&
-		    over_eject_button (sidebar, button_event->x, button_event->y, path)) {
-			return TRUE;
+
+		if (event->type == GDK_BUTTON_PRESS || event->type == GDK_BUTTON_RELEASE) {
+			gdouble x = button_event->x;
+			gdouble y = button_event->y;
+
+			/* over_eject_button() hit-tests in bin-window
+			 * coordinates like the rest of the sidebar; without
+			 * translating first, a scrolled list resolved the click
+			 * to a row further up - so the eject was dropped and
+			 * the sidebar navigated into the volume instead. */
+			places_translate_xy (sidebar->tree_view, &x, &y);
+			if (over_eject_button (sidebar, x, y, path))
+				return TRUE;
 		}
 	}
 
@@ -1892,19 +1902,13 @@ compute_drop_position (GtkTreeView *tree_view,
 		*pos = GTK_TREE_VIEW_DROP_AFTER;
 	}
 
-	/* File transfers onto Home/Desktop/devices/network must land IN the
-	 * place. XDG rows otherwise treat the top/bottom quarter as bookmark
-	 * reorder, which GTK4 bin-vs-widget coords often miss entirely. */
+	/* A row with nothing to drop into can only take a bookmark. */
 	if (!(sidebar->drag_data_received &&
 	      sidebar->drag_data_info == GTK_TREE_MODEL_ROW) &&
-	    place_type != PLACES_HEADING &&
-	    drop_target_uri != NULL && drop_target_uri[0] != '\0' &&
-	    g_strcmp0 (drop_target_uri, "recent:///") != 0 &&
-	    (section_type == SECTION_COMPUTER ||
-	     section_type == SECTION_XDG_BOOKMARKS ||
-	     section_type == SECTION_DEVICES ||
-	     section_type == SECTION_NETWORK)) {
-		*pos = GTK_TREE_VIEW_DROP_INTO_OR_BEFORE;
+	    *pos == GTK_TREE_VIEW_DROP_INTO_OR_BEFORE &&
+	    (place_type == PLACES_HEADING ||
+	     drop_target_uri == NULL || drop_target_uri[0] == '\0')) {
+		goto fail;
 	}
 
 	return TRUE;
@@ -2301,7 +2305,7 @@ drag_data_received_callback (GtkWidget *widget,
 	if (!success)
 		success = places_fallback_drop_path (tree_view, &tree_path, &tree_pos);
 	if (!success) {
-		g_warning ("places drop rejected xy=%d,%d info=%d received=%d",
+		g_debug ("places drop rejected xy=%d,%d info=%d received=%d",
 			   x, y, sidebar->drag_data_info, sidebar->drag_data_received);
 		goto out;
 	}
@@ -2370,7 +2374,7 @@ drag_data_received_callback (GtkWidget *widget,
 			gtk_tree_model_get (model, &iter,
 					    PLACES_SIDEBAR_COLUMN_URI, &drop_uri,
 					    -1);
-			g_warning ("places drop into uri=%s pos=%d xy=%d,%d action=%d",
+			g_debug ("places drop into uri=%s pos=%d xy=%d,%d action=%d",
 				   drop_uri ? drop_uri : "(null)", (int) tree_pos, x, y,
 				   (int) real_action);
 
