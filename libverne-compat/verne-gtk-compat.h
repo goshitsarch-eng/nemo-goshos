@@ -1926,8 +1926,34 @@ gboolean verne_toggle_button_get_active (gpointer button);
 void verne_toggle_button_set_active (gpointer button, gboolean active);
 #define gtk_toggle_button_get_active(b) verne_toggle_button_get_active (b)
 #define gtk_toggle_button_set_active(b, v) verne_toggle_button_set_active ((b), (v))
-#define gtk_toggle_button_get_inconsistent(b) FALSE
-#define gtk_toggle_button_set_inconsistent(b, v) ((void)0)
+/* GTK4 keeps the inconsistent ("mixed") state on GtkCheckButton rather than
+ * GtkToggleButton. Stubbing these out cost more than a visual: the
+ * Permissions page uses the inconsistent flag to mean "these files disagree,
+ * leave this bit alone", so with the flag always FALSE, applying permissions
+ * to a multi-file selection rewrote the bits that should have been left. */
+static inline void
+verne_toggle_button_set_inconsistent (gpointer button, gboolean setting)
+{
+	if (button == NULL)
+		return;
+	g_object_set_data (G_OBJECT (button), "verne-inconsistent",
+			   GINT_TO_POINTER (setting ? 1 : 0));
+	if (GTK_IS_CHECK_BUTTON (button))
+		gtk_check_button_set_inconsistent (GTK_CHECK_BUTTON (button), setting);
+}
+
+static inline gboolean
+verne_toggle_button_get_inconsistent (gpointer button)
+{
+	if (button == NULL)
+		return FALSE;
+	if (GTK_IS_CHECK_BUTTON (button))
+		return gtk_check_button_get_inconsistent (GTK_CHECK_BUTTON (button));
+	return GPOINTER_TO_INT (g_object_get_data (G_OBJECT (button), "verne-inconsistent")) != 0;
+}
+
+#define gtk_toggle_button_get_inconsistent(b) verne_toggle_button_get_inconsistent (b)
+#define gtk_toggle_button_set_inconsistent(b, v) verne_toggle_button_set_inconsistent ((b), (v))
 /* GTK4 GtkCheckButton is no longer a GtkToggleButton. Nemo still casts. */
 #undef GTK_TOGGLE_BUTTON
 #define GTK_TOGGLE_BUTTON(o) ((GtkToggleButton *) (gpointer) (o))
