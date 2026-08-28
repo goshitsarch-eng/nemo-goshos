@@ -631,7 +631,14 @@ NemoWindow *
 nemo_window_slot_get_window (NemoWindowSlot *slot)
 {
 	g_return_val_if_fail (NEMO_IS_WINDOW_SLOT (slot), NULL);
-	g_return_val_if_fail (slot->pane != NULL, NULL);
+
+	/* A slot outliving its pane is an ordinary transient state now that
+	 * the pane pointer is weak -- closing a split view leaves it that way
+	 * until the slot itself goes -- so answer NULL rather than warning. */
+	if (slot->pane == NULL) {
+		return NULL;
+	}
+
 	return slot->pane->window;
 }
 
