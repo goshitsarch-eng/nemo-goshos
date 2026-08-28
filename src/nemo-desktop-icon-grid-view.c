@@ -70,6 +70,9 @@
 
 /* Timeout to check the desktop directory for updates */
 #define RESCAN_TIMEOUT 1
+/* How many one-second polls between full "is anything on disk we are not
+ * showing?" sweeps when the Desktop folder has not changed. */
+#define RESCAN_SWEEP_TICKS 15
 
 struct NemoDesktopIconGridViewDetails
 {
@@ -85,6 +88,7 @@ struct NemoDesktopIconGridViewDetails
 	guint ensure_icons_timeout;
 	guint ensure_icons_timeout2;
 	gboolean pending_rescan;
+	guint rescan_ticks;
     gboolean updating_menus;
 	gboolean live_monitor_started;
 	GFileMonitor *dir_monitor;
@@ -737,6 +741,7 @@ do_desktop_rescan (gpointer data)
 {
 	NemoDesktopIconGridView *desktop_icon_grid_view;
 	struct stat buf;
+	gboolean changed;
 
 	desktop_icon_grid_view = NEMO_DESKTOP_ICON_GRID_VIEW (data);
 
@@ -745,16 +750,24 @@ do_desktop_rescan (gpointer data)
 		return TRUE;
 	}
 
-	if (buf.st_mtime != desktop_dir_modify_time &&
-	    !desktop_icon_grid_view->details->pending_rescan) {
+	changed = buf.st_mtime != desktop_dir_modify_time;
+
+	if (changed && !desktop_icon_grid_view->details->pending_rescan) {
 		desktop_icon_grid_view->details->pending_rescan = TRUE;
 		desktop_reload_from_disk (NEMO_VIEW (desktop_icon_grid_view));
 	}
 
-	/* Always resurrect missing icons. GFileMonitor can miss g_file_copy
-	 * from another process, and done_loading can snap mtime so a later
-	 * poll would skip the file that is already on disk. */
-	desktop_ensure_icons_from_model (NEMO_VIEW (desktop_icon_grid_view));
+	/* Resurrect missing icons. GFileMonitor can miss g_file_copy from
+	 * another process, and done_loading can snap mtime so a later poll
+	 * would skip the file that is already on disk. That sweep enumerates
+	 * the whole folder, though, so running it every second kept the
+	 * desktop process busy at rest for nothing: do it when the folder
+	 * actually changed, and otherwise only now and then. */
+	desktop_icon_grid_view->details->rescan_ticks++;
+	if (changed || desktop_icon_grid_view->details->rescan_ticks >= RESCAN_SWEEP_TICKS) {
+		desktop_icon_grid_view->details->rescan_ticks = 0;
+		desktop_ensure_icons_from_model (NEMO_VIEW (desktop_icon_grid_view));
+	}
 
 	return TRUE;
 }

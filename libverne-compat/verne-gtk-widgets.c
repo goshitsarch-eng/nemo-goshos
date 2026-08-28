@@ -2324,16 +2324,30 @@ verne_x11_walk_dest_canvas (Display *dpy, Window start, Window skip,
 		XFree (children);
 }
 
+/* Walking the X window tree costs three blocking round trips per window, and
+ * an open menu asks for this twenty times a second. The desktop canvas does
+ * not come and go at that rate, so answer from a short-lived cache - including
+ * the common "there is no nemo-desktop running" answer. */
+#define VERNE_DEST_CANVAS_TTL (2 * G_TIME_SPAN_SECOND)
+
 static Window
 verne_x11_find_dest_canvas (Display *dpy, Window skip)
 {
+	static Window cached_canvas;
+	static Window cached_skip;
+	static gint64 cached_at;
 	Window best = 0;
 	int best_area = 0;
 	GListModel *model;
 	guint i, n;
+	gint64 now;
 
 	if (dpy == NULL)
 		return 0;
+	now = g_get_monotonic_time ();
+	if (cached_at != 0 && cached_skip == skip && now - cached_at < VERNE_DEST_CANVAS_TTL)
+		return cached_canvas;
+
 	verne_x11_walk_dest_canvas (dpy, DefaultRootWindow (dpy), skip, &best, &best_area, 3);
 
 	model = gtk_window_get_toplevels ();
@@ -2353,6 +2367,9 @@ verne_x11_find_dest_canvas (Display *dpy, Window skip)
 		if (w)
 			g_object_unref (w);
 	}
+	cached_canvas = best;
+	cached_skip = skip;
+	cached_at = now;
 	return best;
 }
 #endif

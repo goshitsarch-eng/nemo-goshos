@@ -297,12 +297,29 @@ tree_view_row_at_pos (GtkTreeView *tree_view,
 	g_clear_pointer (&path, gtk_tree_path_free);
 
 	model = gtk_tree_view_get_model (tree_view);
-	if (model != NULL && gtk_tree_model_get_iter_first (model, &iter)) {
-		do {
+	if (model != NULL) {
+		GtkTreePath *first = NULL, *last = NULL;
+		gboolean have_row;
+
+		/* Only a row that is on screen can be under the pointer. Without
+		 * this the fallback walked the whole model - every row, every
+		 * drag-motion event - which made dragging over a large folder
+		 * crawl. */
+		if (gtk_tree_view_get_visible_range (tree_view, &first, &last) && first != NULL)
+			have_row = gtk_tree_model_get_iter (model, &iter, first);
+		else
+			have_row = gtk_tree_model_get_iter_first (model, &iter);
+
+		while (have_row) {
 			GdkRectangle rect = { 0 };
 			int wx = 0, wy = 0;
 
 			path = gtk_tree_model_get_path (model, &iter);
+			if (last != NULL && gtk_tree_path_compare (path, last) > 0) {
+				gtk_tree_path_free (path);
+				path = NULL;
+				break;
+			}
 			gtk_tree_view_get_background_area (tree_view, path, NULL, &rect);
 			gtk_tree_view_convert_bin_window_to_widget_coords (tree_view, rect.x, rect.y, &wx, &wy);
 			if (wx >= -40 && wy >= -40) {
@@ -321,11 +338,16 @@ tree_view_row_at_pos (GtkTreeView *tree_view,
 					g_free (ps);
 					logs++;
 				}
-				goto got_path;
+				break;
 			}
 			gtk_tree_path_free (path);
 			path = NULL;
-		} while (gtk_tree_model_iter_next (model, &iter));
+			have_row = gtk_tree_model_iter_next (model, &iter);
+		}
+		gtk_tree_path_free (first);
+		gtk_tree_path_free (last);
+		if (path != NULL)
+			goto got_path;
 	}
 	return FALSE;
 
