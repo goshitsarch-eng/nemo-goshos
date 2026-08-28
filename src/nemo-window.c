@@ -745,8 +745,10 @@ nemo_window_constructed (GObject *self)
         adw_header_bar_set_show_end_title_buttons (ADW_HEADER_BAR (header), TRUE);
         adw_toolbar_view_set_top_bar_style (ADW_TOOLBAR_VIEW (toolbar_view), ADW_TOOLBAR_RAISED);
         adw_toolbar_view_set_bottom_bar_style (ADW_TOOLBAR_VIEW (toolbar_view), ADW_TOOLBAR_RAISED);
+        /* Not "toolbar": this box holds the menubar, the toolbar AND the
+         * file view, and libadwaita's .toolbar padding then insets the
+         * whole view by 6px of headerbar-coloured gutter. */
         gtk_widget_add_css_class (chrome, "verne-chrome");
-        gtk_widget_add_css_class (chrome, "toolbar");
         gtk_box_append (GTK_BOX (chrome), menu);
         gtk_box_append (GTK_BOX (chrome), toolbar_holder);
         gtk_widget_set_vexpand (window->details->content_paned, TRUE);

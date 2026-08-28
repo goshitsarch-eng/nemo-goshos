@@ -2337,11 +2337,29 @@ on_related_toggle_toggled (GtkToggleButton *button, gpointer action)
 {
 	if (g_object_get_data (G_OBJECT (button), "verne-syncing-toggle"))
 		return;
-	if (GTK_IS_TOGGLE_ACTION (action))
-		gtk_toggle_action_set_active (GTK_TOGGLE_ACTION (action),
-					      gtk_toggle_button_get_active (button));
-	else if (gtk_toggle_button_get_active (button))
+	if (GTK_IS_TOGGLE_ACTION (action)) {
+		/* A GTK3 proxy activated its action rather than writing the
+		 * state directly, and ::activate is what the application
+		 * connects to. Poking ->active only emitted ::toggled, so the
+		 * toolbar's Icons/List/Compact, Show Thumbnails and Extra Pane
+		 * buttons moved but did nothing. */
+		if (gtk_toggle_action_get_active (GTK_TOGGLE_ACTION (action)) !=
+		    gtk_toggle_button_get_active (button))
+			gtk_action_activate (GTK_ACTION (action));
+	} else if (gtk_toggle_button_get_active (button)) {
 		gtk_action_activate (GTK_ACTION (action));
+	}
+}
+
+/* GTK3 kept a proxy's sensitivity and visibility in step with its action;
+ * without this the toolbar's Back and Forward buttons keep whatever state
+ * they had when they were built, which is insensitive. */
+static void
+on_related_action_sensitive (GObject *action, GParamSpec *pspec, gpointer activatable)
+{
+	(void) pspec;
+	gtk_widget_set_sensitive (GTK_WIDGET (activatable),
+				  gtk_action_get_sensitive (GTK_ACTION (action)));
 }
 
 static void
@@ -2378,6 +2396,12 @@ gtk_activatable_set_related_action (gpointer activatable, GtkAction *action)
 		if (gtk_action_get_tooltip (action))
 			gtk_widget_set_tooltip_text (GTK_WIDGET (activatable), gtk_action_get_tooltip (action));
 		gtk_widget_set_sensitive (GTK_WIDGET (activatable), gtk_action_get_sensitive (action));
+		if (g_object_get_data (G_OBJECT (activatable), "verne-action-sensitive") == NULL) {
+			g_signal_connect_object (action, "notify::sensitive",
+						 G_CALLBACK (on_related_action_sensitive),
+						 activatable, 0);
+			g_object_set_data (G_OBJECT (activatable), "verne-action-sensitive", GINT_TO_POINTER (1));
+		}
 		if (GTK_IS_TOGGLE_BUTTON (activatable) && GTK_IS_TOGGLE_ACTION (action)) {
 			gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (activatable),
 						      gtk_toggle_action_get_active (GTK_TOGGLE_ACTION (action)));

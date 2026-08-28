@@ -39,22 +39,25 @@
 	background-color: @window_bg_color;
 }
 
-.verne-window .sidebar,
-.nemo-window .sidebar,
-.verne-window .places-sidebar,
-.nemo-window .places-sidebar,
-.verne-window .nemo-places-sidebar,
-.nemo-window .nemo-places-sidebar {
+.verne-window .sidebar:not(:selected),
+.nemo-window .sidebar:not(:selected),
+.verne-window .places-sidebar:not(:selected),
+.nemo-window .places-sidebar:not(:selected),
+.verne-window .nemo-places-sidebar:not(:selected),
+.nemo-window .nemo-places-sidebar:not(:selected) {
 	background-color: @sidebar_bg_color;
 	color: @sidebar_fg_color;
 }
 
-.verne-window layout.view,
-.nemo-window layout.view,
-.verne-window .nemo-canvas-container,
-.nemo-window .nemo-canvas-container,
-.verne-window treeview,
-.nemo-window treeview {
+/* :not(:selected) matters: these rules sit at application priority, above
+ * the theme, so an unqualified background here paints straight over the
+ * selection highlight and selected rows become invisible. */
+.verne-window layout.view:not(:selected),
+.nemo-window layout.view:not(:selected),
+.verne-window .nemo-canvas-container:not(:selected),
+.nemo-window .nemo-canvas-container:not(:selected),
+.verne-window treeview:not(:selected),
+.nemo-window treeview:not(:selected) {
 	background-color: @view_bg_color;
 	color: @view_fg_color;
 }
