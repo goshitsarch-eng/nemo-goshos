@@ -123,49 +123,22 @@ nemo_notebook_new (void)
 
 
 /* FIXME remove when gtknotebook's func for this becomes public, bug #.... */
-static NemoNotebook *
-find_notebook_at_pointer (gint abs_x, gint abs_y)
-{
-	GdkDeviceManager *manager;
-	GdkDevice *pointer;
-	GdkWindow *win_at_pointer, *toplevel_win;
-	gpointer toplevel = NULL;
-	gint x, y;
-
-	/* FIXME multi-head */
-	manager = gdk_display_get_device_manager (gdk_display_get_default ());
-	pointer = gdk_device_manager_get_client_pointer (manager);
-	win_at_pointer = gdk_device_get_window_at_position (pointer, &x, &y);
-
-	if (win_at_pointer == NULL)
-	{
-		/* We are outside all windows containing a notebook */
-		return NULL;
-	}
-
-	toplevel_win = gdk_window_get_toplevel (win_at_pointer);
-
-	/* get the GtkWidget which owns the toplevel GdkWindow */
-	gdk_window_get_user_data (toplevel_win, &toplevel);
-
-	/* toplevel should be an NemoWindow */
-	if (toplevel != NULL && NEMO_IS_WINDOW (toplevel))
-	{
-		return NEMO_NOTEBOOK (NEMO_WINDOW (toplevel)->details->active_pane->notebook);
-	}
-
-	return NULL;
-}
-
+/* GTK4 has no per-widget windows to look up under the pointer, so ask the
+ * notebook where it is on screen instead. */
 static gboolean
 is_in_notebook_window (NemoNotebook *notebook,
 		       gint abs_x, gint abs_y)
 {
-	NemoNotebook *nb_at_pointer;
+	GtkWidget *widget = GTK_WIDGET (notebook);
+	gint x = 0, y = 0;
 
-	nb_at_pointer = find_notebook_at_pointer (abs_x, abs_y);
+	if (!gtk_widget_get_mapped (widget))
+		return FALSE;
 
-	return nb_at_pointer == notebook;
+	verne_widget_get_screen_origin (widget, &x, &y);
+
+	return abs_x >= x && abs_x < x + gtk_widget_get_width (widget) &&
+	       abs_y >= y && abs_y < y + gtk_widget_get_height (widget);
 }
 
 gint
@@ -177,7 +150,6 @@ nemo_notebook_find_tab_num_at_pos (NemoNotebook *notebook,
 	int page_num = 0;
 	GtkNotebook *nb = GTK_NOTEBOOK (notebook);
 	GtkWidget *page;
-	GtkAllocation allocation;
 
 	tab_pos = gtk_notebook_get_tab_pos (GTK_NOTEBOOK (notebook));
 
@@ -208,12 +180,14 @@ nemo_notebook_find_tab_num_at_pos (NemoNotebook *notebook,
 			continue;
 		}
 
-		gdk_window_get_origin (gtk_widget_get_window (tab),
-				       &x_root, &y_root);
-		gtk_widget_get_allocation (tab, &allocation);
+		/* Each tab needs its own on-screen position: GTK4 allocations
+		 * are relative to the parent and gtk_widget_get_window() only
+		 * ever yields the toplevel's surface, so the old arithmetic
+		 * gave every tab the same bounds and the first one always won. */
+		verne_widget_get_screen_origin (tab, &x_root, &y_root);
 
-		max_x = x_root + allocation.x + allocation.width;
-		max_y = y_root + allocation.y + allocation.height;
+		max_x = x_root + gtk_widget_get_width (tab);
+		max_y = y_root + gtk_widget_get_height (tab);
 
 		if (((tab_pos == GTK_POS_TOP)
 		     || (tab_pos == GTK_POS_BOTTOM))

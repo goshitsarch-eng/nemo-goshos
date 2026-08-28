@@ -688,7 +688,7 @@ verne_restore_builder_stacks (GtkBuilder *builder, const gchar *xml)
 			continue;
 		obj = gtk_builder_get_object (builder, info->stack_id);
 		if (!GTK_IS_STACK (obj)) {
-			g_warning ("Verne: UI stack id '%s' was not constructed", info->stack_id);
+			g_debug ("Verne: UI stack id '%s' was not constructed", info->stack_id);
 			continue;
 		}
 		stack = GTK_STACK (obj);

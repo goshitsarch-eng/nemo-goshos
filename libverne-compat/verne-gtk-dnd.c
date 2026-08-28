@@ -32,6 +32,15 @@ dest_targets_quark (void)
 }
 
 static GQuark
+dest_flags_quark (void)
+{
+	static GQuark q;
+	if (!q)
+		q = g_quark_from_static_string ("verne-drop-flags");
+	return q;
+}
+
+static GQuark
 drop_xy_quark (void)
 {
 	static GQuark q;
@@ -195,7 +204,7 @@ verne_content_provider_write_mime_type_async (GdkContentProvider *provider,
 
 	if (sel.data && sel.length > 0)
 		g_output_stream_write_all (stream, sel.data, (gsize) sel.length, NULL, cancellable, NULL);
-	g_warning ("content write mime=%s len=%d widget=%s", mime_type, sel.length,
+	g_debug ("content write mime=%s len=%d widget=%s", mime_type, sel.length,
 		   self->widget ? G_OBJECT_TYPE_NAME (self->widget) : "none");
 	g_free (sel.data);
 	g_task_return_boolean (task, TRUE);
@@ -459,7 +468,7 @@ on_forward_drop (GtkDropTargetAsync *self, GdkDrop *drop, double x, double y, gp
 	double dx = x, dy = y;
 
 	dest = verne_dest_for_native_xy (GTK_NATIVE (win), x, y, &dx, &dy);
-	g_warning ("forward drop on %s -> %s at %.0f,%.0f (win %.0f,%.0f)",
+	g_debug ("forward drop on %s -> %s at %.0f,%.0f (win %.0f,%.0f)",
 		   G_OBJECT_TYPE_NAME (win),
 		   dest ? G_OBJECT_TYPE_NAME (dest) : "(none)", dx, dy, x, y);
 	if (dest == NULL)
@@ -480,15 +489,6 @@ verne_ensure_native_drop_forwarder (GtkWidget *widget)
 {
 	GtkWidget *win;
 	GtkDropTargetAsync *async;
-	GdkContentFormats *formats;
-	const char *mimes[] = {
-		"x-special/gnome-icon-list",
-		"text/uri-list",
-		"x-special/gnome-copied-files",
-		"text/plain",
-		"_NETSCAPE_URL",
-		NULL
-	};
 
 	if (widget == NULL)
 		return;
@@ -497,8 +497,12 @@ verne_ensure_native_drop_forwarder (GtkWidget *widget)
 		return;
 	if (g_object_get_qdata (G_OBJECT (win), forwarder_quark ()))
 		return;
-	formats = gdk_content_formats_new (mimes, 5);
-	async = gtk_drop_target_async_new (formats,
+	/* NULL formats means "offer me everything". The hard-coded list here
+	 * used to reject anything else outright - a GTK_TREE_MODEL_ROW drag
+	 * (reordering bookmarks in the sidebar) or an XdndDirectSave0 drag from
+	 * a browser never reached a destination at all. Which drags are
+	 * actually acceptable is the destination's decision, below. */
+	async = gtk_drop_target_async_new (NULL,
 					   GDK_ACTION_COPY | GDK_ACTION_MOVE | GDK_ACTION_LINK | GDK_ACTION_ASK);
 	gtk_event_controller_set_propagation_phase (GTK_EVENT_CONTROLLER (async), GTK_PHASE_CAPTURE);
 	g_signal_connect (async, "accept", G_CALLBACK (on_async_accept), win);
@@ -508,7 +512,7 @@ verne_ensure_native_drop_forwarder (GtkWidget *widget)
 	g_signal_connect (async, "drop", G_CALLBACK (on_forward_drop), win);
 	gtk_widget_add_controller (win, GTK_EVENT_CONTROLLER (async));
 	g_object_set_qdata (G_OBJECT (win), forwarder_quark (), async);
-	g_warning ("installed drop forwarder on %s native=%s",
+	g_debug ("installed drop forwarder on %s native=%s",
 		   G_OBJECT_TYPE_NAME (widget), G_OBJECT_TYPE_NAME (win));
 }
 
@@ -621,6 +625,11 @@ on_async_motion (GtkDropTargetAsync *self, GdkDrop *drop, double x, double y, gp
 	g_debug ("drop dest motion at %.0f,%.0f on %s", x, y, G_OBJECT_TYPE_NAME (widget));
 	pack_drop_xy (drop, x, y);
 	g_signal_emit_by_name (widget, "drag-motion", drop, (int) x, (int) y, time, &handled);
+	/* GTK3 replied for a destination registered with GTK_DEST_DEFAULT_MOTION;
+	 * such a destination has no drag-motion handler of its own. */
+	if (!handled &&
+	    (GPOINTER_TO_INT (g_object_get_qdata (G_OBJECT (widget), dest_flags_quark ())) & GTK_DEST_DEFAULT_MOTION))
+		handled = TRUE;
 	selected = (GdkDragAction) GPOINTER_TO_INT (g_object_get_qdata (G_OBJECT (drop), selected_action_quark ()));
 	if (selected == 0 && handled)
 		selected = GDK_ACTION_COPY;
@@ -638,6 +647,12 @@ on_async_motion (GtkDropTargetAsync *self, GdkDrop *drop, double x, double y, gp
 		if (pending_drop)
 			g_object_unref (pending_drop);
 		pending_drop = g_object_ref (drop);
+		/* This latch stops one GdkDrop being delivered twice. It was
+		 * only ever cleared by gtk_drag_finish(), so a destination that
+		 * never finished a drop - a read that timed out, a drop nothing
+		 * accepted - killed drag and drop process-wide until restart.
+		 * A new drop means the previous one is over either way. */
+		drop_already_emitted = FALSE;
 	}
 	pending_drop_widget = widget;
 	pending_drop_x = x;
@@ -666,10 +681,23 @@ on_async_drop (GtkDropTargetAsync *self, GdkDrop *drop, double x, double y, gpoi
 	if (g_object_get_qdata (G_OBJECT (drop), selected_action_quark ()) == NULL)
 		g_object_set_qdata (G_OBJECT (drop), selected_action_quark (),
 				    GINT_TO_POINTER ((int) GDK_ACTION_COPY));
-	g_warning ("async drop at %.0f,%.0f on %s selected=%d",
+	g_debug ("async drop at %.0f,%.0f on %s selected=%d",
 		   x, y, G_OBJECT_TYPE_NAME (widget),
 		   GPOINTER_TO_INT (g_object_get_qdata (G_OBJECT (drop), selected_action_quark ())));
 	g_signal_emit_by_name (widget, "drag-drop", drop, (int) x, (int) y, GDK_CURRENT_TIME, &handled);
+	/* GTK3 fetched the data itself for a destination registered with
+	 * GTK_DEST_DEFAULT_DROP - the properties window icon, the location bar
+	 * and the templates list only connect drag-data-received - so without
+	 * this their drops did nothing at all. */
+	if (!handled &&
+	    (GPOINTER_TO_INT (g_object_get_qdata (G_OBJECT (widget), dest_flags_quark ())) & GTK_DEST_DEFAULT_DROP)) {
+		GdkAtom target = gtk_drag_dest_find_target (widget, (GdkDragContext *) drop, NULL);
+
+		if (target != NULL) {
+			gtk_drag_get_data (widget, (GdkDragContext *) drop, target, GDK_CURRENT_TIME);
+			handled = TRUE;
+		}
+	}
 	g_debug ("drag-drop handled=%d", handled);
 	return handled;
 }
@@ -917,7 +945,7 @@ verne_local_update_dest (VerneLocalDrag *local)
 	if (dest != local->current_dest) {
 		char *path = dest ? verne_widget_path (dest) : g_strdup ("none");
 
-		g_warning ("local dest now %s at %.0f,%.0f", path, x, y);
+		g_debug ("local dest now %s at %.0f,%.0f", path, x, y);
 		g_free (path);
 	}
 	local->current_dest = dest;
@@ -1005,14 +1033,14 @@ verne_idle_finish_local (gpointer data)
 	VerneLocalDrag *local = data;
 	GtkWidget *source;
 
-	g_warning ("idle finish local drag");
+	g_debug ("idle finish local drag");
 	source = local->source;
 	if (source && GTK_IS_WIDGET (source) &&
 	    g_object_get_data (G_OBJECT (source), "verne-active-drag") == (gpointer) local)
 		g_signal_emit_by_name (source, "drag-end", local);
-	g_warning ("idle finish after drag-end");
+	g_debug ("idle finish after drag-end");
 	verne_local_cleanup (local);
-	g_warning ("idle finish after cleanup");
+	g_debug ("idle finish after cleanup");
 	return G_SOURCE_REMOVE;
 }
 
@@ -1064,20 +1092,32 @@ verne_local_emit_drop (VerneLocalDrag *local)
 	if (dest) {
 		char *path = verne_widget_path (dest);
 
-		g_warning ("completing local drop on %s at %.0f,%.0f",
+		g_debug ("completing local drop on %s at %.0f,%.0f",
 			   path, local->dest_x, local->dest_y);
 		g_free (path);
 		pack_drop_xy (local, local->dest_x, local->dest_y);
 		g_signal_emit_by_name (dest, "drag-drop", local,
 				       (int) local->dest_x, (int) local->dest_y, GDK_CURRENT_TIME, &handled);
-		g_warning ("local drag-drop handled=%d", handled);
+		/* Same as the foreign-drop path: a destination registered with
+		 * GTK_DEST_DEFAULT_DROP has no drag-drop handler and expects the
+		 * data to be fetched for it. */
+		if (!handled &&
+		    (GPOINTER_TO_INT (g_object_get_qdata (G_OBJECT (dest), dest_flags_quark ())) & GTK_DEST_DEFAULT_DROP)) {
+			GdkAtom target = gtk_drag_dest_find_target (dest, (GdkDragContext *) local, NULL);
+
+			if (target != NULL) {
+				gtk_drag_get_data (dest, (GdkDragContext *) local, target, GDK_CURRENT_TIME);
+				handled = TRUE;
+			}
+		}
+		g_debug ("local drag-drop handled=%d", handled);
 		g_signal_emit_by_name (dest, "drag-leave", local, GDK_CURRENT_TIME);
 	} else {
-		g_warning ("local drop with no dest, cancelling");
+		g_debug ("local drop with no dest, cancelling");
 		if (source)
 			g_signal_emit_by_name (source, "drag-failed", local, 0, &handled);
 	}
-	g_warning ("local drop scheduled idle finish dest=%s",
+	g_debug ("local drop scheduled idle finish dest=%s",
 		   dest ? G_OBJECT_TYPE_NAME (dest) : "none");
 	/* Finish outside the drag-drop stack: copy/move UI and highlight
 	 * teardown re-enter GTK if they run before drag-drop returns. */
@@ -1462,7 +1502,7 @@ verne_xdnd_handle_selection_request (VerneLocalDrag *local, const XSelectionRequ
 		sel.format = 8;
 		info = info_for_target (local->targets, sel.target);
 		g_signal_emit_by_name (local->source, "drag-data-get", local, &sel, info, req->time);
-	g_warning ("xdnd SelectionRequest from=0x%lx mime=%s len=%d data=%.*s",
+	g_debug ("xdnd SelectionRequest from=0x%lx mime=%s len=%d data=%.*s",
 		   (unsigned long) req->requestor, mime, sel.length, MAX (sel.length, 0),
 		   sel.data ? (const char *) sel.data : "");
 		if (sel.data && sel.length > 0) {
@@ -1525,7 +1565,7 @@ verne_xdnd_pump (VerneLocalDrag *local)
 				local->xdnd_accepted = (ev.xclient.data.l[1] & 1) != 0;
 				g_debug ("xdnd status accept=%d", local->xdnd_accepted);
 			} else if (g_strcmp0 (atom_name, "XdndFinished") == 0) {
-				g_warning ("xdnd finished accept=%ld", ev.xclient.data.l[1] & 1);
+				g_debug ("xdnd finished accept=%ld", ev.xclient.data.l[1] & 1);
 				local->xdnd_finished = TRUE;
 			}
 		}
@@ -1552,7 +1592,7 @@ verne_xdnd_finish_timeout (gpointer data)
 	if (local->drop_emitted)
 		return G_SOURCE_REMOVE;
 	local->drop_emitted = TRUE;
-	g_warning ("xdnd finish timeout, accepted=%d served=%d",
+	g_debug ("xdnd finish timeout, accepted=%d served=%d",
 		   local->xdnd_accepted, local->xdnd_served_data);
 	if (source) {
 		if (!local->xdnd_accepted && !local->xdnd_served_data)
@@ -1629,7 +1669,7 @@ verne_copy_uris_to_desktop (VerneLocalDrag *local)
 			ok = g_file_move (src, dst, G_FILE_COPY_NONE, NULL, NULL, NULL, &err);
 		else
 			ok = g_file_copy (src, dst, G_FILE_COPY_NONE, NULL, NULL, NULL, &err);
-		g_warning ("desktop drop %s %s -> %s ok=%d err=%s",
+		g_debug ("desktop drop %s %s -> %s ok=%d err=%s",
 			   (action & GDK_ACTION_MOVE) ? "move" : "copy",
 			   uris[i], base, ok, err ? err->message : "none");
 		g_clear_error (&err);
@@ -1655,7 +1695,7 @@ verne_xdnd_send_drop (VerneLocalDrag *local)
 	verne_xdnd_pump (local);
 	verne_xdnd_wait_status (local, 500);
 	if (local->xdnd_target == None || local->xdnd_source == None) {
-		g_warning ("XdndDrop skipped, no target");
+		g_debug ("XdndDrop skipped, no target");
 		return;
 	}
 	wmclass = verne_xid_wm_class (dpy, local->xdnd_target);
@@ -1670,7 +1710,7 @@ verne_xdnd_send_drop (VerneLocalDrag *local)
 		verne_copy_uris_to_desktop (local);
 		local->xdnd_dropped = TRUE;
 		local->xdnd_finished = TRUE;
-		g_warning ("desktop drop finished without XdndDrop class=%s",
+		g_debug ("desktop drop finished without XdndDrop class=%s",
 			   wmclass ? wmclass : "?");
 		g_free (wmclass);
 		if (local->xdnd_finish_timeout)
@@ -1683,7 +1723,7 @@ verne_xdnd_send_drop (VerneLocalDrag *local)
 				   XInternAtom (dpy, "XdndDrop", False),
 				   (long) local->xdnd_source, 0, (long) time, 0, 0);
 	local->xdnd_dropped = TRUE;
-	g_warning ("sent XdndDrop to 0x%lx from 0x%lx accepted=%d class=%s",
+	g_debug ("sent XdndDrop to 0x%lx from 0x%lx accepted=%d class=%s",
 		   (unsigned long) local->xdnd_target, (unsigned long) local->xdnd_source,
 		   local->xdnd_accepted, wmclass ? wmclass : "?");
 	g_free (wmclass);
@@ -1778,7 +1818,7 @@ verne_local_handover_native (VerneLocalDrag *local)
 	if ((local->actions & GDK_ACTION_COPY) && !(local->selected & GDK_ACTION_MOVE))
 		local->selected = GDK_ACTION_COPY;
 	verne_xdnd_send_position (local);
-	g_warning ("handed local drag over to XDND source=0x%lx types=%u created=%d",
+	g_debug ("handed local drag over to XDND source=0x%lx types=%u created=%d",
 		   (unsigned long) local->xdnd_source, local->n_xdnd_atoms, local->xdnd_created_window);
 }
 
@@ -1819,7 +1859,7 @@ verne_local_poll (gpointer data)
 			return G_SOURCE_CONTINUE;
 		}
 		if (local->xdnd_target != None) {
-			g_warning ("reclaiming local drag from XDND target=0x%lx",
+			g_debug ("reclaiming local drag from XDND target=0x%lx",
 				   (unsigned long) local->xdnd_target);
 			verne_xdnd_send_leave (local);
 		}
@@ -1833,7 +1873,7 @@ verne_local_poll (gpointer data)
 		return G_SOURCE_CONTINUE;
 	if (!verne_local_button1_down ()) {
 		local->poll_id = 0;
-		g_warning ("local DnD poll saw button1 up, dropping");
+		g_debug ("local DnD poll saw button1 up, dropping");
 		verne_local_emit_drop (local);
 		return G_SOURCE_REMOVE;
 	}
@@ -1932,7 +1972,7 @@ gtk_drag_dest_set (GtkWidget *widget, GtkDestDefaults flags, const GtkTargetEntr
 	GtkWidget *native;
 	gpointer existing;
 
-	(void) flags;
+	g_object_set_qdata (G_OBJECT (widget), dest_flags_quark (), GINT_TO_POINTER ((int) flags));
 	list = gtk_target_list_new (targets, (guint) MAX (n_targets, 0));
 	g_object_set_qdata_full (G_OBJECT (widget), dest_targets_quark (), list, (GDestroyNotify) gtk_target_list_unref);
 	formats = formats_from_entries (targets, n_targets);
@@ -2139,7 +2179,7 @@ drop_deliver_bytes (GtkWidget *widget, GdkDrop *drop, const char *mime,
 		g_signal_emit_by_name (widget, "drag-data-received",
 				       drop, x, y, &sel, info, time);
 	}
-	g_warning ("drag-data-received mime=%s len=%d info=%u dest=%s xy=%d,%d",
+	g_debug ("drag-data-received mime=%s len=%d info=%u dest=%s xy=%d,%d",
 		   mime_copy, sel.length, info,
 		   widget ? G_OBJECT_TYPE_NAME (widget) : "(null)", x, y);
 	g_free (copy);
@@ -2191,7 +2231,7 @@ drop_read_timeout (gpointer data)
 	VerneDropRead *rd = data;
 
 	rd->timeout_id = 0;
-	g_warning ("drop-read timeout dest=%s — waiting for async, not emitting empty drop",
+	g_debug ("drop-read timeout dest=%s — waiting for async, not emitting empty drop",
 		   rd->widget ? G_OBJECT_TYPE_NAME (rd->widget) : "(null)");
 	drop_read_unref (rd);
 	return G_SOURCE_REMOVE;
@@ -2224,7 +2264,7 @@ drop_splice_done (GObject *source, GAsyncResult *result, gpointer data)
 		return;
 	}
 	if (bytes == NULL) {
-		g_warning ("drop-read splice produced no bytes dest=%s",
+		g_debug ("drop-read splice produced no bytes dest=%s",
 			   rd->widget ? G_OBJECT_TYPE_NAME (rd->widget) : "(null)");
 		drop_read_unref (rd);
 		return;
@@ -2265,7 +2305,7 @@ drop_read_done (GObject *source, GAsyncResult *result, gpointer data)
 		return;
 	}
 	if (stream == NULL) {
-		g_warning ("gdk_drop_read_finish returned no stream dest=%s",
+		g_debug ("gdk_drop_read_finish returned no stream dest=%s",
 			   rd->widget ? G_OBJECT_TYPE_NAME (rd->widget) : "(null)");
 		drop_read_unref (rd);
 		return;
@@ -2306,7 +2346,7 @@ gtk_drag_get_data (GtkWidget *widget, GdkDragContext *context, GdkAtom target, g
 				dst_info = 0;
 		}
 		g_signal_emit_by_name (local->source, "drag-data-get", local, &sel, src_info, time);
-		g_warning ("local drag-data-get target=%s len=%d src_info=%u dst_info=%u xy=%d,%d dest=%s",
+		g_debug ("local drag-data-get target=%s len=%d src_info=%u dst_info=%u xy=%d,%d dest=%s",
 			   sel.target ? (const char *) sel.target : "(null)", sel.length, src_info, dst_info,
 			   x, y, widget ? G_OBJECT_TYPE_NAME (widget) : "(null)");
 		g_signal_emit_by_name (widget, "drag-data-received", local, x, y, &sel, dst_info, time);
@@ -2326,7 +2366,7 @@ gtk_drag_get_data (GtkWidget *widget, GdkDragContext *context, GdkAtom target, g
 			guint info = info_for_target (gtk_drag_dest_get_target_list (widget),
 						      target ? target : (GdkAtom) (mime ? mime : "text/uri-list"));
 
-			g_warning ("drop-read cache hit dest=%s mime=%s xy=%d,%d",
+			g_debug ("drop-read cache hit dest=%s mime=%s xy=%d,%d",
 				   widget ? G_OBJECT_TYPE_NAME (widget) : "(null)",
 				   mime ? mime : "(null)", x, y);
 			drop_deliver_bytes (widget, GDK_DROP (context),
@@ -2338,7 +2378,7 @@ gtk_drag_get_data (GtkWidget *widget, GdkDragContext *context, GdkAtom target, g
 			inflight->x = x;
 			inflight->y = y;
 			inflight->time = time;
-			g_warning ("drop-read coalesced dest=%s xy=%d,%d",
+			g_debug ("drop-read coalesced dest=%s xy=%d,%d",
 				   widget ? G_OBJECT_TYPE_NAME (widget) : "(null)", x, y);
 			return;
 		}
@@ -2402,7 +2442,7 @@ gtk_drag_get_data (GtkWidget *widget, GdkDragContext *context, GdkAtom target, g
 		{
 			char *fmt = formats ? gdk_content_formats_to_string (formats) : NULL;
 
-			g_warning ("drop-read async dest=%s n=%u first=%s formats=%s",
+			g_debug ("drop-read async dest=%s n=%u first=%s formats=%s",
 				   widget ? G_OBJECT_TYPE_NAME (widget) : "(null)", n,
 				   mimes[0], fmt ? fmt : "(null)");
 			g_free (fmt);
@@ -2477,7 +2517,7 @@ verne_drop_finish_idle (gpointer data)
 	VerneDropFinish *fin = data;
 
 	if (fin->drop && GDK_IS_DROP (fin->drop)) {
-		g_warning ("gdk_drop_finish idle action=%d", (int) fin->action);
+		g_debug ("gdk_drop_finish idle action=%d", (int) fin->action);
 		gdk_drop_finish (fin->drop, fin->action);
 	}
 	verne_reset_drop_async_controllers ();
@@ -2514,7 +2554,7 @@ gtk_drag_finish (gpointer context, gboolean success, gboolean del, guint32 time)
 		return;
 	if (VERNE_IS_LOCAL_DRAG (context)) {
 		VerneLocalDrag *local = (VerneLocalDrag *) context;
-		g_warning ("gtk_drag_finish local success=%d del=%d", success, del);
+		g_debug ("gtk_drag_finish local success=%d del=%d", success, del);
 		if (del && local->source)
 			g_signal_emit_by_name (local->source, "drag-data-delete", local);
 		local->dest_finished = TRUE;
@@ -2644,6 +2684,16 @@ verne_suggested_from_modifiers (GdkDragAction actions)
 	if ((state & GDK_SHIFT_MASK) && (actions & GDK_ACTION_MOVE))
 		return GDK_ACTION_MOVE;
 	return 0;
+}
+
+/* Whether the user is holding a modifier that names a drop action, so a
+ * destination can tell "copy because Ctrl" from "copy because that is the
+ * default". */
+GdkDragAction
+verne_drag_forced_action (void)
+{
+	return verne_suggested_from_modifiers (GDK_ACTION_ASK | GDK_ACTION_LINK |
+					       GDK_ACTION_COPY | GDK_ACTION_MOVE);
 }
 
 GdkDragAction
@@ -2884,7 +2934,7 @@ gtk_drag_begin_with_coordinates (GtkWidget *widget, GtkTargetList *targets, GdkD
 	local->poll_id = g_timeout_add (16, verne_local_poll, local);
 	g_signal_emit_by_name (widget, "drag-begin", local);
 	verne_dnd_local_motion (widget);
-	g_warning ("local drag started from %s", G_OBJECT_TYPE_NAME (widget));
+	g_debug ("local drag started from %s", G_OBJECT_TYPE_NAME (widget));
 	return (GdkDragContext *) local;
 }
 

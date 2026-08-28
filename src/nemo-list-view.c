@@ -101,6 +101,7 @@ struct NemoListViewDetails {
     gboolean rename_on_release;
 	gboolean drag_started;
 	gboolean ignore_button_release;
+	guint selection_hold_id;
 	gboolean row_selected_on_button_down;
 	gboolean menus_ready;
 	gboolean active;
@@ -1122,6 +1123,47 @@ handle_icon_slow_two_click (NemoListView *view, GtkTreePath *path, GdkEventButto
     return FALSE;
 }
 
+/* nemo's handler returns GDK_EVENT_STOP, but in GTK4 that no longer keeps
+ * GtkTreeView's own click gesture from running: it would re-select the row
+ * under the pointer, undoing a Ctrl+click toggle and collapsing a
+ * multi-selection right before the context menu acts on it. Freeze the
+ * selection for the rest of this event instead. */
+static gboolean
+list_view_refuse_selection (GtkTreeSelection *selection,
+                            GtkTreeModel *model,
+                            GtkTreePath *path,
+                            gboolean path_currently_selected,
+                            gpointer data)
+{
+    (void) selection; (void) model; (void) path;
+    (void) path_currently_selected; (void) data;
+
+    return FALSE;
+}
+
+static gboolean
+list_view_release_selection (gpointer data)
+{
+    NemoListView *view = data;
+
+    view->details->selection_hold_id = 0;
+    gtk_tree_selection_set_select_function (gtk_tree_view_get_selection (view->details->tree_view),
+                                            NULL, NULL, NULL);
+    return G_SOURCE_REMOVE;
+}
+
+static void
+list_view_hold_selection (NemoListView *view)
+{
+    gtk_tree_selection_set_select_function (gtk_tree_view_get_selection (view->details->tree_view),
+                                            list_view_refuse_selection, NULL, NULL);
+    if (view->details->selection_hold_id == 0) {
+        view->details->selection_hold_id = g_idle_add_full (G_PRIORITY_HIGH,
+                                                            list_view_release_selection,
+                                                            view, NULL);
+    }
+}
+
 static gboolean
 button_press_callback (GtkWidget *widget, GdkEventButton *event, gpointer callback_data)
 {
@@ -1322,6 +1364,10 @@ button_press_callback (GtkWidget *widget, GdkEventButton *event, gpointer callba
 		if (event->button == 3) {
 			do_popup_menu (widget, view, event);
 		}
+	}
+
+	if (!call_parent) {
+		list_view_hold_selection (view);
 	}
 
 	/* We chained to the default handler in this method, so never
@@ -4241,6 +4287,11 @@ nemo_list_view_dispose (GObject *object)
 	if (list_view->details->renaming_file_activate_timeout != 0) {
 		g_source_remove (list_view->details->renaming_file_activate_timeout);
 		list_view->details->renaming_file_activate_timeout = 0;
+	}
+
+	if (list_view->details->selection_hold_id != 0) {
+		g_source_remove (list_view->details->selection_hold_id);
+		list_view->details->selection_hold_id = 0;
 	}
 
     if (list_view->details->update_visible_icons_id > 0) {

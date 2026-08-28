@@ -10,6 +10,8 @@ typedef struct {
 	gchar *tryexec;
 	gchar *exec;
 	gchar **mimes;
+	/* 0 = not looked up yet, 1 = present, -1 = missing */
+	int tryexec_state;
 } VerneThumbnailer;
 
 struct _GnomeDesktopThumbnailFactory {
@@ -190,27 +192,36 @@ verne_ensure_thumbnailers (void)
 static gboolean
 verne_pixbuf_supports_mime (const char *mime_type)
 {
-	GSList *formats, *l;
-	gboolean ok = FALSE;
+	static GHashTable *pixbuf_mimes;
 
 	if (mime_type == NULL)
 		return FALSE;
-	formats = gdk_pixbuf_get_formats ();
-	for (l = formats; l; l = l->next) {
-		gchar **types = gdk_pixbuf_format_get_mime_types (l->data);
-		int i;
-		for (i = 0; types && types[i]; i++) {
-			if (g_ascii_strcasecmp (types[i], mime_type) == 0) {
-				ok = TRUE;
-				break;
-			}
+	/* The format list never changes during a run; enumerating it - and
+	 * allocating a string vector per format - for every file was the bulk
+	 * of the work in loading a folder. */
+	if (g_once_init_enter (&pixbuf_mimes)) {
+		GHashTable *table = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
+		GSList *formats = gdk_pixbuf_get_formats ();
+		GSList *l;
+
+		for (l = formats; l; l = l->next) {
+			gchar **types = gdk_pixbuf_format_get_mime_types (l->data);
+			int i;
+
+			for (i = 0; types && types[i]; i++)
+				g_hash_table_add (table, g_ascii_strdown (types[i], -1));
+			g_strfreev (types);
 		}
-		g_strfreev (types);
-		if (ok)
-			break;
+		g_slist_free (formats);
+		g_once_init_leave (&pixbuf_mimes, table);
 	}
-	g_slist_free (formats);
-	return ok;
+	{
+		gchar *lower = g_ascii_strdown (mime_type, -1);
+		gboolean ok = g_hash_table_contains (pixbuf_mimes, lower);
+
+		g_free (lower);
+		return ok;
+	}
 }
 
 static VerneThumbnailer *
@@ -225,10 +236,17 @@ verne_find_thumbnailer (const char *mime_type)
 		VerneThumbnailer *t = g_ptr_array_index (verne_thumbnailers, i);
 		int m;
 		if (t->tryexec && t->tryexec[0]) {
-			gchar *prog = g_find_program_in_path (t->tryexec);
-			if (prog == NULL)
+			/* A $PATH scan is a handful of stat()s; doing it per
+			 * thumbnailer per file made opening a large folder
+			 * hundreds of thousands of syscalls. */
+			if (t->tryexec_state == 0) {
+				gchar *prog = g_find_program_in_path (t->tryexec);
+
+				t->tryexec_state = prog ? 1 : -1;
+				g_free (prog);
+			}
+			if (t->tryexec_state < 0)
 				continue;
-			g_free (prog);
 		}
 		if (t->mimes == NULL)
 			continue;
@@ -304,28 +322,42 @@ gnome_desktop_thumbnail_factory_new (GnomeDesktopThumbnailSize size)
 	return f;
 }
 
+/* Whether anything installed can produce a thumbnail for this type. The answer
+ * only changes when thumbnailers are installed, so remember it per type. */
+static gboolean
+verne_mime_can_thumbnail (const char *mime_type)
+{
+	static GHashTable *cache;
+	gpointer value;
+	gboolean can;
+
+	if (cache == NULL)
+		cache = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
+	if (g_hash_table_lookup_extended (cache, mime_type, NULL, &value))
+		return GPOINTER_TO_INT (value) > 0;
+	can = verne_pixbuf_supports_mime (mime_type) ||
+	      verne_find_thumbnailer (mime_type) != NULL ||
+	      g_str_has_prefix (mime_type, "image/");
+	g_hash_table_insert (cache, g_strdup (mime_type), GINT_TO_POINTER (can ? 1 : -1));
+	return can;
+}
+
 gboolean
 gnome_desktop_thumbnail_factory_can_thumbnail (GnomeDesktopThumbnailFactory *factory, const char *uri, const char *mime_type, time_t mtime)
 {
 	gchar *fail;
+	GStatBuf st;
+	gboolean failed;
 	(void) factory;
 
 	if (uri == NULL || mime_type == NULL)
 		return FALSE;
 	fail = verne_thumb_fail_path (uri);
-	if (g_file_test (fail, G_FILE_TEST_EXISTS)) {
-		GStatBuf st;
-		if (g_stat (fail, &st) == 0 && (time_t) st.st_mtime >= mtime) {
-			g_free (fail);
-			return FALSE;
-		}
-	}
+	failed = g_stat (fail, &st) == 0 && (time_t) st.st_mtime >= mtime;
 	g_free (fail);
-	if (verne_pixbuf_supports_mime (mime_type))
-		return TRUE;
-	if (verne_find_thumbnailer (mime_type) != NULL)
-		return TRUE;
-	return g_str_has_prefix (mime_type, "image/");
+	if (failed)
+		return FALSE;
+	return verne_mime_can_thumbnail (mime_type);
 }
 
 static GdkPixbuf *

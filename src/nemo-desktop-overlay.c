@@ -413,7 +413,7 @@ hide_hosted_customize (NemoDesktopOverlay *overlay)
     if (GTK_IS_WIDGET (priv->window) &&
         GTK_WIDGET (priv->window) != priv->hosted_wrap)
         gtk_widget_set_visible (GTK_WIDGET (priv->window), FALSE);
-    g_warning ("verne: hiding dest customize");
+    g_debug ("verne: hiding dest customize");
 }
 
 static void
@@ -461,7 +461,7 @@ size_hosted_customize (GtkWidget *dest_ovl,
     gtk_overlay_set_clip_overlay (GTK_OVERLAY (dest_ovl), wrap, FALSE);
     gtk_overlay_set_measure_overlay (GTK_OVERLAY (dest_ovl), wrap, TRUE);
     gtk_widget_queue_allocate (dest_ovl);
-    g_warning ("verne: dest customize overlay hosted size %dx%d at %d,%d dest=%dx%d",
+    g_debug ("verne: dest customize overlay hosted size %dx%d at %d,%d dest=%dx%d",
                nat_w, nat_h, mx, my, dest_w, dest_h);
 }
 
@@ -730,7 +730,7 @@ show_overlay (NemoDesktopOverlay *overlay,
         gtk_window_set_transient_for (GTK_WINDOW (priv->hosted_wrap), NULL);
         gtk_widget_set_visible (GTK_WIDGET (priv->window), FALSE);
         verne_window_present_keep (GTK_WINDOW (priv->hosted_wrap));
-        g_warning ("verne: presenting dest customize AdwWindow");
+        g_debug ("verne: presenting dest customize AdwWindow");
         return;
     }
 
@@ -741,13 +741,13 @@ show_overlay (NemoDesktopOverlay *overlay,
         if (GTK_IS_WIDGET (priv->nemo_window))
             dest_ovl = g_object_get_data (G_OBJECT (priv->nemo_window),
                                           "verne-dest-menu-overlay");
-        g_warning ("verne: customize dest_ovl=%s window=%s",
+        g_debug ("verne: customize dest_ovl=%s window=%s",
                    dest_ovl ? G_OBJECT_TYPE_NAME (dest_ovl) : "NULL",
                    priv->window ? G_OBJECT_TYPE_NAME (priv->window) : "NULL");
         if (GTK_IS_OVERLAY (dest_ovl)) {
             GtkWidget *child = steal_overlay_body (priv->window);
 
-            g_warning ("verne: customize child=%s",
+            g_debug ("verne: customize child=%s",
                        child ? G_OBJECT_TYPE_NAME (child) : "NULL");
 
             if (priv->hosted_wrap == NULL && GTK_IS_WIDGET (child)) {

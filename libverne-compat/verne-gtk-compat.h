@@ -258,7 +258,8 @@ verne_gdk_window_get_height (GdkSurface *window)
 #define gdk_screen_get_height(s) verne_screen_height()
 #define gdk_screen_get_monitor_at_window(s,w) 0
 #define gdk_screen_get_n_monitors(s) verne_screen_n_monitors()
-#define gdk_screen_get_primary_monitor(s) 0
+int verne_screen_primary_monitor (void);
+#define gdk_screen_get_primary_monitor(s) verne_screen_primary_monitor ()
 #define gdk_screen_is_composited(s) TRUE
 
 int verne_screen_width (void);
@@ -1383,6 +1384,7 @@ typedef enum {
 #define gdk_app_launch_context_set_screen(c, s) ((void)0)
 #define gtk_widget_get_parent_window(w) ((w) && gtk_widget_get_parent (w) ? gtk_widget_get_window (gtk_widget_get_parent (w)) : gtk_widget_get_window (w))
 gint gdk_window_get_origin (GdkSurface *window, gint *x, gint *y);
+void verne_widget_get_screen_origin (GtkWidget *widget, gint *x, gint *y);
 #define gdk_window_get_toplevel(w) (w)
 #define gdk_cairo_get_clip_rectangle(cr, r) verne_gdk_cairo_get_clip_rectangle (cr, r)
 void verne_style_context_get_background_color (GtkStyleContext *context, GtkStateFlags state, GdkRGBA *rgba);
@@ -1772,6 +1774,7 @@ void gtk_drag_set_icon_surface (GdkDragContext *context, cairo_surface_t *surfac
 void gtk_drag_dest_set_track_motion (GtkWidget *widget, gboolean track);
 GtkTargetList *gtk_drag_source_get_target_list (GtkWidget *widget);
 GdkDragAction gdk_drag_context_get_selected_action (GdkDragContext *context);
+GdkDragAction verne_drag_forced_action (void);
 GdkDragAction gdk_drag_context_get_suggested_action (GdkDragContext *context);
 GdkDragAction gdk_drag_context_get_actions (GdkDragContext *context);
 GdkSurface *gdk_drag_context_get_source_window (GdkDragContext *context);

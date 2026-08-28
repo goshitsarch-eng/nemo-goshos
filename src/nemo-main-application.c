@@ -1104,11 +1104,15 @@ menu_state_changed_callback (NemoMainApplication *self)
         GtkWidget *msg_area;
         GtkWidget *checkbox;
 
-        dialog = gtk_message_dialog_new (NULL,
+        dialog = gtk_message_dialog_new (gtk_application_get_active_window (GTK_APPLICATION (self)),
                                          GTK_DIALOG_MODAL,
                                          GTK_MESSAGE_INFO,
                                          GTK_BUTTONS_OK,
                                          _("Verne's main menu is now hidden"));
+        /* Without a title the window manager labels this "Unnamed Window",
+         * and without a parent it lands in the top left corner. */
+        gtk_window_set_title (GTK_WINDOW (dialog), _("Main Menu Hidden"));
+        gtk_window_set_position (GTK_WINDOW (dialog), GTK_WIN_POS_CENTER_ON_PARENT);
 
         gchar *secondary;
         secondary = g_strdup_printf (_("You have chosen to hide the main menu.  You can get it back temporarily by:\n\n"

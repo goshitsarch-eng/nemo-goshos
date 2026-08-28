@@ -1196,7 +1196,7 @@ nemo_file_management_properties_dialog_setup (GtkBuilder  *builder,
     }
 
 	verne_window_present_keep (GTK_WINDOW (dialog));
-	g_warning ("Verne: presenting File Management Preferences");
+	g_debug ("Verne: presenting File Management Preferences");
 }
 
 void

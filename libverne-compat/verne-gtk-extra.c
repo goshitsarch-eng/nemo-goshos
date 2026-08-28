@@ -671,7 +671,7 @@ verne_x11_hide_dummy_natives (GtkWindow *keep)
 		XWithdrawWindow (dpy, w, DefaultScreen (dpy));
 		XUnmapWindow (dpy, w);
 		XMoveWindow (dpy, w, -2000, -2000);
-		g_warning ("verne: hid dummy 1x1 native xid=0x%lx", (unsigned long) w);
+		g_debug ("verne: hid dummy 1x1 native xid=0x%lx", (unsigned long) w);
 	}
 	gdk_x11_display_error_trap_pop_ignored (gdk_display_get_default ());
 	XFree (children);
@@ -1294,6 +1294,31 @@ gdk_window_get_geometry (GdkSurface *window, gint *x, gint *y, gint *width, gint
 		*height = (window && GDK_IS_SURFACE (window)) ? gdk_surface_get_height (window) : 0;
 }
 
+/* GTK4 has no per-widget GdkWindow, so "where is this widget on screen" has
+ * to be assembled from the widget's offset inside its root, the root's
+ * surface transform and the surface's position. */
+void
+verne_widget_get_screen_origin (GtkWidget *widget, gint *x, gint *y)
+{
+	GtkWidget *root;
+	double rx = 0, ry = 0, tx = 0, ty = 0;
+	int ox = 0, oy = 0;
+
+	if (x) *x = 0;
+	if (y) *y = 0;
+	if (widget == NULL || !GTK_IS_WIDGET (widget))
+		return;
+	root = GTK_WIDGET (gtk_widget_get_root (widget));
+	if (root == NULL || !GTK_IS_NATIVE (root))
+		return;
+	if (!gtk_widget_translate_coordinates (widget, root, 0, 0, &rx, &ry))
+		return;
+	gtk_native_get_surface_transform (GTK_NATIVE (root), &tx, &ty);
+	gdk_window_get_origin (gtk_native_get_surface (GTK_NATIVE (root)), &ox, &oy);
+	if (x) *x = (gint) (ox + tx + rx);
+	if (y) *y = (gint) (oy + ty + ry);
+}
+
 gint
 gdk_window_get_origin (GdkSurface *window, gint *x, gint *y)
 {
@@ -1526,8 +1551,14 @@ gdk_screen_get_monitor_geometry (GdkScreen *screen, int monitor, GdkRectangle *d
 	GdkDisplay *d = screen ? screen : gdk_display_get_default ();
 	GListModel *list = d ? gdk_display_get_monitors (d) : NULL;
 	GdkMonitor *m = NULL;
-	(void) monitor;
-	if (list && g_list_model_get_n_items (list) > 0)
+	guint n = list ? g_list_model_get_n_items (list) : 0;
+
+	/* Every caller passes a monitor index. Answering for monitor 0 whatever
+	 * was asked made every monitor look identical, so the desktop was only
+	 * ever created on the first one. */
+	if (monitor >= 0 && (guint) monitor < n)
+		m = g_list_model_get_item (list, (guint) monitor);
+	else if (n > 0)
 		m = g_list_model_get_item (list, 0);
 	if (m && dest)
 		gdk_monitor_get_geometry (m, dest);
@@ -1556,11 +1587,40 @@ gdk_screen_get_monitor_scale_factor (GdkScreen *screen, int monitor)
 	return m ? gdk_monitor_get_scale_factor (m) : 1;
 }
 
+/* GTK4 dropped the notion of a primary monitor from GdkDisplay, but the
+ * desktop code needs it to decide which monitor gets the icons by default. */
+int
+verne_screen_primary_monitor (void)
+{
+#ifdef GDK_WINDOWING_X11
+	GdkDisplay *d = gdk_display_get_default ();
+
+	if (d != NULL && GDK_IS_X11_DISPLAY (d)) {
+		GdkMonitor *primary = gdk_x11_display_get_primary_monitor (d);
+		GListModel *list = gdk_display_get_monitors (d);
+		guint i, n = list ? g_list_model_get_n_items (list) : 0;
+
+		for (i = 0; primary != NULL && i < n; i++) {
+			GdkMonitor *m = g_list_model_get_item (list, i);
+
+			g_object_unref (m);
+			if (m == primary)
+				return (int) i;
+		}
+	}
+#endif
+	return 0;
+}
+
 gchar *
 gdk_screen_get_monitor_plug_name (GdkScreen *screen, int monitor)
 {
-	(void) screen; (void) monitor;
-	return g_strdup ("default");
+	GdkDisplay *d = screen ? screen : gdk_display_get_default ();
+	GdkMonitor *m = gdk_display_get_monitor (d, monitor);
+	const char *connector = m ? gdk_monitor_get_connector (m) : NULL;
+
+	/* The desktop overlay labels each monitor with this. */
+	return g_strdup (connector ? connector : "default");
 }
 
 struct _VerneKeymap {
@@ -2028,7 +2088,7 @@ verne_paint_tree_dest_row (GtkTreeView *tree_view, GtkSnapshot *snapshot)
 	if (verne_tree_dest_paint_logs < 8) {
 		char *ps = gtk_tree_path_to_string (row->path);
 
-		g_warning ("paint dest row path=%s pos=%d rect=%d,%d %dx%d widget=%dx%d",
+		g_debug ("paint dest row path=%s pos=%d rect=%d,%d %dx%d widget=%dx%d",
 			   ps ? ps : "?", (int) row->pos, rect.x, rect.y, rect.width, rect.height, ww, wh);
 		g_free (ps);
 		verne_tree_dest_paint_logs++;
@@ -2164,7 +2224,7 @@ verne_gtk_tree_view_set_drag_dest_row (GtkTreeView *tree_view, GtkTreePath *path
 	verne_tree_view_hook_snapshot (tree_view);
 	if (path == NULL) {
 		if (g_object_get_qdata (G_OBJECT (tree_view), verne_tree_dest_quark ()) != NULL)
-			g_warning ("tree dest row cleared widget=%s", G_OBJECT_TYPE_NAME (tree_view));
+			g_debug ("tree dest row cleared widget=%s", G_OBJECT_TYPE_NAME (tree_view));
 		g_object_set_qdata (G_OBJECT (tree_view), verne_tree_dest_quark (), NULL);
 		verne_tree_dest_remove_tick (GTK_WIDGET (tree_view));
 		gtk_widget_queue_draw (GTK_WIDGET (tree_view));
@@ -2177,7 +2237,7 @@ verne_gtk_tree_view_set_drag_dest_row (GtkTreeView *tree_view, GtkTreePath *path
 		prev = g_object_get_qdata (G_OBJECT (tree_view), verne_tree_dest_quark ());
 		if (prev == NULL || prev->pos != pos || prev->path == NULL ||
 		    gtk_tree_path_compare (prev->path, path) != 0)
-			g_warning ("tree dest row widget=%s path=%s pos=%d",
+			g_debug ("tree dest row widget=%s path=%s pos=%d",
 				   G_OBJECT_TYPE_NAME (tree_view), ps ? ps : "?", (int) pos);
 		g_free (ps);
 	}
