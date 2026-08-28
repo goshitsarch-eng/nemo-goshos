@@ -427,6 +427,188 @@ action_nemo_manual_callback (GtkAction *action,
 	}
 }
 
+static GtkWidget *
+verne_shortcuts_fallback_list (void)
+{
+	static const struct {
+		const char *group;
+		const char *title;
+		const char *accel;
+	} rows[] = {
+		{ N_("General"), N_("New window"), "<Primary>N" },
+		{ N_("General"), N_("Close window or tab"), "<Primary>W" },
+		{ N_("General"), N_("Close all windows"), "<Primary>Q" },
+		{ N_("General"), N_("Toggle extra pane"), "F3" },
+		{ N_("General"), N_("Search"), "<Primary>F" },
+		{ N_("General"), N_("Bookmark current location"), "<Primary>D" },
+		{ N_("General"), N_("Help"), "F1" },
+		{ N_("General"), N_("Keyboard shortcuts"), "<Primary>F1" },
+		{ N_("Opening"), N_("Open"), "Return" },
+		{ N_("Opening"), N_("Open in new tab"), "<Primary><Shift>T" },
+		{ N_("Opening"), N_("Open in new window"), "<Primary><Shift>O" },
+		{ N_("Tabs"), N_("New tab"), "<Primary>T" },
+		{ N_("Tabs"), N_("Next tab"), "<Primary>Page_Down" },
+		{ N_("Tabs"), N_("Previous tab"), "<Primary>Page_Up" },
+		{ N_("Navigation"), N_("Go back"), "<Alt>Left" },
+		{ N_("Navigation"), N_("Go forward"), "<Alt>Right" },
+		{ N_("Navigation"), N_("Go up"), "<Alt>Up" },
+		{ N_("Navigation"), N_("Go home"), "<Alt>Home" },
+		{ N_("Navigation"), N_("Enter location"), "<Primary>L" },
+		{ N_("View"), N_("Zoom in"), "<Primary>plus" },
+		{ N_("View"), N_("Zoom out"), "<Primary>minus" },
+		{ N_("View"), N_("Normal size"), "<Primary>0" },
+		{ N_("View"), N_("Reload"), "<Primary>R" },
+		{ N_("View"), N_("Show hidden files"), "<Primary>H" },
+		{ N_("View"), N_("Icon view"), "<Primary>1" },
+		{ N_("View"), N_("List view"), "<Primary>2" },
+		{ N_("View"), N_("Compact view"), "<Primary>3" },
+		{ N_("Editing"), N_("New folder"), "<Shift><Primary>N" },
+		{ N_("Editing"), N_("Rename"), "F2" },
+		{ N_("Editing"), N_("Move to Trash"), "Delete" },
+		{ N_("Editing"), N_("Cut"), "<Primary>X" },
+		{ N_("Editing"), N_("Copy"), "<Primary>C" },
+		{ N_("Editing"), N_("Paste"), "<Primary>V" },
+		{ N_("Editing"), N_("Select all"), "<Primary>A" },
+		{ N_("Editing"), N_("Properties"), "<Alt>Return" },
+	};
+	GtkWidget *box;
+	GtkWidget *group_box = NULL;
+	const char *cur_group = NULL;
+	guint i;
+
+	box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 18);
+	gtk_widget_set_margin_start (box, 18);
+	gtk_widget_set_margin_end (box, 18);
+	gtk_widget_set_margin_top (box, 12);
+	gtk_widget_set_margin_bottom (box, 18);
+	for (i = 0; i < G_N_ELEMENTS (rows); i++) {
+		GtkWidget *row;
+		GtkWidget *title;
+		GtkWidget *accel;
+
+		if (g_strcmp0 (cur_group, rows[i].group) != 0) {
+			GtkWidget *heading;
+
+			cur_group = rows[i].group;
+			group_box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 6);
+			heading = gtk_label_new (_(rows[i].group));
+			gtk_widget_add_css_class (heading, "heading");
+			gtk_widget_set_halign (heading, GTK_ALIGN_START);
+			gtk_box_append (GTK_BOX (group_box), heading);
+			gtk_box_append (GTK_BOX (box), group_box);
+		}
+		row = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 12);
+		title = gtk_label_new (_(rows[i].title));
+		gtk_widget_set_halign (title, GTK_ALIGN_START);
+		gtk_widget_set_hexpand (title, TRUE);
+		accel = gtk_label_new (rows[i].accel);
+		gtk_widget_add_css_class (accel, "dim-label");
+		gtk_widget_set_halign (accel, GTK_ALIGN_END);
+		gtk_box_append (GTK_BOX (row), title);
+		gtk_box_append (GTK_BOX (row), accel);
+		gtk_box_append (GTK_BOX (group_box), row);
+	}
+	return box;
+}
+
+static GtkWidget *
+verne_steal_shortcuts_body (GtkWidget *src)
+{
+	GtkWidget *box;
+	GtkWidget *ch, *next;
+	gboolean stole = FALSE;
+
+	box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 12);
+	if (!GTK_IS_WIDGET (src))
+		return box;
+	if (GTK_IS_WINDOW (src)) {
+		ch = gtk_window_get_child (GTK_WINDOW (src));
+		if (GTK_IS_WIDGET (ch)) {
+			g_object_ref (ch);
+			gtk_window_set_child (GTK_WINDOW (src), NULL);
+			gtk_box_append (GTK_BOX (box), ch);
+			g_object_unref (ch);
+			stole = TRUE;
+		}
+	}
+	for (ch = gtk_widget_get_first_child (src); ch; ch = next) {
+		next = gtk_widget_get_next_sibling (ch);
+		g_object_ref (ch);
+		gtk_widget_unparent (ch);
+		gtk_box_append (GTK_BOX (box), ch);
+		g_object_unref (ch);
+		stole = TRUE;
+	}
+	if (!stole) {
+		g_object_ref_sink (box);
+		g_object_unref (box);
+		return verne_shortcuts_fallback_list ();
+	}
+	return box;
+}
+
+static GtkWidget *
+verne_shortcuts_window_new (void)
+{
+	GtkBuilder *builder;
+	GError *error = NULL;
+	GtkWidget *src = NULL;
+	GtkWidget *win;
+	GtkWidget *header;
+	GtkWidget *toolbar;
+	GtkWidget *scrolled;
+	GtkWidget *body;
+
+	builder = gtk_builder_new ();
+	if (gtk_builder_add_from_resource (builder, "/org/nemo/nemo-shortcuts.ui", &error))
+		src = GTK_WIDGET (gtk_builder_get_object (builder, "keyboard_shortcuts"));
+	else {
+		g_warning ("Verne: failed to load keyboard shortcuts UI: %s",
+			   error ? error->message : "unknown");
+		g_clear_error (&error);
+	}
+
+	win = g_object_new (ADW_TYPE_WINDOW, NULL);
+	gtk_window_set_title (GTK_WINDOW (win), _("Keyboard Shortcuts"));
+	gtk_window_set_default_size (GTK_WINDOW (win), 760, 520);
+	gtk_widget_set_size_request (win, 700, 480);
+	gtk_window_set_hide_on_close (GTK_WINDOW (win), TRUE);
+	verne_window_keep_native (GTK_WINDOW (win));
+
+	header = adw_header_bar_new ();
+	toolbar = adw_toolbar_view_new ();
+	adw_toolbar_view_add_top_bar (ADW_TOOLBAR_VIEW (toolbar), header);
+	body = verne_steal_shortcuts_body (src);
+	if (gtk_widget_get_first_child (body) == NULL) {
+		g_object_ref_sink (body);
+		g_object_unref (body);
+		body = verne_shortcuts_fallback_list ();
+	}
+	scrolled = gtk_scrolled_window_new (NULL, NULL);
+	gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (scrolled),
+					GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+	gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (scrolled), body);
+	adw_toolbar_view_set_content (ADW_TOOLBAR_VIEW (toolbar), scrolled);
+	adw_window_set_content (ADW_WINDOW (win), toolbar);
+
+	if (GTK_IS_WINDOW (src) && src != win) {
+		verne_window_keep_native (GTK_WINDOW (src));
+		gtk_widget_set_visible (src, FALSE);
+	}
+	g_object_unref (builder);
+	return win;
+}
+
+static void
+shortcuts_window_weak_notify (gpointer data, GObject *where)
+{
+	GtkWidget **ptr = data;
+
+	(void) where;
+	if (ptr)
+		*ptr = NULL;
+}
+
 static void
 action_show_shortcuts_window (GtkAction *action,
                               gpointer user_data)
@@ -434,48 +616,30 @@ action_show_shortcuts_window (GtkAction *action,
     NemoWindow *window;
     static GtkWidget *shortcuts_window;
 
+	(void) action;
 	window = NEMO_WINDOW (user_data);
 
-	if (shortcuts_window == NULL)
-	{
-		GtkBuilder *builder;
-		GError *error = NULL;
-
-		builder = gtk_builder_new ();
-		if (!gtk_builder_add_from_resource (builder, "/org/nemo/nemo-shortcuts.ui", &error)) {
-			g_warning ("Verne: failed to load keyboard shortcuts UI: %s",
-				   error ? error->message : "unknown");
-			g_clear_error (&error);
-			g_object_unref (builder);
-			return;
-		}
-		shortcuts_window = GTK_WIDGET (gtk_builder_get_object (builder, "keyboard_shortcuts"));
-		if (!GTK_IS_WINDOW (shortcuts_window)) {
-			g_warning ("Verne: keyboard_shortcuts object missing from UI");
-			g_object_unref (builder);
-			shortcuts_window = NULL;
-			return;
-		}
-
-		g_signal_connect (shortcuts_window, "destroy",
-				  G_CALLBACK (gtk_widget_destroyed), &shortcuts_window);
-
-		gtk_window_set_title (GTK_WINDOW (shortcuts_window), _("Keyboard Shortcuts"));
-		gtk_window_set_resizable (GTK_WINDOW (shortcuts_window), TRUE);
-		gtk_window_set_default_size (GTK_WINDOW (shortcuts_window), 760, 520);
-		/* GTK4 GtkShortcutsWindow otherwise sizes to content (~natural). */
-		gtk_widget_set_size_request (shortcuts_window, 700, 480);
-		gtk_window_set_hide_on_close (GTK_WINDOW (shortcuts_window), TRUE);
-
-		g_object_unref (builder);
+	if (shortcuts_window == NULL) {
+		shortcuts_window = verne_shortcuts_window_new ();
+		g_object_weak_ref (G_OBJECT (shortcuts_window),
+				   shortcuts_window_weak_notify,
+				   &shortcuts_window);
 	}
 
-	if (GTK_WINDOW (window) != gtk_window_get_transient_for (GTK_WINDOW (shortcuts_window)))
+	if (GTK_IS_WINDOW (window) &&
+	    GTK_WINDOW (window) != gtk_window_get_transient_for (GTK_WINDOW (shortcuts_window)))
 		gtk_window_set_transient_for (GTK_WINDOW (shortcuts_window), GTK_WINDOW (window));
 
-	gtk_widget_set_visible (shortcuts_window, TRUE);
-	gtk_window_present (GTK_WINDOW (shortcuts_window));
+	verne_window_present_keep (GTK_WINDOW (shortcuts_window));
 	g_warning ("Verne: presenting keyboard shortcuts window");
+}
+
+static void
+window_shortcuts_gaction (GSimpleAction *action, GVariant *parameter, gpointer user_data)
+{
+	(void) action;
+	(void) parameter;
+	action_show_shortcuts_window (NULL, user_data);
 }
 
 static gboolean
@@ -2106,6 +2270,18 @@ nemo_window_initialize_menus (NemoWindow *window)
 		gtk_shortcut_controller_add_shortcut (GTK_SHORTCUT_CONTROLLER (shortcuts), shortcut);
 		gtk_widget_add_controller (GTK_WIDGET (window), shortcuts);
 		g_object_set_data (G_OBJECT (window), "verne-shortcuts-keys", GINT_TO_POINTER (1));
+		if (g_action_map_lookup_action (G_ACTION_MAP (window), "show-shortcuts") == NULL) {
+			GSimpleAction *act = g_simple_action_new ("show-shortcuts", NULL);
+			GtkApplication *app;
+
+			g_signal_connect (act, "activate", G_CALLBACK (window_shortcuts_gaction), window);
+			g_action_map_add_action (G_ACTION_MAP (window), G_ACTION (act));
+			g_object_unref (act);
+			app = gtk_window_get_application (GTK_WINDOW (window));
+			if (GTK_IS_APPLICATION (app))
+				gtk_application_set_accels_for_action (app, "win.show-shortcuts",
+								       (const char *[]) { "<Control>F1", NULL });
+		}
 		g_warning ("Verne: installed Ctrl+F1 shortcut handlers on %s",
 			   G_OBJECT_TYPE_NAME (window));
 	}

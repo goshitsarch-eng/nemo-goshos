@@ -510,15 +510,22 @@ verne_gtk_widget_queue_draw (GtkWidget *widget)
 	GtkWidget *w;
 
 	if (widget != NULL && verne_desktop_wallpaper_for_widget (widget) != NULL) {
-		/* EelCanvas draw/update often queues another expose. Swallow
-		 * that during dest snapshot so the texture cache can hold. */
-		if (g_object_get_data (G_OBJECT (widget), "verne-in-snapshot") != NULL)
+		/* EelCanvas draw/update often queues another expose during
+		 * dest snapshot. Mark dirty and replay after snapshot so F2
+		 * label updates are not stuck on the cached texture. */
+		if (g_object_get_data (G_OBJECT (widget), "verne-in-snapshot") != NULL) {
+			g_object_set_data (G_OBJECT (widget), "verne-dest-dirty", GINT_TO_POINTER (1));
+			g_object_set_data (G_OBJECT (widget), "verne-dest-redraw-after", GINT_TO_POINTER (1));
 			return;
+		}
 		/* Snapshot reads verne-dest-dirty on the canvas, not on a
 		 * child label / icon item. Mark every dest ancestor dirty. */
 		for (w = widget; GTK_IS_WIDGET (w); w = gtk_widget_get_parent (w)) {
-			if (g_object_get_data (G_OBJECT (w), "verne-in-snapshot") != NULL)
-				return;
+			if (g_object_get_data (G_OBJECT (w), "verne-in-snapshot") != NULL) {
+				g_object_set_data (G_OBJECT (w), "verne-dest-dirty", GINT_TO_POINTER (1));
+				g_object_set_data (G_OBJECT (w), "verne-dest-redraw-after", GINT_TO_POINTER (1));
+				continue;
+			}
 			g_object_set_data (G_OBJECT (w), "verne-dest-dirty", GINT_TO_POINTER (1));
 		}
 	}
@@ -563,6 +570,8 @@ verne_x11_add_net_wm_state (Display *dpy, Window xid, Atom *atoms, int *n_atoms,
 	(void) xid;
 }
 
+static gboolean verne_window_is_keep_native (GtkWidget *w);
+
 static void
 verne_x11_hide_dummy_natives (GtkWindow *keep)
 {
@@ -598,10 +607,13 @@ verne_x11_hide_dummy_natives (GtkWindow *keep)
 		ww = gtk_widget_get_width (w);
 		hh = gtk_widget_get_height (w);
 		/* Abandoned 1×1 natives stay in gtk_window_list_toplevels.
-		 * Only protect the window we just mapped and real-sized ones. */
-		if (xid && (w == GTK_WIDGET (keep) || ww > 8 || hh > 8))
+		 * Protect mapped File/dest windows, dialogs, and shortcuts.
+		 * Never hide a window that has a real default size — GtkShortcutsWindow
+		 * and Adw dialogs are 1×1 until the first allocate. */
+		if (xid && (w == GTK_WIDGET (keep) || verne_window_is_keep_native (w) || ww > 8 || hh > 8))
 			g_hash_table_add (live, GUINT_TO_POINTER (xid));
-		if (w != GTK_WIDGET (keep) && !GTK_IS_MENU (w) && ww <= 2 && hh <= 2 &&
+		if (w != GTK_WIDGET (keep) && !verne_window_is_keep_native (w) &&
+		    !GTK_IS_MENU (w) && ww <= 2 && hh <= 2 &&
 		    gtk_widget_get_visible (w))
 			gtk_widget_set_visible (w, FALSE);
 	}
@@ -700,6 +712,66 @@ verne_x11_hide_dummy_natives (GtkWindow *keep)
 	g_hash_table_unref (live);
 #else
 	(void) keep;
+#endif
+}
+
+static gboolean
+verne_window_is_keep_native (GtkWidget *w)
+{
+	int dw = 0, dh = 0;
+	int ww, hh;
+
+	if (!GTK_IS_WINDOW (w) || GTK_IS_MENU (w))
+		return FALSE;
+	if (g_object_get_data (G_OBJECT (w), "verne-keep-native") != NULL)
+		return TRUE;
+	if (GTK_IS_DIALOG (w))
+		return TRUE;
+	if (GTK_IS_SHORTCUTS_WINDOW (w))
+		return TRUE;
+#ifdef ADW_TYPE_ABOUT_WINDOW
+	if (ADW_IS_ABOUT_WINDOW (w))
+		return TRUE;
+#endif
+	gtk_window_get_default_size (GTK_WINDOW (w), &dw, &dh);
+	if (dw > 8 || dh > 8)
+		return TRUE;
+	ww = gtk_widget_get_width (w);
+	hh = gtk_widget_get_height (w);
+	return ww > 8 || hh > 8;
+}
+
+void
+verne_window_keep_native (GtkWindow *window)
+{
+	if (GTK_IS_WINDOW (window))
+		g_object_set_data (G_OBJECT (window), "verne-keep-native", GINT_TO_POINTER (1));
+}
+
+void
+verne_window_present_keep (GtkWindow *window)
+{
+	if (!GTK_IS_WINDOW (window))
+		return;
+	verne_window_keep_native (window);
+	gtk_widget_set_visible (GTK_WIDGET (window), TRUE);
+	gtk_window_present (window);
+#ifdef GDK_WINDOWING_X11
+	{
+		GtkNative *native = gtk_widget_get_native (GTK_WIDGET (window));
+		GdkSurface *surface = native ? gtk_native_get_surface (native) : NULL;
+
+		if (surface && GDK_IS_X11_SURFACE (surface)) {
+			Display *dpy = gdk_x11_display_get_xdisplay (gdk_surface_get_display (surface));
+			Window xid = gdk_x11_surface_get_xid (GDK_X11_SURFACE (surface));
+
+			if (dpy && xid) {
+				gdk_x11_display_error_trap_push (gdk_display_get_default ());
+				XRaiseWindow (dpy, xid);
+				gdk_x11_display_error_trap_pop_ignored (gdk_display_get_default ());
+			}
+		}
+	}
 #endif
 }
 

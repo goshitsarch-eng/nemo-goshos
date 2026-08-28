@@ -959,6 +959,10 @@ wrapped_snapshot (GtkWidget *widget, GtkSnapshot *snapshot)
 	}
 	verne_tree_view_paint_dest_overlay (widget, snapshot);
 	g_object_set_data (G_OBJECT (widget), "verne-in-snapshot", NULL);
+	if (g_object_get_data (G_OBJECT (widget), "verne-dest-redraw-after") != NULL) {
+		g_object_set_data (G_OBJECT (widget), "verne-dest-redraw-after", NULL);
+		gtk_widget_queue_draw (widget);
+	}
 }
 
 static void

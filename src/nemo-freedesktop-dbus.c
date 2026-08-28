@@ -171,6 +171,7 @@ name_acquired_cb (GDBusConnection *connection,
 		  gpointer         user_data)
 {
 	DEBUG ("Acquired the name %s on the session message bus\n", name);
+	g_warning ("Verne: acquired %s", name);
 }
 
 static void
@@ -179,6 +180,7 @@ name_lost_cb (GDBusConnection *connection,
 	      gpointer         user_data)
 {
 	DEBUG ("Lost (or failed to acquire) the name %s on the session message bus\n", name);
+	g_warning ("Verne: lost %s", name);
 }
 
 static void

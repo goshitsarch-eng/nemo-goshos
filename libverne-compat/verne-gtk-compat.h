@@ -1835,6 +1835,8 @@ gboolean verne_desktop_canvas_snapshot (GtkWidget *widget, GtkSnapshot *snapshot
 void verne_gtk_widget_queue_draw (GtkWidget *widget);
 #undef gtk_widget_queue_draw
 #define gtk_widget_queue_draw(w) verne_gtk_widget_queue_draw (w)
+void verne_window_keep_native (GtkWindow *window);
+void verne_window_present_keep (GtkWindow *window);
 #define gtk_builder_add_from_string(b, buf, len, err) verne_gtk_builder_add_from_string ((b), (buf), (len), (err))
 #define gtk_builder_add_from_file(b, f, err) verne_gtk_builder_add_from_file ((b), (f), (err))
 #define gtk_builder_add_from_resource(b, p, err) verne_gtk_builder_add_from_resource ((b), (p), (err))
