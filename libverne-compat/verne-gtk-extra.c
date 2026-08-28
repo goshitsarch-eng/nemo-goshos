@@ -1551,8 +1551,14 @@ gdk_screen_get_monitor_geometry (GdkScreen *screen, int monitor, GdkRectangle *d
 	GdkDisplay *d = screen ? screen : gdk_display_get_default ();
 	GListModel *list = d ? gdk_display_get_monitors (d) : NULL;
 	GdkMonitor *m = NULL;
-	(void) monitor;
-	if (list && g_list_model_get_n_items (list) > 0)
+	guint n = list ? g_list_model_get_n_items (list) : 0;
+
+	/* Every caller passes a monitor index. Answering for monitor 0 whatever
+	 * was asked made every monitor look identical, so the desktop was only
+	 * ever created on the first one. */
+	if (monitor >= 0 && (guint) monitor < n)
+		m = g_list_model_get_item (list, (guint) monitor);
+	else if (n > 0)
 		m = g_list_model_get_item (list, 0);
 	if (m && dest)
 		gdk_monitor_get_geometry (m, dest);
@@ -1581,11 +1587,40 @@ gdk_screen_get_monitor_scale_factor (GdkScreen *screen, int monitor)
 	return m ? gdk_monitor_get_scale_factor (m) : 1;
 }
 
+/* GTK4 dropped the notion of a primary monitor from GdkDisplay, but the
+ * desktop code needs it to decide which monitor gets the icons by default. */
+int
+verne_screen_primary_monitor (void)
+{
+#ifdef GDK_WINDOWING_X11
+	GdkDisplay *d = gdk_display_get_default ();
+
+	if (d != NULL && GDK_IS_X11_DISPLAY (d)) {
+		GdkMonitor *primary = gdk_x11_display_get_primary_monitor (d);
+		GListModel *list = gdk_display_get_monitors (d);
+		guint i, n = list ? g_list_model_get_n_items (list) : 0;
+
+		for (i = 0; primary != NULL && i < n; i++) {
+			GdkMonitor *m = g_list_model_get_item (list, i);
+
+			g_object_unref (m);
+			if (m == primary)
+				return (int) i;
+		}
+	}
+#endif
+	return 0;
+}
+
 gchar *
 gdk_screen_get_monitor_plug_name (GdkScreen *screen, int monitor)
 {
-	(void) screen; (void) monitor;
-	return g_strdup ("default");
+	GdkDisplay *d = screen ? screen : gdk_display_get_default ();
+	GdkMonitor *m = gdk_display_get_monitor (d, monitor);
+	const char *connector = m ? gdk_monitor_get_connector (m) : NULL;
+
+	/* The desktop overlay labels each monitor with this. */
+	return g_strdup (connector ? connector : "default");
 }
 
 struct _VerneKeymap {

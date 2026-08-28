@@ -258,7 +258,8 @@ verne_gdk_window_get_height (GdkSurface *window)
 #define gdk_screen_get_height(s) verne_screen_height()
 #define gdk_screen_get_monitor_at_window(s,w) 0
 #define gdk_screen_get_n_monitors(s) verne_screen_n_monitors()
-#define gdk_screen_get_primary_monitor(s) 0
+int verne_screen_primary_monitor (void);
+#define gdk_screen_get_primary_monitor(s) verne_screen_primary_monitor ()
 #define gdk_screen_is_composited(s) TRUE
 
 int verne_screen_width (void);

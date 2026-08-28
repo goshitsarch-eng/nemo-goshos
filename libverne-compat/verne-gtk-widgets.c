@@ -3745,12 +3745,51 @@ void gtk_menu_attach_to_widget (GtkMenu *menu, GtkWidget *attach, gpointer detac
 GtkWidget *gtk_menu_get_attach_widget (GtkMenu *menu) { return menu->attach; }
 GtkWidget *gtk_menu_get_box (GtkMenu *menu) { return menu->box; }
 
+/* The hovered item is remembered across the life of the shell, and the shell
+ * outlives its children: the UI manager empties and refills a reused GtkMenu
+ * whenever the merged UI changes. A raw pointer here dangled as soon as that
+ * happened, so keep a weak reference instead. */
+static void
+verne_selected_ref_free (gpointer data)
+{
+	g_weak_ref_clear (data);
+	g_free (data);
+}
+
+static void
+verne_menu_shell_set_selected_item (gpointer menu_shell, GtkWidget *item)
+{
+	GWeakRef *ref;
+
+	if (menu_shell == NULL)
+		return;
+	ref = g_object_get_data (G_OBJECT (menu_shell), "verne-selected-item");
+	if (ref == NULL) {
+		ref = g_new0 (GWeakRef, 1);
+		g_weak_ref_init (ref, NULL);
+		g_object_set_data_full (G_OBJECT (menu_shell), "verne-selected-item",
+					ref, verne_selected_ref_free);
+	}
+	g_weak_ref_set (ref, item);
+}
+
 GtkWidget *
 gtk_menu_shell_get_selected_item (gpointer menu_shell)
 {
+	GWeakRef *ref;
+	GtkWidget *item;
+
 	if (menu_shell == NULL)
 		return NULL;
-	return g_object_get_data (G_OBJECT (menu_shell), "verne-selected-item");
+	ref = g_object_get_data (G_OBJECT (menu_shell), "verne-selected-item");
+	if (ref == NULL)
+		return NULL;
+	item = g_weak_ref_get (ref);
+	if (item == NULL)
+		return NULL;
+	/* Borrowed, as before: the item is kept alive by its parent. */
+	g_object_unref (item);
+	return item;
 }
 
 void gtk_menu_shell_append (gpointer menu_shell, GtkWidget *child) {
@@ -3791,7 +3830,7 @@ gtk_menu_shell_select_first (gpointer menu_shell, gboolean search_sensitive)
 			continue;
 		if (GTK_IS_SEPARATOR (child) || GTK_IS_SEPARATOR_MENU_ITEM (child))
 			continue;
-		g_object_set_data (G_OBJECT (menu_shell), "verne-selected-item", child);
+		verne_menu_shell_set_selected_item (menu_shell, child);
 		if (gtk_widget_get_focusable (child))
 			gtk_widget_grab_focus (child);
 		break;
@@ -3940,7 +3979,7 @@ verne_menu_item_set_selected_shell (GtkWidget *item)
 	if (shell == NULL)
 		shell = gtk_widget_get_ancestor (item, GTK_TYPE_MENU_BAR);
 	if (shell)
-		g_object_set_data (G_OBJECT (shell), "verne-selected-item", item);
+		verne_menu_shell_set_selected_item (shell, item);
 }
 
 static void
@@ -3956,7 +3995,7 @@ verne_menu_item_enter (GtkEventControllerMotion *motion, gdouble x, gdouble y, g
 	shell = GTK_WIDGET (verne_menu_from_item (item));
 	if (shell == NULL)
 		shell = gtk_widget_get_ancestor (item, GTK_TYPE_MENU_BAR);
-	prev = shell ? g_object_get_data (G_OBJECT (shell), "verne-selected-item") : NULL;
+	prev = gtk_menu_shell_get_selected_item (shell);
 	/* Only swap nested submenus inside a GtkMenu. Menubar File/Edit stay
 	 * click-to-open; hovering Edit must not pop down an open File menu. */
 	if (GTK_IS_MENU (shell) && GTK_IS_MENU_ITEM (prev) && prev != item) {
@@ -4095,7 +4134,7 @@ verne_menu_popup_submenu (GtkWidget *item, GtkWidget *submenu, gboolean toggle)
 	{
 		GtkWidget *bar = gtk_widget_get_ancestor (item, GTK_TYPE_MENU_BAR);
 		if (bar)
-			g_object_set_data (G_OBJECT (bar), "verne-selected-item", item);
+			verne_menu_shell_set_selected_item (bar, item);
 	}
 	verne_widget_root_xy (item, &x, &y);
 	if (gtk_widget_get_ancestor (item, GTK_TYPE_MENU_BAR) && parent_menu == NULL) {
