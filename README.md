@@ -74,3 +74,8 @@ ninja -C build install
 
 Build dependencies are listed in `debian/control`. GTK 4.10 or newer and
 libadwaita 1.4 or newer are required.
+
+On a Cinnamon system, add `-Dcinnamon_schemas=false`. Verne ships a cut-down
+copy of the `org.cinnamon.desktop` GSettings schemas so that it can run outside
+Cinnamon at all; installing that copy over the full schemas from
+`cinnamon-desktop-data` would break other Cinnamon applications.

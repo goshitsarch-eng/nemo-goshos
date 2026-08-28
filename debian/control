@@ -10,25 +10,23 @@ Build-Depends:
  gtk-doc-tools (>= 1.4),
  intltool (>= 0.40.1),
  itstool,
+ libadwaita-1-dev (>= 1.4),
  libatk1.0-dev (>= 1.32.0),
- libcinnamon-desktop-dev (>= 4.8),
  libexempi-dev (>= 2.2.0),
  libexif-dev (>= 0.6.20),
- libgail-3-dev,
+ libgdk-pixbuf-2.0-dev,
  libgirepository1.0-dev (>= 0.9.12),
  libglib2.0-dev (>= 2.45.7),
  libglib2.0-doc,
  libgsf-1-dev,
- libgtk-3-dev (>= 3.10),
- libgtk-3-doc,
- libgtk-layer-shell-dev,
+ libgtk-4-dev (>= 4.10),
+ libgtk-4-doc,
  libjson-glib-dev (>= 1.6),
  libpango1.0-dev (>= 1.44.0),
  libx11-dev,
- libxapp-dev (>= 2.0.0),
  libxext-dev,
+ libxi-dev,
  libxrender-dev,
- libwayland-dev,
  meson,
  python3,
  python3-gi,
@@ -55,7 +53,7 @@ Section: libdevel
 Depends:
  gir1.2-nemo-3.0 (= ${binary:Version}),
  libglib2.0-dev (>= 2.45.7),
- libgtk-3-dev (>= 3.10),
+ libgtk-4-dev (>= 4.10),
  libnemo-extension1 (= ${binary:Version}),
  ${misc:Depends},
 Description: libraries for nemo components - development version
@@ -84,7 +82,6 @@ Package: nemo
 Architecture: any
 Pre-Depends: ${misc:Pre-Depends}
 Depends:
- cinnamon-desktop-data (>= 4.8.0),
  cinnamon-l10n,
  desktop-file-utils (>= 0.7),
  gsettings-desktop-schemas,
@@ -100,13 +97,13 @@ Depends:
  untex,
  html2text,
  python3-xlrd,
- xapp-symbolic-icons (>= 1.0.7),
  ${misc:Depends},
  ${shlibs:Depends},
 Recommends:
  gvfs-backends,
  gvfs-fuse,
  librsvg2-common,
+ xapp-symbolic-icons (>= 1.0.7),
  nemo-fileroller,
  gnome-disk-utility
 Suggests: eog, evince | pdf-viewer, totem | mp3-decoder, xdg-user-dirs

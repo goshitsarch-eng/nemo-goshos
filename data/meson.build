@@ -108,9 +108,16 @@ subdir('icons')
 
 glib_compile_schemas = find_program('glib-compile-schemas')
 
-install_data('org.cinnamon.desktop.gschema.xml',
-  install_dir: join_paths(get_option('datadir'), 'glib-2.0', 'schemas')
-)
+# This is a cut-down copy carrying only the org.cinnamon.desktop keys Verne
+# reads, so that it runs outside Cinnamon at all (g_settings_new() aborts on a
+# missing schema). On a Cinnamon system cinnamon-desktop-data ships the full
+# schemas and installing this over them would break every other Cinnamon app,
+# so packagers there must configure with -Dcinnamon_schemas=false.
+if get_option('cinnamon_schemas')
+  install_data('org.cinnamon.desktop.gschema.xml',
+    install_dir: join_paths(get_option('datadir'), 'glib-2.0', 'schemas')
+  )
+endif
 
 configure_file(
   input: 'org.cinnamon.desktop.gschema.xml',
