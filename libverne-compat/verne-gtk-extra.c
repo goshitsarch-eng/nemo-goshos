@@ -2647,7 +2647,7 @@ gtk_widget_override_background_color (GtkWidget *widget, GtkStateFlags state, co
 void gdk_window_set_background_rgba (GdkSurface *window, const GdkRGBA *rgba) { (void) window; (void) rgba; }
 void gdk_window_set_transient_for (GdkSurface *window, GdkSurface *parent) { (void) window; (void) parent; }
 GdkWindowTypeHint
-gdk_window_get_type_hint (GdkSurface *window)
+gdk_window_get_type_hint (gpointer window)
 {
 #ifdef GDK_WINDOWING_X11
 	Display *dpy;

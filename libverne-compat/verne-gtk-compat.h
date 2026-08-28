@@ -1790,7 +1790,7 @@ gchar *gtk_file_chooser_get_filename (GtkFileChooser *chooser);
 GdkSurface *gdk_device_get_window_at_position (GdkDevice *device, gint *x, gint *y);
 void gdk_window_set_background_rgba (GdkSurface *window, const GdkRGBA *rgba);
 void gdk_window_set_transient_for (GdkSurface *window, GdkSurface *parent);
-GdkWindowTypeHint gdk_window_get_type_hint (GdkSurface *window);
+GdkWindowTypeHint gdk_window_get_type_hint (gpointer window);
 cairo_surface_t *gdk_window_create_similar_surface (GdkSurface *window, cairo_content_t content, int w, int h);
 cairo_surface_t *gdk_window_create_similar_image_surface (GdkSurface *window, cairo_format_t format, int w, int h, int scale);
 void gdk_window_move_to_rect (GdkSurface *window, const GdkRectangle *rect, GdkGravity rect_anchor, GdkGravity window_anchor, GdkAnchorHints hints, int dx, int dy);
