@@ -40,11 +40,21 @@ nemo_plugin_manager_init (NemoPluginManager *self)
     gtk_grid_set_column_homogeneous (GTK_GRID (grid), TRUE);
 
     widget = nemo_action_config_widget_new ();
+    gtk_widget_set_hexpand (widget, TRUE);
+    gtk_widget_set_vexpand (widget, TRUE);
     gtk_grid_attach (GTK_GRID (grid), widget, 0, 0, 2, 1);
 
     widget = nemo_extension_config_widget_new ();
+    gtk_widget_set_hexpand (widget, TRUE);
+    gtk_widget_set_vexpand (widget, TRUE);
     gtk_grid_attach (GTK_GRID (grid), widget, 0, 1, 2, 1);
 
+    /* Homogeneous rows only give the two lists the same height if the grid
+     * itself takes the space the page offers it. */
+    gtk_widget_set_hexpand (grid, TRUE);
+    gtk_widget_set_vexpand (grid, TRUE);
+    gtk_widget_set_hexpand (GTK_WIDGET (self), TRUE);
+    gtk_widget_set_vexpand (GTK_WIDGET (self), TRUE);
     gtk_container_add (GTK_CONTAINER (self), grid);
 
     gtk_widget_show_all (GTK_WIDGET (self));

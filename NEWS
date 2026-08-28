@@ -1,3 +1,30 @@
+Verne 6.8.0
+===========
+
+The first release of Verne, a GTK4 + libadwaita presentation of Nemo, based on
+Nemo 6.7.5. See debian/changelog for the full list of changes, README.md for
+what Verne is and is not, and THANKS for credit to the projects it is built on.
+
+Highlights:
+
+- The user interface is ported from GTK3 to GTK4 and libadwaita. Nemo's
+  internal APIs, D-Bus names, GSettings schemas, extensions and actions are
+  unchanged, so Nemo actions and extensions keep working.
+
+- The whole window follows the desktop's light/dark preference. Previously the
+  chrome, the icon view, the rubber band and the properties-window capacity
+  ring were painted with fixed light colours.
+
+- Menu rows read label-left / accelerator-right again, with a real check mark
+  and submenu arrows.
+
+- The places-sidebar free-space indicator works again, deriving its colours
+  from the theme rather than from GTK3 widget style properties that GTK4
+  removed.
+
+- Icons that came from Mint's xapp-symbolic-icons now resolve on any system.
+
+
 Development: 1/22/2013:
 
 - Breadcrumbs:  Stylable by themes, see src/nemo-styles-fallback.css for default style information.
