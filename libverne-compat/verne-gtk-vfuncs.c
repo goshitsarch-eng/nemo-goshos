@@ -822,7 +822,7 @@ verne_window_present_safe (GtkWindow *window)
 		if (surface)
 			gdk_window_lower (surface);
 	} else if (gtk_widget_get_realized (widget) && !GTK_IS_MENU (window)) {
-		gtk_window_present (window);
+		(gtk_window_present) (window);
 	}
 
 	g_object_set_qdata (G_OBJECT (window), verne_presenting_quark (), NULL);

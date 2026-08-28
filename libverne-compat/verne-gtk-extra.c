@@ -750,7 +750,7 @@ verne_window_present_keep (GtkWindow *window)
 		return;
 	verne_window_keep_native (window);
 	gtk_widget_set_visible (GTK_WIDGET (window), TRUE);
-	gtk_window_present (window);
+	(gtk_window_present) (window);
 #ifdef GDK_WINDOWING_X11
 	{
 		GtkNative *native = gtk_widget_get_native (GTK_WIDGET (window));
@@ -759,13 +759,18 @@ verne_window_present_keep (GtkWindow *window)
 		if (surface && GDK_IS_X11_SURFACE (surface)) {
 			Display *dpy = gdk_x11_display_get_xdisplay (gdk_surface_get_display (surface));
 			Window xid = gdk_x11_surface_get_xid (GDK_X11_SURFACE (surface));
+			gboolean is_dest;
 
+			is_dest = gtk_window_get_type_hint (window) == GDK_WINDOW_TYPE_HINT_DESKTOP ||
+				  g_object_get_data (G_OBJECT (window), "is_desktop_window") != NULL;
 			if (dpy && xid) {
 				gdk_x11_display_error_trap_push (gdk_display_get_default ());
-				if (gtk_window_get_type_hint (window) != GDK_WINDOW_TYPE_HINT_DESKTOP &&
-				    g_object_get_data (G_OBJECT (window), "is_desktop_window") == NULL)
+				if (is_dest)
+					XLowerWindow (dpy, xid);
+				else {
 					verne_x11_lower_desktop_toplevels ();
-				XRaiseWindow (dpy, xid);
+					XRaiseWindow (dpy, xid);
+				}
 				gdk_x11_display_error_trap_pop_ignored (gdk_display_get_default ());
 			}
 		}
@@ -812,12 +817,61 @@ verne_adw_window_from_body (GtkWidget *body, const char *title, int width, int h
 	return win;
 }
 
+void
+verne_gtk_window_present (GtkWindow *window)
+{
+	if (!GTK_IS_WINDOW (window))
+		return;
+	if (gtk_window_get_type_hint (window) == GDK_WINDOW_TYPE_HINT_DESKTOP ||
+	    g_object_get_data (G_OBJECT (window), "is_desktop_window") != NULL) {
+		GtkWidget *widget = GTK_WIDGET (window);
+		GdkSurface *surface;
+
+		if (!gtk_widget_get_visible (widget))
+			gtk_widget_set_visible (widget, TRUE);
+		if (!gtk_widget_get_realized (widget))
+			gtk_widget_realize (widget);
+		if (gtk_widget_get_realized (widget) && !gtk_widget_get_mapped (widget))
+			gtk_widget_map (widget);
+		surface = gtk_native_get_surface (GTK_NATIVE (window));
+		if (surface)
+			gdk_window_lower (surface);
+		return;
+	}
+	verne_window_present_keep (window);
+}
+
 static gboolean
 verne_hide_dummy_idle (gpointer data)
 {
 	if (GTK_IS_WINDOW (data))
 		verne_x11_hide_dummy_natives (GTK_WINDOW (data));
 	return G_SOURCE_REMOVE;
+}
+
+static void
+verne_dest_keep_below (GtkWindow *window, GParamSpec *pspec, gpointer data)
+{
+	GdkSurface *surface;
+
+	(void) pspec;
+	(void) data;
+	if (!GTK_IS_WINDOW (window))
+		return;
+	if (gtk_window_get_type_hint (window) != GDK_WINDOW_TYPE_HINT_DESKTOP &&
+	    g_object_get_data (G_OBJECT (window), "is_desktop_window") == NULL)
+		return;
+	surface = gtk_native_get_surface (GTK_NATIVE (window));
+	if (surface)
+		gdk_window_lower (surface);
+}
+
+static void
+verne_dest_keep_below_map (GtkWidget *widget, gpointer data)
+{
+	(void) data;
+	if (GTK_IS_WINDOW (widget))
+		verne_dest_keep_below (GTK_WINDOW (widget), NULL, NULL);
 }
 
 static void
@@ -855,6 +909,14 @@ verne_window_apply_x11 (GtkWindow *window)
 				 (unsigned char *) &value, 1);
 		if (hint == GDK_WINDOW_TYPE_HINT_DESKTOP)
 			XLowerWindow (dpy, xid);
+		if (hint == GDK_WINDOW_TYPE_HINT_DESKTOP &&
+		    g_object_get_data (G_OBJECT (window), "verne-dest-keep-below") == NULL) {
+			g_object_set_data (G_OBJECT (window), "verne-dest-keep-below", GINT_TO_POINTER (1));
+			g_signal_connect (window, "notify::is-active",
+					  G_CALLBACK (verne_dest_keep_below), NULL);
+			g_signal_connect (window, "map",
+					  G_CALLBACK (verne_dest_keep_below_map), NULL);
+		}
 	} else if (hint == GDK_WINDOW_TYPE_HINT_POPUP_MENU ||
 		   hint == GDK_WINDOW_TYPE_HINT_DROPDOWN_MENU ||
 		   hint == GDK_WINDOW_TYPE_HINT_MENU) {
@@ -1261,9 +1323,32 @@ void gdk_window_resize (GdkSurface *window, gint width, gint height) { (void) wi
 void gdk_window_raise (GdkSurface *window)
 {
 #ifdef GDK_WINDOWING_X11
-	if (window && GDK_IS_X11_SURFACE (window))
-		XRaiseWindow (gdk_x11_display_get_xdisplay (gdk_surface_get_display (window)),
-			      gdk_x11_surface_get_xid (window));
+	if (window && GDK_IS_X11_SURFACE (window)) {
+		GListModel *model = gtk_window_get_toplevels ();
+		guint i, n = g_list_model_get_n_items (model);
+		gboolean is_dest = FALSE;
+
+		for (i = 0; i < n; i++) {
+			gpointer w = g_list_model_get_item (model, i);
+			GdkSurface *s;
+
+			if (w && GTK_IS_WINDOW (w) &&
+			    (gtk_window_get_type_hint (GTK_WINDOW (w)) == GDK_WINDOW_TYPE_HINT_DESKTOP ||
+			     g_object_get_data (G_OBJECT (w), "is_desktop_window") != NULL)) {
+				s = gtk_native_get_surface (GTK_NATIVE (w));
+				if (s == window)
+					is_dest = TRUE;
+			}
+			if (w)
+				g_object_unref (w);
+		}
+		if (is_dest)
+			XLowerWindow (gdk_x11_display_get_xdisplay (gdk_surface_get_display (window)),
+				      gdk_x11_surface_get_xid (window));
+		else
+			XRaiseWindow (gdk_x11_display_get_xdisplay (gdk_surface_get_display (window)),
+				      gdk_x11_surface_get_xid (window));
+	}
 #else
 	(void) window;
 #endif

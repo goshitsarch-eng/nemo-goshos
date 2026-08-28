@@ -1055,6 +1055,8 @@ void gtk_window_get_position (GtkWindow *window, gint *x, gint *y);
 #define gtk_window_set_has_resize_grip(w,b) ((void)0)
 #define gtk_window_reshow_with_initial_size(w) ((void)0)
 #define gtk_window_present_with_time(w,t) gtk_window_present(w)
+void verne_gtk_window_present (GtkWindow *window);
+#define gtk_window_present(w) verne_gtk_window_present (w)
 #define gtk_window_set_startup_id(w,id) ((void)0)
 
 GtkAccelGroup *gtk_accel_group_new (void);

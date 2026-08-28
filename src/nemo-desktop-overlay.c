@@ -413,6 +413,7 @@ hide_hosted_customize (NemoDesktopOverlay *overlay)
     if (GTK_IS_WIDGET (priv->window) &&
         GTK_WIDGET (priv->window) != priv->hosted_wrap)
         gtk_widget_set_visible (GTK_WIDGET (priv->window), FALSE);
+    g_warning ("verne: hiding dest customize");
 }
 
 static void
@@ -523,8 +524,9 @@ on_hosted_close_clicked (GtkButton *button,
 static gboolean
 on_adw_close_request (GtkWindow *window, gpointer user_data)
 {
-    (void) window;
     hide_hosted_customize (NEMO_DESKTOP_OVERLAY (user_data));
+    if (GTK_IS_WIDGET (window))
+        gtk_widget_set_visible (GTK_WIDGET (window), FALSE);
     return TRUE;
 }
 
