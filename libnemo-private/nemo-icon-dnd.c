@@ -1418,6 +1418,7 @@ nemo_icon_container_receive_dropped_icons (NemoIconContainer *container,
 	}
 
 	if (real_action > 0) {
+		GdkDragAction forced_action;
 		GtkAdjustment *ha = gtk_scrollable_get_hadjustment (GTK_SCROLLABLE (container));
 		GtkAdjustment *va = gtk_scrollable_get_vadjustment (GTK_SCROLLABLE (container));
 
@@ -1443,7 +1444,14 @@ nemo_icon_container_receive_dropped_icons (NemoIconContainer *container,
 		}
 
 		local_move_only = FALSE;
-		if (!icon_hit &&
+		forced_action = verne_drag_forced_action ();
+		if (forced_action != 0) {
+			/* Ctrl, Shift+Ctrl or Alt name the action outright; a
+			 * duplicate or a link inside the same folder is a real
+			 * file operation, not an icon rearrange. */
+			real_action = forced_action;
+		}
+		if (!icon_hit && forced_action == 0 &&
 		    nemo_icon_container_selection_items_local
 				(container, container->details->dnd_info->drag_info.selection_list)) {
 			/* GTK4 local dest/file rearranges often arrive as COPY

@@ -2646,6 +2646,16 @@ verne_suggested_from_modifiers (GdkDragAction actions)
 	return 0;
 }
 
+/* Whether the user is holding a modifier that names a drop action, so a
+ * destination can tell "copy because Ctrl" from "copy because that is the
+ * default". */
+GdkDragAction
+verne_drag_forced_action (void)
+{
+	return verne_suggested_from_modifiers (GDK_ACTION_ASK | GDK_ACTION_LINK |
+					       GDK_ACTION_COPY | GDK_ACTION_MOVE);
+}
+
 GdkDragAction
 gdk_drag_context_get_suggested_action (GdkDragContext *context)
 {

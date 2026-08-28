@@ -1774,6 +1774,7 @@ void gtk_drag_set_icon_surface (GdkDragContext *context, cairo_surface_t *surfac
 void gtk_drag_dest_set_track_motion (GtkWidget *widget, gboolean track);
 GtkTargetList *gtk_drag_source_get_target_list (GtkWidget *widget);
 GdkDragAction gdk_drag_context_get_selected_action (GdkDragContext *context);
+GdkDragAction verne_drag_forced_action (void);
 GdkDragAction gdk_drag_context_get_suggested_action (GdkDragContext *context);
 GdkDragAction gdk_drag_context_get_actions (GdkDragContext *context);
 GdkSurface *gdk_drag_context_get_source_window (GdkDragContext *context);
