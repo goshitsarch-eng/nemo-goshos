@@ -105,6 +105,13 @@ static void
 restore_focus_widget (NemoWindowPane *pane)
 {
 	if (pane->last_focus_widget != NULL) {
+		/* The weak pointer keeps this from dangling, but a widget that
+		 * has been taken out of the window (a slot whose tab just
+		 * closed) must not be handed the focus back. */
+		if (gtk_widget_get_root (pane->last_focus_widget) == NULL) {
+			unset_focus_widget (pane);
+			return;
+		}
 		if (NEMO_IS_VIEW (pane->last_focus_widget)) {
 			nemo_view_grab_focus (NEMO_VIEW (pane->last_focus_widget));
 		} else {

@@ -2541,6 +2541,13 @@ slot_active (NemoWindowSlot *slot,
 		return;
 	}
 
+	/* A view that has been destroyed has no window left to merge menus
+	 * into. Closing a tab re-focuses the pane's remembered widget, which
+	 * can still be this view, so the slot goes on emitting at it. */
+	if (view->details->window == NULL) {
+		return;
+	}
+
 	view->details->active = TRUE;
 
 	nemo_view_merge_menus (view);
@@ -2556,6 +2563,10 @@ slot_inactive (NemoWindowSlot *slot,
 	}
 
 	view->details->active = FALSE;
+
+	if (view->details->window == NULL) {
+		return;
+	}
 
 	nemo_view_unmerge_menus (view);
 	remove_update_menus_timeout_callback (view);
@@ -2983,6 +2994,15 @@ nemo_view_destroy (GtkWidget *object)
     g_clear_object (&view->details->action_manager);
 
 	nemo_view_unmerge_menus (view);
+
+	/* Stop the slot from calling back into a view that is on its way out:
+	 * the signals were connected with g_signal_connect_object, which only
+	 * disconnects at finalize, and the window pointer below goes away now. */
+	if (view->details->slot != NULL) {
+		g_signal_handlers_disconnect_matched (view->details->slot,
+						      G_SIGNAL_MATCH_DATA, 0, 0,
+						      NULL, NULL, view);
+	}
 
 	/* We don't own the window, so no unref */
 	view->details->slot = NULL;
