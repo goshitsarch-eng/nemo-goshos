@@ -1741,12 +1741,42 @@ places_path_from_drop_xy (GtkTreeView *tree_view,
 		}
 	} while (gtk_tree_model_iter_next (model, &iter));
 
-	if (best != NULL && best_dist <= 28) {
+	if (best != NULL && best_dist <= 80) {
 		*path = best;
 		*pos = GTK_TREE_VIEW_DROP_INTO_OR_BEFORE;
 		return TRUE;
 	}
 	gtk_tree_path_free (best);
+	return FALSE;
+}
+
+static gboolean
+places_fallback_drop_path (GtkTreeView *tree_view,
+			   GtkTreePath **path,
+			   GtkTreeViewDropPosition *pos)
+{
+	GtkTreeModel *model;
+	GtkTreeIter iter;
+
+	model = gtk_tree_view_get_model (tree_view);
+	if (model == NULL || !gtk_tree_model_get_iter_first (model, &iter))
+		return FALSE;
+	do {
+		PlaceType place_type;
+		gchar *uri = NULL;
+
+		gtk_tree_model_get (model, &iter,
+				    PLACES_SIDEBAR_COLUMN_ROW_TYPE, &place_type,
+				    PLACES_SIDEBAR_COLUMN_URI, &uri,
+				    -1);
+		if (place_type != PLACES_HEADING && uri != NULL && uri[0] != '\0') {
+			*path = gtk_tree_model_get_path (model, &iter);
+			*pos = GTK_TREE_VIEW_DROP_INTO_OR_BEFORE;
+			g_free (uri);
+			return TRUE;
+		}
+		g_free (uri);
+	} while (gtk_tree_model_iter_next (model, &iter));
 	return FALSE;
 }
 
@@ -2268,6 +2298,8 @@ drag_data_received_callback (GtkWidget *widget,
 
 	/* Compute position */
 	success = compute_drop_position (tree_view, x, y, &tree_path, &tree_pos, sidebar);
+	if (!success)
+		success = places_fallback_drop_path (tree_view, &tree_path, &tree_pos);
 	if (!success) {
 		g_warning ("places drop rejected xy=%d,%d info=%d received=%d",
 			   x, y, sidebar->drag_data_info, sidebar->drag_data_received);

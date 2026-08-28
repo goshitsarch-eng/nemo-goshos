@@ -764,6 +764,13 @@ verne_menu_ensure_css (void)
 		"  min-width: 0;\n"
 		"  padding: 6px;\n"
 		"}\n"
+		"box.verne-dest-customize {\n"
+		"  background-color: #ffffff;\n"
+		"  background-image: none;\n"
+		"  color: #1e1e1e;\n"
+		"  border-radius: 12px;\n"
+		"  border: 1px solid #c0c0c0;\n"
+		"}\n"
 		".menubar {\n"
 		"  background-color: #f6f5f4;\n"
 		"  min-height: 28px;\n"
@@ -822,31 +829,13 @@ static GtkWidget *
 verne_menu_overlay_host (GtkMenu *menu)
 {
 	GtkWindow *dest;
-	GtkWidget *start;
-	GtkWidget *w;
 
+	/* Only dest hosts menus on GtkOverlay (dest GSK used to cover sibling
+	 * X popups). File windows keep native popups so Edit→Preferences is
+	 * not clipped to a 360px-tall Home window. */
 	dest = verne_menu_dest_attach_window (GTK_WIDGET (menu));
 	if (dest)
 		return GTK_WIDGET (dest);
-
-	if (!GTK_IS_MENU (menu))
-		return NULL;
-	start = menu->attach;
-	if (!GTK_IS_WIDGET (start))
-		start = g_object_get_data (G_OBJECT (menu), "verne-submenu-item");
-	for (w = start; GTK_IS_WIDGET (w); w = gtk_widget_get_parent (w)) {
-		GtkWidget *overlay;
-
-		if (GTK_IS_MENU (w))
-			continue;
-		overlay = g_object_get_data (G_OBJECT (w), "verne-file-menu-overlay");
-		if (overlay == NULL)
-			overlay = g_object_get_data (G_OBJECT (w), "verne-dest-menu-overlay");
-		if (GTK_IS_OVERLAY (overlay))
-			return w;
-		if (GTK_IS_WINDOW (w) && !GTK_IS_MENU (w))
-			return w;
-	}
 	return NULL;
 }
 
@@ -1573,7 +1562,33 @@ verne_dest_overlay_scroll (GtkEventControllerScroll *controller,
 	(void) dx;
 	if (va == NULL)
 		return FALSE;
-	gtk_adjustment_set_value (va, gtk_adjustment_get_value (va) + dy * 32.0);
+	if (!verne_any_dest_overlay_visible ())
+		return FALSE;
+	if (dy > -0.01 && dy < 0.01)
+		return FALSE;
+	{
+		gdouble step;
+		gdouble lower = gtk_adjustment_get_lower (va);
+		gdouble upper = gtk_adjustment_get_upper (va) - gtk_adjustment_get_page_size (va);
+		gdouble next;
+		gdouble page = gtk_adjustment_get_page_increment (va);
+
+		if (page < 8.0)
+			page = 32.0;
+		if (dy > -2.0 && dy < 2.0)
+			step = dy * page;
+		else
+			step = dy;
+		next = gtk_adjustment_get_value (va) + step;
+
+		if (upper < lower)
+			upper = lower;
+		if (next < lower)
+			next = lower;
+		if (next > upper)
+			next = upper;
+		gtk_adjustment_set_value (va, next);
+	}
 	g_warning ("verne: overlay menu scroll dy=%.1f value=%.0f",
 		   dy, gtk_adjustment_get_value (va));
 	return TRUE;
@@ -1597,10 +1612,10 @@ verne_dest_overlay_wheel_button (GtkGestureClick *gesture, gint n_press,
 	if (button != 4 && button != 5)
 		return;
 	va = verne_overlay_menu_vadj (widget);
-	if (va == NULL)
+	if (va == NULL || !verne_any_dest_overlay_visible ())
 		return;
 	gtk_adjustment_set_value (va,
-				  gtk_adjustment_get_value (va) + (button == 5 ? 48.0 : -48.0));
+				  gtk_adjustment_get_value (va) + (button == 5 ? 32.0 : -32.0));
 	g_warning ("verne: overlay menu wheel button=%u value=%.0f",
 		   button, gtk_adjustment_get_value (va));
 	gtk_gesture_set_state (GTK_GESTURE (gesture), GTK_EVENT_SEQUENCE_CLAIMED);
@@ -1618,6 +1633,47 @@ verne_overlay_escape (GtkEventControllerKey *controller, guint keyval, guint key
 		return FALSE;
 	verne_menu_hide_others (NULL);
 	return TRUE;
+}
+
+static void
+verne_overlay_ungrab_keyboard (void)
+{
+}
+
+static void
+verne_overlay_grab_keyboard (GtkWidget *host)
+{
+	GtkNative *native;
+	GdkSurface *surface;
+
+	if (!GTK_IS_WIDGET (host))
+		return;
+	native = gtk_widget_get_native (host);
+	surface = native ? gtk_native_get_surface (native) : NULL;
+	verne_overlay_ungrab_keyboard ();
+#ifdef GDK_WINDOWING_X11
+	if (surface && GDK_IS_X11_SURFACE (surface)) {
+		Display *dpy = gdk_x11_display_get_xdisplay (gdk_surface_get_display (surface));
+		Window xid = gdk_x11_surface_get_xid (surface);
+
+		if (dpy && xid) {
+			gdk_x11_display_error_trap_push (gdk_display_get_default ());
+			XSetInputFocus (dpy, xid, RevertToPointerRoot, CurrentTime);
+			gdk_x11_display_error_trap_pop_ignored (gdk_display_get_default ());
+		}
+	}
+#endif
+	if (GTK_IS_WINDOW (host)) {
+		GtkEventController *keys;
+
+		if (g_object_get_data (G_OBJECT (host), "verne-dest-escape") == NULL) {
+			keys = gtk_event_controller_key_new ();
+			gtk_event_controller_set_propagation_phase (keys, GTK_PHASE_CAPTURE);
+			g_signal_connect (keys, "key-pressed", G_CALLBACK (verne_overlay_escape), NULL);
+			gtk_widget_add_controller (host, keys);
+			g_object_set_data (G_OBJECT (host), "verne-dest-escape", GINT_TO_POINTER (1));
+		}
+	}
 }
 
 static void
@@ -1861,6 +1917,19 @@ verne_menu_popup_dest_overlay (GtkMenu *menu, int root_x, int root_y)
 		g_object_set_data (G_OBJECT (box), "verne-dest-click", GINT_TO_POINTER (1));
 	}
 	g_object_set_data (G_OBJECT (menu), "verne-dest-overlay", overlay);
+	verne_overlay_grab_keyboard (host);
+	{
+		GtkWidget *scroll = verne_menu_get_scroll (menu);
+		GtkAdjustment *ova = NULL;
+
+		if (GTK_IS_WIDGET (scroll))
+			ova = g_object_get_data (G_OBJECT (scroll), "verne-overlay-vadj");
+		if (!GTK_IS_ADJUSTMENT (ova) && GTK_IS_WIDGET (box))
+			ova = verne_overlay_vadj_from_widget (box);
+		if (GTK_IS_ADJUSTMENT (ova))
+			g_object_set_data (G_OBJECT (host), "verne-overlay-vadj", ova);
+		verne_overlay_attach_scroll_controllers (host);
+	}
 	g_object_unref (box);
 	return TRUE;
 }
@@ -2920,6 +2989,21 @@ verne_menu_hide_others (GtkMenu *keep)
 			g_object_unref (w);
 	}
 	verne_menu_hide_overlay_leftovers (keep);
+	if (keep == NULL) {
+		GListModel *model2 = gtk_window_get_toplevels ();
+		guint j, n2 = g_list_model_get_n_items (model2);
+
+		verne_overlay_ungrab_keyboard ();
+		for (j = 0; j < n2; j++) {
+			gpointer w = g_list_model_get_item (model2, j);
+			if (GTK_IS_WINDOW (w) &&
+			    (g_object_get_data (G_OBJECT (w), "is_desktop_window") != NULL ||
+			     gtk_window_get_type_hint (GTK_WINDOW (w)) == GDK_WINDOW_TYPE_HINT_DESKTOP))
+				g_object_set_data (G_OBJECT (w), "verne-overlay-vadj", NULL);
+			if (w)
+				g_object_unref (w);
+		}
+	}
 }
 
 static void
@@ -3047,11 +3131,32 @@ verne_toplevel_dismiss_menus (GtkGestureClick *gesture, gint n_press, gdouble x,
 			wx = (dw - ww) / 2;
 			wy = (dh - wh) / 2;
 			if (x >= wx && x < wx + ww && y >= wy && y < wy + wh) {
-				gtk_gesture_set_state (GTK_GESTURE (gesture), GTK_EVENT_SEQUENCE_CLAIMED);
-				if (button == 1 && x < wx + 56 && y < wy + 48) {
-					GtkWidget *close_btn = g_object_get_data (G_OBJECT (wrap),
-										  "verne-dest-customize-close");
+				GtkWidget *close_btn = g_object_get_data (G_OBJECT (wrap),
+									  "verne-dest-customize-close");
+				gboolean hit_close = FALSE;
 
+				gtk_gesture_set_state (GTK_GESTURE (gesture), GTK_EVENT_SEQUENCE_CLAIMED);
+				if (button == 1 && GTK_IS_WIDGET (close_btn)) {
+					graphene_rect_t bounds;
+					GtkWidget *picked_close;
+
+					if (gtk_widget_compute_bounds (close_btn, toplevel, &bounds) &&
+					    x >= bounds.origin.x &&
+					    x < bounds.origin.x + MAX (bounds.size.width, 1) &&
+					    y >= bounds.origin.y &&
+					    y < bounds.origin.y + MAX (bounds.size.height, 1))
+						hit_close = TRUE;
+					picked_close = gtk_widget_pick (toplevel, x, y, GTK_PICK_DEFAULT);
+					while (picked_close != NULL && picked_close != wrap &&
+					       picked_close != toplevel) {
+						if (picked_close == close_btn) {
+							hit_close = TRUE;
+							break;
+						}
+						picked_close = gtk_widget_get_parent (picked_close);
+					}
+				}
+				if (button == 1 && (hit_close || (x < wx + 56 && y < wy + 48))) {
 					if (GTK_IS_BUTTON (close_btn))
 						g_signal_emit_by_name (close_btn, "clicked");
 					g_warning ("verne: dest customize close at %.0f,%.0f wrap=%d,%d %dx%d",
@@ -4190,7 +4295,11 @@ verne_accel_group_activate (GtkAccelGroup *group, guint key, GdkModifierType mod
 		return FALSE;
 	for (i = (gint) group->entries->len - 1; i >= 0; i--) {
 		VerneAccelEntry *e = g_ptr_array_index (group->entries, i);
-		if (e->action == NULL || e->key != key || e->mods != mods)
+		if (e->action == NULL || e->mods != mods)
+			continue;
+		if (e->key != key &&
+		    !((e->key == GDK_KEY_F1 || e->key == GDK_KEY_KP_F1) &&
+		      (key == GDK_KEY_F1 || key == GDK_KEY_KP_F1)))
 			continue;
 		if (!gtk_action_get_sensitive (e->action) || !gtk_action_get_visible (e->action))
 			continue;

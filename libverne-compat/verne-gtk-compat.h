@@ -1055,6 +1055,8 @@ void gtk_window_get_position (GtkWindow *window, gint *x, gint *y);
 #define gtk_window_set_has_resize_grip(w,b) ((void)0)
 #define gtk_window_reshow_with_initial_size(w) ((void)0)
 #define gtk_window_present_with_time(w,t) gtk_window_present(w)
+void verne_gtk_window_present (GtkWindow *window);
+#define gtk_window_present(w) verne_gtk_window_present (w)
 #define gtk_window_set_startup_id(w,id) ((void)0)
 
 GtkAccelGroup *gtk_accel_group_new (void);
@@ -1439,9 +1441,14 @@ void gtk_target_table_free (GtkTargetEntry *targets, gint n_targets);
 
 void gtk_misc_get_padding (GtkMisc *misc, gint *xpad, gint *ypad);
 void gtk_style_context_get (GtkStyleContext *context, GtkStateFlags state, ...) G_GNUC_NULL_TERMINATED;
-#define gtk_render_insertion_cursor(ctx, cr, x, y, layout, index, dir) ((void)0)
-#define gdk_keymap_get_default() NULL
-#define gdk_keymap_get_direction(k) PANGO_DIRECTION_LTR
+
+typedef struct _GdkKeymap GdkKeymap;
+GType gdk_keymap_get_type (void);
+#define GDK_TYPE_KEYMAP (gdk_keymap_get_type ())
+#define GDK_IS_KEYMAP(obj) (G_TYPE_CHECK_INSTANCE_TYPE ((obj), GDK_TYPE_KEYMAP))
+GdkKeymap *gdk_keymap_get_default (void);
+GdkKeymap *gdk_keymap_get_for_display (GdkDisplay *display);
+PangoDirection gdk_keymap_get_direction (GdkKeymap *keymap);
 
 static inline GtkClipboard *
 verne_gtk_widget_get_clipboard (GtkWidget *widget, GdkAtom selection)
@@ -1454,7 +1461,6 @@ verne_gtk_widget_get_clipboard (GtkWidget *widget, GdkAtom selection)
 #endif
 #define gtk_widget_get_clipboard(w, sel) verne_gtk_widget_get_clipboard (w, sel)
 
-typedef struct _GdkKeymap GdkKeymap;
 #define gtk_im_multicontext_append_menuitems(ctx, shell) verne_im_multicontext_append_menuitems ((ctx), (shell))
 void verne_im_multicontext_append_menuitems (gpointer context, gpointer menushell);
 void gtk_menu_shell_select_first (gpointer shell, gboolean search_sensitive);
@@ -1741,6 +1747,26 @@ void gtk_propagate_event (GtkWidget *widget, GdkEvent *event);
 GtkWidget *gtk_image_new_from_surface (cairo_surface_t *surface);
 void gtk_image_set_from_surface (GtkImage *image, cairo_surface_t *surface);
 void gtk_render_icon_surface (GtkStyleContext *context, cairo_t *cr, cairo_surface_t *surface, gdouble x, gdouble y);
+void verne_gtk_render_layout (GtkStyleContext *context, cairo_t *cr, double x, double y, PangoLayout *layout);
+void verne_gtk_render_background (GtkStyleContext *context, cairo_t *cr, double x, double y, double width, double height);
+void verne_gtk_render_frame (GtkStyleContext *context, cairo_t *cr, double x, double y, double width, double height);
+void verne_gtk_render_focus (GtkStyleContext *context, cairo_t *cr, double x, double y, double width, double height);
+#ifdef gtk_render_layout
+#undef gtk_render_layout
+#endif
+#ifdef gtk_render_background
+#undef gtk_render_background
+#endif
+#ifdef gtk_render_frame
+#undef gtk_render_frame
+#endif
+#ifdef gtk_render_focus
+#undef gtk_render_focus
+#endif
+#define gtk_render_layout verne_gtk_render_layout
+#define gtk_render_background verne_gtk_render_background
+#define gtk_render_frame verne_gtk_render_frame
+#define gtk_render_focus verne_gtk_render_focus
 gpointer gtk_icon_theme_lookup_icon_for_scale (GtkIconTheme *theme, const gchar *name, gint size, gint scale, GtkIconLookupFlags flags);
 gpointer gtk_icon_theme_lookup_by_gicon_for_scale (GtkIconTheme *theme, GIcon *icon, gint size, gint scale, GtkIconLookupFlags flags);
 GdkPixbuf *gtk_icon_info_load_icon (gpointer info, GError **error);
@@ -1786,7 +1812,7 @@ gchar *gtk_file_chooser_get_filename (GtkFileChooser *chooser);
 GdkSurface *gdk_device_get_window_at_position (GdkDevice *device, gint *x, gint *y);
 void gdk_window_set_background_rgba (GdkSurface *window, const GdkRGBA *rgba);
 void gdk_window_set_transient_for (GdkSurface *window, GdkSurface *parent);
-GdkWindowTypeHint gdk_window_get_type_hint (GdkSurface *window);
+GdkWindowTypeHint gdk_window_get_type_hint (gpointer window);
 cairo_surface_t *gdk_window_create_similar_surface (GdkSurface *window, cairo_content_t content, int w, int h);
 cairo_surface_t *gdk_window_create_similar_image_surface (GdkSurface *window, cairo_format_t format, int w, int h, int scale);
 void gdk_window_move_to_rect (GdkSurface *window, const GdkRectangle *rect, GdkGravity rect_anchor, GdkGravity window_anchor, GdkAnchorHints hints, int dx, int dy);
@@ -1811,6 +1837,9 @@ gboolean verne_desktop_canvas_snapshot (GtkWidget *widget, GtkSnapshot *snapshot
 void verne_gtk_widget_queue_draw (GtkWidget *widget);
 #undef gtk_widget_queue_draw
 #define gtk_widget_queue_draw(w) verne_gtk_widget_queue_draw (w)
+void verne_window_keep_native (GtkWindow *window);
+void verne_window_present_keep (GtkWindow *window);
+GtkWidget *verne_adw_window_from_body (GtkWidget *body, const char *title, int width, int height);
 #define gtk_builder_add_from_string(b, buf, len, err) verne_gtk_builder_add_from_string ((b), (buf), (len), (err))
 #define gtk_builder_add_from_file(b, f, err) verne_gtk_builder_add_from_file ((b), (f), (err))
 #define gtk_builder_add_from_resource(b, p, err) verne_gtk_builder_add_from_resource ((b), (p), (err))
@@ -1959,6 +1988,9 @@ void gtk_menu_item_set_accel_path (GtkMenuItem *item, const gchar *accel_path);
 #define GTK_PACK_DIRECTION_LTR 0
 #define GTK_ICON_LOOKUP_FORCE_SIZE 0
 #define GDK_PROP_MODE_REPLACE 0
+#define GDK_PROP_MODE_PREPEND 1
+#define GDK_PROP_MODE_APPEND 2
+unsigned long verne_x11_get_xid (gpointer window);
 #ifndef GTK_WINDOW_TOPLEVEL
 #define GTK_WINDOW_TOPLEVEL 0
 #define GTK_WINDOW_POPUP 1

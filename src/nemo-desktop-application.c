@@ -161,7 +161,7 @@ _get_wmclass (Display *xdisplay,
 }
 
 static gboolean
-desktop_handler_is_ignored (GdkWindow *window, gchar **ignored)
+desktop_handler_is_ignored (gpointer window, gchar **ignored)
 {
     gboolean ret;
     Window xw;
@@ -174,7 +174,7 @@ desktop_handler_is_ignored (GdkWindow *window, gchar **ignored)
 
     ret = FALSE;
 
-    xw = gdk_x11_window_get_xid (GDK_X11_WINDOW (window));
+    xw = verne_x11_get_xid (window);
     xd = gdk_x11_display_get_xdisplay (gdk_display_get_default ());
 
     for (i = 0; i < g_strv_length (ignored); i++) {
@@ -217,7 +217,7 @@ desktop_already_managed (void)
     ret = FALSE;
 
     for (iter = windows; iter != NULL; iter = iter->next) {
-        GdkWindow *window = GDK_WINDOW (iter->data);
+        gpointer window = iter->data;
 
         if (gdk_window_get_type_hint (window) == GDK_WINDOW_TYPE_HINT_DESKTOP) {
             GSettings *desktop_preferences = g_settings_new("org.nemo.desktop");

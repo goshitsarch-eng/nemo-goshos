@@ -813,8 +813,17 @@ verne_window_present_safe (GtkWindow *window)
 	if (gtk_widget_get_realized (widget) && !gtk_widget_get_mapped (widget))
 		gtk_widget_map (widget);
 
-	if (gtk_widget_get_realized (widget))
-		gtk_window_present (window);
+	/* gtk_window_present raises. Desktop windows must stay at the bottom
+	 * of the stack or dest GSK covers File menus and the file window. */
+	if (g_object_get_data (G_OBJECT (window), "is_desktop_window") != NULL ||
+	    gtk_window_get_type_hint (window) == GDK_WINDOW_TYPE_HINT_DESKTOP) {
+		GdkSurface *surface = gtk_native_get_surface (GTK_NATIVE (window));
+
+		if (surface)
+			gdk_window_lower (surface);
+	} else if (gtk_widget_get_realized (widget) && !GTK_IS_MENU (window)) {
+		(gtk_window_present) (window);
+	}
 
 	g_object_set_qdata (G_OBJECT (window), verne_presenting_quark (), NULL);
 }
@@ -950,6 +959,10 @@ wrapped_snapshot (GtkWidget *widget, GtkSnapshot *snapshot)
 	}
 	verne_tree_view_paint_dest_overlay (widget, snapshot);
 	g_object_set_data (G_OBJECT (widget), "verne-in-snapshot", NULL);
+	if (g_object_get_data (G_OBJECT (widget), "verne-dest-redraw-after") != NULL) {
+		g_object_set_data (G_OBJECT (widget), "verne-dest-redraw-after", NULL);
+		gtk_widget_queue_draw (widget);
+	}
 }
 
 static void

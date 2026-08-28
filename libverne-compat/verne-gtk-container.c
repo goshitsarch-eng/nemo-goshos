@@ -549,6 +549,7 @@ verne_prepare_dialog (GtkWidget *widget)
 	g_object_set_data (G_OBJECT (widget), "verne-dialog-prepared", GINT_TO_POINTER (1));
 
 	gtk_window_set_hide_on_close (GTK_WINDOW (widget), TRUE);
+	g_object_set_data (G_OBJECT (widget), "verne-keep-native", GINT_TO_POINTER (1));
 	g_signal_connect (widget, "close-request", G_CALLBACK (verne_dialog_close_request), NULL);
 
 	if (gtk_window_get_transient_for (GTK_WINDOW (widget)) == NULL) {
