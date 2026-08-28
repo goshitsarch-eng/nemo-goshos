@@ -733,7 +733,7 @@ notebook_page_added_cb (GtkNotebook *notebook,
 	//So reassociate the pane if needed.
 	if (slot->pane != pane) {
 		slot->pane->slots = g_list_remove (slot->pane->slots, slot);
-		slot->pane = pane;
+		nemo_window_slot_set_pane (slot, pane);
 		pane->slots = g_list_append (pane->slots, slot);
 		g_signal_emit_by_name (slot, "changed-pane");
 		nemo_window_set_active_slot (nemo_window_slot_get_window (slot), slot);

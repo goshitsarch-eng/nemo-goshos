@@ -716,14 +716,15 @@ nemo_main_application_open (GApplication *app,
 	gboolean open_in_existing_window = strcmp (options, "EXISTING_WINDOW") == 0;
 	gboolean default_no_args = FALSE;
 	gboolean select_mode = FALSE;
-	const char splitter = '=';
 
 	g_debug ("Open called on the GApplication instance; %d files", n_files);
 
 	if (!open_in_existing_window) {
 		/* Check if local command line passed --geometry, --tabs or --select */
 		if (strlen (options) > 0) {
-			gchar** split_options = g_strsplit (options, &splitter, 2);
+			/* g_strsplit() wants a NUL-terminated delimiter; passing the
+			 * address of a lone char reads off the end of the stack. */
+			gchar** split_options = g_strsplit (options, "=", 2);
 			if (strcmp (split_options[0], "SELECT") == 0) {
 				select_mode = TRUE;
 			} else if (g_str_has_prefix (split_options[0], "DEFAULT")) {
@@ -734,7 +735,11 @@ nemo_main_application_open (GApplication *app,
 			} else if (strcmp (split_options[0], "NULL") != 0) {
 				geometry = g_strdup (split_options[0]);
 			}
-			sscanf (split_options[1], "%d", &open_in_tabs);
+			/* No '=' means no tab count -- keep the default rather than
+			 * handing sscanf() a NULL. */
+			if (split_options[1] != NULL) {
+				sscanf (split_options[1], "%d", &open_in_tabs);
+			}
 			g_strfreev (split_options);
 		}
 	}
@@ -1046,25 +1051,29 @@ post_registration:
 	/* Invoke "Open" to open in existing window or create new windows.
 	 */
 	if (len > 0) {
-		gchar* concatOptions = g_malloc0(64);
+		/* Built with g_strdup_printf rather than into a fixed buffer: a
+		 * --geometry long enough to fill 64 bytes used to truncate the
+		 * "=<tabs>" tail, and the receiving side then had no '=' to
+		 * split on. */
+		gchar* concatOptions;
 		if (open_in_existing_window) {
-			g_stpcpy (concatOptions, "EXISTING_WINDOW");
+			concatOptions = g_strdup ("EXISTING_WINDOW");
 		} else if (select) {
-			g_snprintf (concatOptions, 64, "SELECT=%d", open_in_tabs);
+			concatOptions = g_strdup_printf ("SELECT=%d", open_in_tabs);
 		} else {
 			if (self->priv->geometry == NULL) {
 				/* If Home was synthesized because no URIs were passed, signal that
 				 * to the primary instance so it can attempt session restore. */
 				if (used_default_location) {
-					g_snprintf (concatOptions, 64, "DEFAULT=%d", open_in_tabs);
+					concatOptions = g_strdup_printf ("DEFAULT=%d", open_in_tabs);
 				} else {
-					g_snprintf (concatOptions, 64, "NULL=%d", open_in_tabs);
+					concatOptions = g_strdup_printf ("NULL=%d", open_in_tabs);
 				}
 			} else {
 				if (used_default_location) {
-					g_snprintf (concatOptions, 64, "DEFAULT+%s=%d", self->priv->geometry, open_in_tabs);
+					concatOptions = g_strdup_printf ("DEFAULT+%s=%d", self->priv->geometry, open_in_tabs);
 				} else {
-					g_snprintf (concatOptions, 64, "%s=%d", self->priv->geometry, open_in_tabs);
+					concatOptions = g_strdup_printf ("%s=%d", self->priv->geometry, open_in_tabs);
 				}
 			}
 		}

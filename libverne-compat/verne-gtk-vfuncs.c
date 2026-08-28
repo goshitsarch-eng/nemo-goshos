@@ -1544,12 +1544,20 @@ verne_crash_handler (int sig)
 	/* backtrace_symbols_fd allocates; skip it on allocator abort. */
 	if (sig != SIGABRT) {
 		n = backtrace (frames, 64);
+		if (n > 0)
+			backtrace_symbols_fd (frames, n, STDERR_FILENO);
 		for (i = 0; i < n; i++) {
 			len = snprintf (buf, sizeof buf, "  %p\n", frames[i]);
 			if (len > 0)
 				write (STDERR_FILENO, buf, (size_t) len);
 		}
 	}
+
+	/* Hand the signal back to the default disposition rather than
+	 * _exit()ing: that is what produces a core file and lets the
+	 * distribution's crash reporter see the failure at all. */
+	signal (sig, SIG_DFL);
+	raise (sig);
 	_exit (128 + sig);
 }
 

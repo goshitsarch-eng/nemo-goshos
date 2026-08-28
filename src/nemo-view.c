@@ -3002,6 +3002,8 @@ nemo_view_destroy (GtkWidget *object)
 		g_signal_handlers_disconnect_matched (view->details->slot,
 						      G_SIGNAL_MATCH_DATA, 0, 0,
 						      NULL, NULL, view);
+		g_object_remove_weak_pointer (G_OBJECT (view->details->slot),
+					      (gpointer *) &view->details->slot);
 	}
 
 	/* We don't own the window, so no unref */
@@ -11580,6 +11582,14 @@ nemo_view_set_property (GObject         *object,
 
 		directory_view->details->slot = slot;
 		directory_view->details->window = window;
+
+		/* A slot can be finalized while its old view is still alive --
+		 * switching view type or closing a tab does that -- and the
+		 * NEMO_IS_WINDOW_SLOT() guards dotted through this file cannot
+		 * tell a freed slot from a live one. Let the pointer NULL
+		 * itself so those guards mean something. */
+		g_object_add_weak_pointer (G_OBJECT (directory_view->details->slot),
+					   (gpointer *) &directory_view->details->slot);
 
 		g_signal_connect_object (directory_view->details->slot,
 					 "active", G_CALLBACK (slot_active),

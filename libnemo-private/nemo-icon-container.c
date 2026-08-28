@@ -2752,6 +2752,13 @@ destroy (GtkWidget *object)
 		container->details->size_allocation_count_id = 0;
 	}
 
+	/* nemo_icon_container_clear() above drops this one, but redo_layout
+	 * queues it again, so make sure it is gone before we go. */
+	if (container->details->update_visible_icons_id != 0) {
+		g_source_remove (container->details->update_visible_icons_id);
+		container->details->update_visible_icons_id = 0;
+	}
+
 	/* destroy interactive search dialog */
 	if (container->details->search_window) {
 		gtk_widget_destroy (container->details->search_window);
@@ -2782,6 +2789,39 @@ finalize (GObject *object)
                                           tooltip_prefs_changed_callback,
                                           object);
 
+	/* Backstop for the GTK3-era destroy() vfunc: a teardown path that
+	 * unparents the container without going through it would otherwise
+	 * leave these sources running against freed memory. Removing an id
+	 * that destroy() already cleared is a no-op, because it zeroes them. */
+	if (details->idle_id != 0) {
+		g_source_remove (details->idle_id);
+		details->idle_id = 0;
+	}
+	if (details->stretch_idle_id != 0) {
+		g_source_remove (details->stretch_idle_id);
+		details->stretch_idle_id = 0;
+	}
+	if (details->align_idle_id != 0) {
+		g_source_remove (details->align_idle_id);
+		details->align_idle_id = 0;
+	}
+	if (details->selection_changed_id != 0) {
+		g_source_remove (details->selection_changed_id);
+		details->selection_changed_id = 0;
+	}
+	if (details->size_allocation_count_id != 0) {
+		g_source_remove (details->size_allocation_count_id);
+		details->size_allocation_count_id = 0;
+	}
+	if (details->rubberband_info.timer_id != 0) {
+		g_source_remove (details->rubberband_info.timer_id);
+		details->rubberband_info.timer_id = 0;
+	}
+	if (details->update_visible_icons_id != 0) {
+		g_source_remove (details->update_visible_icons_id);
+		details->update_visible_icons_id = 0;
+	}
+
 	g_hash_table_destroy (details->icon_set);
 	details->icon_set = NULL;
 
@@ -2796,6 +2836,7 @@ finalize (GObject *object)
 	}
 	if (details->a11y_item_action_idle_handler != 0) {
 		g_source_remove (details->a11y_item_action_idle_handler);
+		details->a11y_item_action_idle_handler = 0;
 	}
 
     g_free (details->view_constants);

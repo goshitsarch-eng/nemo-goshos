@@ -1165,7 +1165,13 @@ nemo_window_report_load_underway (NemoWindow *window,
 	}
 
 	slot = nemo_window_get_slot_for_view (window, view);
-	g_assert (slot != NULL);
+
+	/* A directory load that was already in flight can finish after its
+	 * view has been dropped from the slot -- switching view type, or
+	 * closing the tab, does that. There is nothing left to report to. */
+	if (slot == NULL) {
+		return;
+	}
 
 	if (view == slot->new_content_view) {
 		location_has_really_changed (slot);
@@ -1606,7 +1612,11 @@ nemo_window_report_load_complete (NemoWindow *window,
 	}
 
 	slot = nemo_window_get_slot_for_view (window, view);
-	g_assert (slot != NULL);
+
+	/* As above: the view may already have been detached from its slot. */
+	if (slot == NULL) {
+		return;
+	}
 
 	/* Only handle this if we're expecting it.
 	 * Don't handle it if its from an old view we've switched from */
