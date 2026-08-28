@@ -645,8 +645,47 @@ verne_x11_hide_dummy_natives (GtkWindow *keep)
 			continue;
 		sa.override_redirect = True;
 		XChangeWindowAttributes (dpy, w, CWOverrideRedirect, &sa);
+		{
+			XWMHints *hints = XGetWMHints (dpy, w);
+			Atom protocols[8];
+			int nprot = 0;
+			Atom wm_protocols = XInternAtom (dpy, "WM_PROTOCOLS", False);
+			Atom take_focus = XInternAtom (dpy, "WM_TAKE_FOCUS", False);
+			Atom ping = XInternAtom (dpy, "_NET_WM_PING", False);
+			Atom actual_p = None;
+			int fmt_p = 0;
+			unsigned long nitems_p = 0, after_p = 0;
+			unsigned char *pdata = NULL;
+			int p;
+
+			if (hints == NULL)
+				hints = XAllocWMHints ();
+			if (hints) {
+				hints->flags |= InputHint | StateHint;
+				hints->input = False;
+				hints->initial_state = WithdrawnState;
+				XSetWMHints (dpy, w, hints);
+				XFree (hints);
+			}
+			if (XGetWindowProperty (dpy, w, wm_protocols, 0, 8, False, XA_ATOM,
+						&actual_p, &fmt_p, &nitems_p, &after_p, &pdata) == Success &&
+			    pdata != NULL) {
+				Atom *old = (Atom *) pdata;
+				for (p = 0; p < (int) nitems_p && nprot < 8; p++) {
+					if (old[p] != take_focus)
+						protocols[nprot++] = old[p];
+				}
+				XFree (pdata);
+				if (nprot == 0) {
+					protocols[nprot++] = ping;
+				}
+				XSetWMProtocols (dpy, w, protocols, nprot);
+			}
+		}
+		XWithdrawWindow (dpy, w, DefaultScreen (dpy));
 		XUnmapWindow (dpy, w);
 		XMoveWindow (dpy, w, -2000, -2000);
+		g_warning ("verne: hid dummy 1x1 native xid=0x%lx", (unsigned long) w);
 	}
 	gdk_x11_display_error_trap_pop_ignored (gdk_display_get_default ());
 	XFree (children);
