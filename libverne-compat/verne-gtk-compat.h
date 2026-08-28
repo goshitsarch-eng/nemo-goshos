@@ -1896,8 +1896,12 @@ typedef GtkWidget GtkMenuShell;
 #define gtk_menu_reposition(m) ((void)0)
 #define gtk_menu_item_get_reserve_indicator(i) FALSE
 #define gdk_monitor_is_primary(m) TRUE
-#define gdk_error_trap_push() ((void)0)
-#define gdk_error_trap_pop_ignored() ((void)0)
+/* Not optional: an untrapped X error (XGetClassHint on a window that has just
+ * gone away, say) takes the whole process down. */
+void verne_gdk_error_trap_push (void);
+void verne_gdk_error_trap_pop_ignored (void);
+#define gdk_error_trap_push() verne_gdk_error_trap_push ()
+#define gdk_error_trap_pop_ignored() verne_gdk_error_trap_pop_ignored ()
 #define GTK_STYLE_CLASS_BUTTON "button"
 #define GTK_STYLE_CLASS_RUBBERBAND "rubberband"
 #define GTK_STYLE_CLASS_DND "dnd"

@@ -3877,6 +3877,28 @@ gtk_style_context_get_style (GtkStyleContext *context, ...)
 	va_end (args);
 }
 
+void
+verne_gdk_error_trap_push (void)
+{
+#ifdef GDK_WINDOWING_X11
+	GdkDisplay *display = gdk_display_get_default ();
+
+	if (display != NULL && GDK_IS_X11_DISPLAY (display))
+		gdk_x11_display_error_trap_push (display);
+#endif
+}
+
+void
+verne_gdk_error_trap_pop_ignored (void)
+{
+#ifdef GDK_WINDOWING_X11
+	GdkDisplay *display = gdk_display_get_default ();
+
+	if (display != NULL && GDK_IS_X11_DISPLAY (display))
+		gdk_x11_display_error_trap_pop_ignored (display);
+#endif
+}
+
 unsigned long
 verne_gdk_root_xid (void)
 {
